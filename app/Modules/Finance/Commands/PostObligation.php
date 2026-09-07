@@ -41,6 +41,7 @@ final class PostObligation
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly StudentOperationalEligibility $studentEligibility,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /**
@@ -116,8 +117,9 @@ final class PostObligation
                     $event = $this->audit->record($actor->actorId, 'finance.obligation.post', 'obligation', $obligation->id, null, [
                         'student_id' => $studentId, 'branch_id' => $originatingBranchId, 'organization_id' => $authorizationBranch->structureScope()->organizationId, 'original_amount' => $total, 'lines' => count($lines), 'offering_id' => $obligation->offering_id,
                     ]);
+                    $ledger = $this->ledger->post($actor, 'obligation', $obligation->id);
 
-                    return ['obligation_id' => $obligation->id, 'correlation_id' => $event->correlation_id];
+                    return ['obligation_id' => $obligation->id, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

@@ -37,6 +37,7 @@ final class RecordPayment
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly CrmInteractionTraceRecorder $crmTrace,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /** @return array{payment_id: string, correlation_id: string} */
@@ -87,9 +88,10 @@ final class RecordPayment
                     $event = $this->audit->record($actor->actorId, 'finance.payment.record', 'payment', $payment->id, null, [
                         'student_id' => $studentId, 'branch_id' => $originatingBranchId, 'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount, 'payer_ref' => $payerRef,
                     ]);
+                    $ledger = $this->ledger->post($actor, 'payment', $payment->id);
                     $this->traceVisitor($actor, $studentId, $payment->id, $payerRef, $receivedOn, $event->id);
 
-                    return ['payment_id' => $payment->id, 'correlation_id' => $event->correlation_id];
+                    return ['payment_id' => $payment->id, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

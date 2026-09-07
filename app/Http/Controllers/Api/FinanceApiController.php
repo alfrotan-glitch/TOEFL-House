@@ -25,6 +25,7 @@ use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Commands\RecordReconciliation;
 use App\Modules\Finance\Commands\RefundPayment;
 use App\Modules\Finance\Commands\RevokeFinancialCoverage;
+use App\Modules\Finance\Queries\GeneralLedgerQuery;
 use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\CashDrawer;
@@ -217,7 +218,7 @@ final class FinanceApiController extends Controller
     public function postJournal(Request $request): JsonResponse
     {
         $input = $request->validate([
-            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_liability,expense,other'],
+            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_liability,expense,payment,discount,refund,fund_allocation,other'],
             'source_id' => ['nullable', 'string'], 'reason' => ['required', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1'], 'lines.*.account_id' => ['required', 'string'],
             'lines.*.direction' => ['required', 'in:debit,credit'], 'lines.*.amount' => ['required', 'numeric', 'money', 'gt:0'],
@@ -621,5 +622,50 @@ final class FinanceApiController extends Controller
         );
 
         return response()->json(['status' => 'approved', ...$result]);
+    }
+
+    public function glTrialBalance(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['nullable', 'string'],
+            'organization_id' => ['required', 'string'],
+        ]);
+        $this->requireOrganizationInScope('finance.journal', $input['organization_id'], 'finance.gltrial', 'journal');
+        $ledger = app(GeneralLedgerQuery::class)->trialBalance($input['period_id'] ?? null, $input['organization_id']);
+
+        return response()->json($ledger);
+    }
+
+    public function glAccountDetail(Request $request, string $accountId): JsonResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['nullable', 'string'],
+            'organization_id' => ['required', 'string'],
+        ]);
+        $this->requireOrganizationInScope('finance.journal', $input['organization_id'], 'finance.gldetail', 'journal');
+        $ledger = app(GeneralLedgerQuery::class)->accountDetail($accountId, $input['period_id'] ?? null, $input['organization_id']);
+
+        return response()->json(['account_id' => $accountId, 'entries' => $ledger]);
+    }
+
+    public function glCompleteness(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['nullable', 'string'],
+        ]);
+        $this->requireOrganizationRead('finance.journal', 'finance.glcompleteness', 'journal');
+        $ledger = app(GeneralLedgerQuery::class)->completeness($input['period_id'] ?? null);
+
+        return response()->json($ledger);
+    }
+
+    private function requireOrganizationInScope(string $capability, string $organizationId, string $operation, string $targetType): void
+    {
+        if (! in_array($organizationId, $this->authorizedOrganizations($capability), true)) {
+            app(\App\Modules\Audit\AttemptedOperation::class)->deniedByActor(
+                \App\Support\Errors\AuthorizationDenied::forCode('api.organization_read_denied', 'this organization is outside your authorized finance scope'),
+                $this->actor(), $operation, $targetType, $organizationId,
+            );
+        }
     }
 }

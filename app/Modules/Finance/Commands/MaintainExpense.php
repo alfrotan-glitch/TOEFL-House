@@ -39,6 +39,7 @@ final class MaintainExpense
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /** @return array{expense_id: string, correlation_id: string} */
@@ -139,8 +140,9 @@ final class MaintainExpense
                         'organization_id' => $branch->structureScope()->organizationId,
                         'amount' => $locked->amount,
                     ]);
+                    $ledger = $this->ledger->post($approver, 'expense', $locked->id);
 
-                    return ['expense_id' => $locked->id, 'lifecycle_state' => Expense::STATE_APPROVED, 'correlation_id' => $event->correlation_id];
+                    return ['expense_id' => $locked->id, 'lifecycle_state' => Expense::STATE_APPROVED, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

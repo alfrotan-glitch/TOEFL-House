@@ -40,6 +40,7 @@ final class MaintainDiscount
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly AllocatePayment $allocations,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /** @return array{discount_id: string, correlation_id: string} */
@@ -135,8 +136,9 @@ final class MaintainDiscount
                     $locked->forceFill(['lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED, 'approved_by' => $approver->actorId]);
                     $locked->save();
                     $event = $this->audit->record($approver->actorId, 'finance.discount.approve', 'discount', $locked->id, $before, ['lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId]);
+                    $ledger = $this->ledger->post($approver, 'discount', $locked->id);
 
-                    return ['discount_id' => $locked->id, 'lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED, 'correlation_id' => $event->correlation_id];
+                    return ['discount_id' => $locked->id, 'lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

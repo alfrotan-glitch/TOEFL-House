@@ -33,6 +33,7 @@ final class RecognizePayrollLiability
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /** @return array{liability_id: string, duplicate: bool, correlation_id: string} */
@@ -102,7 +103,9 @@ final class RecognizePayrollLiability
                         ->where('source_id', $sourceId)
                         ->first();
                     if ($existing !== null) {
-                        return ['liability_id' => $existing->id, 'duplicate' => true, 'correlation_id' => (string) $existing->correlation_id];
+                        $ledger = $this->ledger->post($actor, 'payroll_liability', $existing->id);
+
+                        return ['liability_id' => $existing->id, 'duplicate' => true, 'correlation_id' => (string) $existing->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                     }
 
                     $correlationId = RandomIdentifier::new();
@@ -123,8 +126,9 @@ final class RecognizePayrollLiability
                         'originating_branch_id' => $branch->id, 'branch_id' => $branch->id,
                         'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount,
                     ], $correlationId);
+                    $ledger = $this->ledger->post($actor, 'payroll_liability', $fact->id);
 
-                    return ['liability_id' => $fact->id, 'duplicate' => false, 'correlation_id' => $event->correlation_id];
+                    return ['liability_id' => $fact->id, 'duplicate' => false, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

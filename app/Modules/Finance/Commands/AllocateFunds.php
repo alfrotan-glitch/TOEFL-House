@@ -43,6 +43,7 @@ final class AllocateFunds
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly AllocatePayment $allocations,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /** @return array{fund_id: string, correlation_id: string} */
@@ -194,8 +195,9 @@ final class AllocateFunds
                     $event = $this->audit->record($actor->actorId, 'finance.fund.allocate', 'fund_allocation', $allocation->id, null, [
                         'fund_id' => $lockedFund->id, 'obligation_line_id' => $line->id, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount,
                     ]);
+                    $ledger = $this->ledger->post($actor, 'fund_allocation', $allocation->id);
 
-                    return ['allocation_id' => $allocation->id, 'correlation_id' => $event->correlation_id];
+                    return ['allocation_id' => $allocation->id, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

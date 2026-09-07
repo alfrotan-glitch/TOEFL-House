@@ -197,6 +197,9 @@ Route::prefix('v1')->middleware('employee')->group(function (): void {
         Route::post('/cash-drawers/{drawerId}/close', [FinanceApiController::class, 'closeCashDrawer'])->name('cash-drawer.close');
         Route::post('/scholarship-awards', [FinanceApiController::class, 'proposeScholarship'])->name('scholarship.propose');
         Route::post('/scholarship-awards/{awardId}/approve', [FinanceApiController::class, 'approveScholarship'])->name('scholarship.approve');
+        Route::get('/ledger/trial-balance', [FinanceApiController::class, 'glTrialBalance'])->name('ledger.trial-balance');
+        Route::get('/ledger/accounts/{accountId}', [FinanceApiController::class, 'glAccountDetail'])->name('ledger.account-detail');
+        Route::get('/ledger/completeness', [FinanceApiController::class, 'glCompleteness'])->name('ledger.completeness');
     });
 
     Route::prefix('payroll')->name('api.payroll.')->group(function (): void {

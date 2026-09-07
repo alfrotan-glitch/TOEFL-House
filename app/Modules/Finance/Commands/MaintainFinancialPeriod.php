@@ -8,6 +8,7 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Domain\FinanceLifecycle;
 use App\Modules\Finance\Models\FinancialPeriod;
+use App\Modules\Finance\Queries\GeneralLedgerQuery;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
@@ -32,6 +33,7 @@ final class MaintainFinancialPeriod
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly GeneralLedgerQuery $ledger,
     ) {}
 
     /** @return array{period_id: string, correlation_id: string} */
@@ -88,6 +90,15 @@ final class MaintainFinancialPeriod
                         ->count();
                     if ($openPayroll > 0) {
                         throw BusinessRejection::forCode('finance.period_payroll_open', sprintf('%d overlapping payroll periods are still open', $openPayroll));
+                    }
+
+                    // Closing is the "close the books" act: every money fact of
+                    // the period must already be journalized. A period with an
+                    // un-journalized obligation, payment, discount, refund, fund
+                    // allocation, payroll liability, or expense cannot be closed.
+                    $unresolved = $this->ledger->completeness($locked->id)['unresolved'];
+                    if ($unresolved !== []) {
+                        throw BusinessRejection::forCode('finance.period_incomplete_ledger', sprintf('%d money facts in this period are not yet journalized; complete the ledger before closing', count($unresolved)));
                     }
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];

@@ -50,6 +50,7 @@ final class RefundPayment
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly FinancialBalanceQuery $balances,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /** @return array{refund_id: string, correlation_id: string} */
@@ -154,8 +155,9 @@ final class RefundPayment
                         'branch_id' => $branch->id,
                         'organization_id' => $branch->structureScope()->organizationId,
                     ]);
+                    $ledger = $this->ledger->post($approver, 'refund', $locked->id);
 
-                    return ['refund_id' => $locked->id, 'lifecycle_state' => self::STATE_RECORDED, 'correlation_id' => $event->correlation_id];
+                    return ['refund_id' => $locked->id, 'lifecycle_state' => self::STATE_RECORDED, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {
