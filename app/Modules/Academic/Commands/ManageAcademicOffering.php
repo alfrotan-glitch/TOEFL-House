@@ -9,6 +9,7 @@ use App\Modules\Academic\Domain\BranchAvailabilityLifecycle;
 use App\Modules\Academic\Domain\OfferingLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\BranchAvailability;
+use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\ProgramVersionLevel;
@@ -174,6 +175,16 @@ final class ManageAcademicOffering
                     $this->requireCapability($actor, (string) $locked->branch_id);
                     if ($capacity < 1) {
                         throw BusinessRejection::forCode('academic.offering_capacity_positive', 'an offering requires a positive capacity');
+                    }
+
+                    // A class is born with `class.capacity <= offering.capacity`
+                    // and its offering provenance is immutable, so resizing the
+                    // offering below the largest referencing class capacity
+                    // would silently break that invariant. Guard against it here
+                    // (and at the database boundary, 000190).
+                    $largestClassCapacity = (int) ClassModel::query()->where('offering_id', $locked->id)->max('capacity');
+                    if ($capacity < $largestClassCapacity) {
+                        throw BusinessRejection::forCode('academic.offering_capacity_below_class', "offering capacity cannot fall below the capacity of a referencing class ({$largestClassCapacity})");
                     }
 
                     $claimedSeats = Enrollment::query()->where('offering_id', $locked->id)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->count();

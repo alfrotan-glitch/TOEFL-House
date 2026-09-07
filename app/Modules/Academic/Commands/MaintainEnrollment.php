@@ -323,6 +323,10 @@ final class MaintainEnrollment
     /**
      * Transfer closes the old enrollment as transferred and opens a new
      * requested enrollment in the target class under the same invariants.
+     * The new seat is always born with the target class's offering (a caller
+     * may name it explicitly, but an omitted value resolves from the class),
+     * is validated against that offering's open/matching/capacity invariants,
+     * and places the actor under the receiving branch's approval capability.
      *
      * @return array{enrollment_id: string, previous_enrollment_id: string, correlation_id: string}
      */
@@ -346,12 +350,28 @@ final class MaintainEnrollment
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
                     $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
-                    // A cross-branch transfer writes a seat into the
-                    // receiving branch: the actor must hold the capability
-                    // there too, not just on the source seat.
-                    if ($offeringId !== null && $offeringId !== '') {
-                        $this->access->require($actor, self::CAPABILITY_APPROVE, $this->constraints->offeringBranch($offeringId), 'academic.enrollment_denied');
+
+                    // The receiving seat is born in the target class, so it
+                    // must carry that class's offering — exactly as a new
+                    // request resolves it. Callers may pass one explicitly,
+                    // but an omitted or empty value derives from the class so
+                    // the seat is never born offering-less (a live seat must
+                    // use its class offering — database boundary 000160).
+                    $targetClassOfferingId = ClassModel::query()->whereKey($targetClassId)->value('offering_id');
+                    if ($targetClassOfferingId === null || $targetClassOfferingId === '') {
+                        throw BusinessRejection::forCode('academic.enrollment_offering_required', 'new enrollment seats require a class offering; historical classes need governed remediation');
                     }
+                    $resolvedOfferingId = $offeringId !== null && $offeringId !== '' ? $offeringId : (string) $targetClassOfferingId;
+
+                    // A cross-branch transfer writes a seat into the receiving
+                    // branch: the actor must hold the capability there too, not
+                    // just on the source seat. Scope follows the resolved seat
+                    // (offering branch, else the student's home branch —
+                    // WP-ACAD-SCOPE). Checked before any same-class business
+                    // rejection so a denied authority is never masked.
+                    $receivingBranchId = $this->seatBranch($resolvedOfferingId, (string) $locked->student_id);
+                    $this->access->require($actor, self::CAPABILITY_APPROVE, $receivingBranchId, 'academic.enrollment_denied');
+
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_TRANSFERRED);
                     if ($targetClassId === $locked->class_id) {
                         throw BusinessRejection::forCode('academic.transfer_same_class', 'a transfer requires a different target class');
@@ -361,10 +381,8 @@ final class MaintainEnrollment
                     $this->assertStudentActive($locked->student_id);
                     $eligibilitySnapshotId = $this->currentEligibilitySnapshotId($locked->student_id);
                     $this->assertCapacity($targetClassId);
-                    if ($offeringId !== null && $offeringId !== '') {
-                        $this->assertOfferingOpenAndMatchesClass($offeringId, $targetClassId);
-                        $this->assertOfferingCapacity($offeringId);
-                    }
+                    $this->assertOfferingOpenAndMatchesClass($resolvedOfferingId, $targetClassId);
+                    $this->assertOfferingCapacity($resolvedOfferingId);
                     if (Enrollment::query()->where('student_id', $locked->student_id)->where('class_id', $targetClassId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in the target class');
                     }
@@ -377,8 +395,8 @@ final class MaintainEnrollment
                         'id' => RandomIdentifier::new(),
                         'student_id' => $locked->student_id,
                         'class_id' => $targetClassId,
-                        'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
-                        'originating_branch_id' => $this->seatBranch($offeringId, (string) $locked->student_id),
+                        'offering_id' => $resolvedOfferingId,
+                        'originating_branch_id' => $receivingBranchId,
                         'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
