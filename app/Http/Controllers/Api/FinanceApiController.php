@@ -659,6 +659,30 @@ final class FinanceApiController extends Controller
         return response()->json($ledger);
     }
 
+    public function glIncomeStatement(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['required', 'string'],
+            'organization_id' => ['required', 'string'],
+        ]);
+        $this->requireOrganizationInScope('finance.journal', $input['organization_id'], 'finance.glincomestatement', 'journal');
+        $statement = app(GeneralLedgerQuery::class)->incomeStatement($input['period_id'], $input['organization_id']);
+
+        return response()->json($statement);
+    }
+
+    public function glBalanceSheet(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['nullable', 'string'],
+            'organization_id' => ['required', 'string'],
+        ]);
+        $this->requireOrganizationInScope('finance.journal', $input['organization_id'], 'finance.glbalancesheet', 'journal');
+        $statement = app(GeneralLedgerQuery::class)->balanceSheet($input['period_id'] ?? null, $input['organization_id']);
+
+        return response()->json($statement);
+    }
+
     private function requireOrganizationInScope(string $capability, string $organizationId, string $operation, string $targetType): void
     {
         if (! in_array($organizationId, $this->authorizedOrganizations($capability), true)) {

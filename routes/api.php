@@ -200,6 +200,8 @@ Route::prefix('v1')->middleware('employee')->group(function (): void {
         Route::get('/ledger/trial-balance', [FinanceApiController::class, 'glTrialBalance'])->name('ledger.trial-balance');
         Route::get('/ledger/accounts/{accountId}', [FinanceApiController::class, 'glAccountDetail'])->name('ledger.account-detail');
         Route::get('/ledger/completeness', [FinanceApiController::class, 'glCompleteness'])->name('ledger.completeness');
+        Route::get('/ledger/income-statement', [FinanceApiController::class, 'glIncomeStatement'])->name('ledger.income-statement');
+        Route::get('/ledger/balance-sheet', [FinanceApiController::class, 'glBalanceSheet'])->name('ledger.balance-sheet');
     });
 
     Route::prefix('payroll')->name('api.payroll.')->group(function (): void {

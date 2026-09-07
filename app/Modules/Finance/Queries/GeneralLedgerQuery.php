@@ -8,6 +8,7 @@ use App\Modules\Finance\Models\Journal;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\Expense;
 use App\Modules\Finance\Models\FinancialCorrection;
+use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\FundAllocation;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\Payment;
@@ -104,6 +105,135 @@ final class GeneralLedgerQuery
         }
 
         return $rows;
+    }
+
+    /**
+     * Period profit-or-loss. Only revenue and expense accounts participate;
+     * revenue is a credit balance, expense a debit balance, and net income is
+     * revenue less expense. Scoped to one financial period (and, optionally,
+     * one organization) so the statement reflects the period's activity.
+     *
+     * @return array{total_revenue: string, total_expense: string, net_income: string, accounts: array<int, array{account_id: string, code: string, name: string, type: string, debit: string, credit: string, balance: string}>}
+     */
+    public function incomeStatement(?string $periodId = null, ?string $organizationId = null): array
+    {
+        $query = DB::table('journal_lines as jl')
+            ->join('journals as j', 'j.id', '=', 'jl.journal_id')
+            ->join('accounts as a', 'a.id', '=', 'jl.account_id')
+            ->whereIn('a.type', ['revenue', 'expense'])
+            ->selectRaw('a.id AS account_id, a.code AS code, a.name AS name, a.type AS type')
+            ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'debit\'), 0) AS debit')
+            ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'credit\'), 0) AS credit')
+            ->groupBy('a.id', 'a.code', 'a.name', 'a.type')
+            ->orderBy('a.code');
+
+        if ($periodId !== null && $periodId !== '') {
+            $query->where('j.period_id', $periodId);
+        }
+        if ($organizationId !== null && $organizationId !== '') {
+            $query->where('j.organization_id', $organizationId);
+        }
+
+        $accounts = [];
+        $totalRevenue = '0.00';
+        $totalExpense = '0.00';
+        foreach ($query->get() as $row) {
+            $debit = (string) $row->debit;
+            $credit = (string) $row->credit;
+            // Revenue is recognized on the credit side; expense on the debit.
+            $balance = $row->type === 'revenue' ? bcsub($credit, $debit, 2) : bcsub($debit, $credit, 2);
+            if ($row->type === 'revenue') {
+                $totalRevenue = bcadd($totalRevenue, $balance, 2);
+            } else {
+                $totalExpense = bcadd($totalExpense, $balance, 2);
+            }
+            $accounts[] = [
+                'account_id' => (string) $row->account_id,
+                'code' => (string) $row->code,
+                'name' => (string) $row->name,
+                'type' => (string) $row->type,
+                'debit' => $debit,
+                'credit' => $credit,
+                'balance' => $balance,
+            ];
+        }
+        $netIncome = bcsub($totalRevenue, $totalExpense, 2);
+
+        return [
+            'total_revenue' => $totalRevenue,
+            'total_expense' => $totalExpense,
+            'net_income' => $netIncome,
+            'accounts' => $accounts,
+        ];
+    }
+
+    /**
+     * Statement of financial position as of a date. The GL posts every money
+     * fact to its source period, so a point-in-time balance sheet accumulates
+     * every journal in any period through the target period's end (all periods
+     * when no period is given). Assets carry a debit natural balance;
+     * liabilities and equity carry a credit natural balance; retained earnings
+     * close through equity, so assets are reported alongside the sum of
+     * liabilities and equity from the same balanced entry set.
+     *
+     * @return array{bottom_line: array{assets: string, liabilities: string, equity: string, balanced: bool}, accounts: array<int, array{account_id: string, code: string, name: string, type: string, balance: string}>}
+     */
+    public function balanceSheet(?string $periodId = null, ?string $organizationId = null): array
+    {
+        $builder = DB::table('journal_lines as jl')
+            ->join('journals as j', 'j.id', '=', 'jl.journal_id')
+            ->join('accounts as a', 'a.id', '=', 'jl.account_id')
+            ->selectRaw('a.id AS account_id, a.code AS code, a.name AS name, a.type AS type')
+            ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'debit\'), 0) AS debit')
+            ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'credit\'), 0) AS credit')
+            ->groupBy('a.id', 'a.code', 'a.name', 'a.type')
+            ->orderBy('a.code');
+
+        if ($periodId !== null && $periodId !== '') {
+            $end = FinancialPeriod::query()->whereKey($periodId)->value('date_to');
+            if ($end !== null) {
+                $periodIds = FinancialPeriod::query()->where('date_to', '<=', $end)->pluck('id')->all();
+                $builder->whereIn('j.period_id', $periodIds);
+            }
+        }
+        if ($organizationId !== null && $organizationId !== '') {
+            $builder->where('j.organization_id', $organizationId);
+        }
+
+        $assets = '0.00';
+        $liabilities = '0.00';
+        $equity = '0.00';
+        $accounts = [];
+        foreach ($builder->get() as $row) {
+            $debit = (string) $row->debit;
+            $credit = (string) $row->credit;
+            $balance = $row->type === 'asset' ? bcsub($debit, $credit, 2) : bcsub($credit, $debit, 2);
+            if ($row->type === 'asset') {
+                $assets = bcadd($assets, $balance, 2);
+            } elseif ($row->type === 'liability') {
+                $liabilities = bcadd($liabilities, $balance, 2);
+            } elseif ($row->type === 'equity') {
+                $equity = bcadd($equity, $balance, 2);
+            }
+            $accounts[] = [
+                'account_id' => (string) $row->account_id,
+                'code' => (string) $row->code,
+                'name' => (string) $row->name,
+                'type' => (string) $row->type,
+                'balance' => $balance,
+            ];
+        }
+        $liabilitiesPlusEquity = bcadd($liabilities, $equity, 2);
+
+        return [
+            'bottom_line' => [
+                'assets' => $assets,
+                'liabilities' => $liabilities,
+                'equity' => $equity,
+                'balanced' => bccomp($assets, $liabilitiesPlusEquity, 2) === 0,
+            ],
+            'accounts' => $accounts,
+        ];
     }
 
     /**
