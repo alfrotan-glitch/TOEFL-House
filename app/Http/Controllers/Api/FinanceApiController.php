@@ -7,14 +7,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Modules\Finance\Commands\AllocateFunds;
 use App\Modules\Finance\Commands\AllocatePayment;
+use App\Modules\Finance\Commands\MaintainCashDrawer;
 use App\Modules\Finance\Commands\MaintainChartOfAccounts;
 use App\Modules\Finance\Commands\MaintainDiscount;
 use App\Modules\Finance\Commands\MaintainEmploymentSettlement;
+use App\Modules\Finance\Commands\MaintainExpense;
 use App\Modules\Finance\Commands\MaintainFinancialCorrection;
 use App\Modules\Finance\Commands\MaintainFinancialCredit;
 use App\Modules\Finance\Commands\MaintainFinancialGateException;
 use App\Modules\Finance\Commands\MaintainFinancialPeriod;
 use App\Modules\Finance\Commands\MaintainInstallmentPlan;
+use App\Modules\Finance\Commands\MaintainScholarshipAward;
 use App\Modules\Finance\Commands\PostJournal;
 use App\Modules\Finance\Commands\PostObligation;
 use App\Modules\Finance\Commands\RecognizePayrollLiability;
@@ -24,8 +27,10 @@ use App\Modules\Finance\Commands\RefundPayment;
 use App\Modules\Finance\Commands\RevokeFinancialCoverage;
 use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\Account;
+use App\Modules\Finance\Models\CashDrawer;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
+use App\Modules\Finance\Models\Expense;
 use App\Modules\Finance\Models\FinancialCredit;
 use App\Modules\Finance\Models\FinancialCoverageRevocation;
 use App\Modules\Finance\Models\FinancialGateException;
@@ -38,6 +43,7 @@ use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\PaymentAllocation;
 use App\Modules\Finance\Models\Reconciliation;
 use App\Modules\Finance\Models\Refund;
+use App\Modules\Finance\Models\ScholarshipAward;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Payroll\Models\SettlementProposal;
@@ -211,7 +217,7 @@ final class FinanceApiController extends Controller
     public function postJournal(Request $request): JsonResponse
     {
         $input = $request->validate([
-            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_liability,other'],
+            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_liability,expense,other'],
             'source_id' => ['nullable', 'string'], 'reason' => ['required', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1'], 'lines.*.account_id' => ['required', 'string'],
             'lines.*.direction' => ['required', 'in:debit,credit'], 'lines.*.amount' => ['required', 'numeric', 'money', 'gt:0'],
@@ -516,5 +522,104 @@ final class FinanceApiController extends Controller
         );
 
         return response()->json(['status' => 'refunded', 'refund_id' => $result['refund_id']]);
+    }
+
+    public function proposeExpense(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['required', 'string'], 'branch_id' => ['required', 'string'],
+            'supplier' => ['required', 'string', 'max:200'], 'purpose' => ['required', 'string', 'max:1000'],
+            'category' => ['required', 'string', 'max:120'], 'source_ref' => ['required', 'string', 'max:120'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'expense_account_id' => ['required', 'string'],
+        ]);
+        $result = app(MaintainExpense::class)->propose(
+            $this->actor(), FinancialPeriod::query()->findOrFail((string) $input['period_id']),
+            $input['branch_id'], $input['supplier'], $input['purpose'], $input['category'],
+            $input['source_ref'], $input['amount'], $input['expense_account_id'],
+            $this->idempotencyKey('finance.expense.propose'),
+        );
+
+        return response()->json(['status' => 'proposed', ...$result], 201);
+    }
+
+    public function approveExpense(string $expenseId): JsonResponse
+    {
+        $result = app(MaintainExpense::class)->approve(
+            $this->actor(), Expense::query()->findOrFail($expenseId),
+            $this->idempotencyKey('finance.expense.approve'),
+        );
+
+        return response()->json(['status' => 'approved', ...$result]);
+    }
+
+    public function openCashDrawer(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'branch_id' => ['required', 'string'], 'custodian_id' => ['required', 'string'],
+            'opening_balance' => ['required', 'numeric', 'money'],
+        ]);
+        $result = app(MaintainCashDrawer::class)->open(
+            $this->actor(), $input['branch_id'], $input['custodian_id'], $input['opening_balance'],
+            $this->idempotencyKey('finance.cash-drawer.open'),
+        );
+
+        return response()->json(['status' => 'opened', ...$result], 201);
+    }
+
+    public function recordCashMovement(Request $request, string $drawerId): JsonResponse
+    {
+        $input = $request->validate([
+            'type' => ['required', 'in:in,out'], 'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+        $result = app(MaintainCashDrawer::class)->recordMovement(
+            $this->actor(), CashDrawer::query()->findOrFail($drawerId), $input['type'],
+            $input['amount'], $input['reason'], $this->idempotencyKey('finance.cash-drawer.move'),
+        );
+
+        return response()->json(['status' => 'recorded', ...$result], 201);
+    }
+
+    public function closeCashDrawer(Request $request, string $drawerId): JsonResponse
+    {
+        $input = $request->validate([
+            'counted_balance' => ['required', 'numeric', 'money'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+        $result = app(MaintainCashDrawer::class)->close(
+            $this->actor(), CashDrawer::query()->findOrFail($drawerId), $input['counted_balance'],
+            $input['reason'], $this->idempotencyKey('finance.cash-drawer.close'),
+        );
+
+        return response()->json(['status' => 'closed', ...$result]);
+    }
+
+    public function proposeScholarship(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'], 'funding_source_id' => ['required', 'string'],
+            'period_id' => ['required', 'string'], 'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'award_rule_ref' => ['required', 'string', 'max:120'], 'reason' => ['required', 'string', 'max:1000'],
+        ]);
+        $result = app(MaintainScholarshipAward::class)->propose(
+            $this->actor(), $input['student_id'],
+            FundingSource::query()->findOrFail((string) $input['funding_source_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
+            $input['amount'], $input['award_rule_ref'], $input['reason'],
+            $this->idempotencyKey('finance.scholarship.propose'),
+        );
+
+        return response()->json(['status' => 'proposed', ...$result], 201);
+    }
+
+    public function approveScholarship(string $awardId): JsonResponse
+    {
+        $result = app(MaintainScholarshipAward::class)->approve(
+            $this->actor(), ScholarshipAward::query()->findOrFail($awardId),
+            $this->idempotencyKey('finance.scholarship.approve'),
+        );
+
+        return response()->json(['status' => 'approved', ...$result]);
     }
 }

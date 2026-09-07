@@ -190,6 +190,13 @@ Route::prefix('v1')->middleware('employee')->group(function (): void {
         Route::post('/fund-allocations/{allocationId}/reversal', [FinanceApiController::class, 'proposeFundAllocationReversal'])->name('correction.fund-allocation.propose');
         Route::post('/corrections/{correctionId}/approve', [FinanceApiController::class, 'approveFinancialCorrection'])->name('correction.approve');
         Route::post('/employment-settlements/{proposalId}/approve', [FinanceApiController::class, 'approveEmploymentSettlement'])->name('employment-settlement.approve');
+        Route::post('/expenses', [FinanceApiController::class, 'proposeExpense'])->name('expense.propose');
+        Route::post('/expenses/{expenseId}/approve', [FinanceApiController::class, 'approveExpense'])->name('expense.approve');
+        Route::post('/cash-drawers', [FinanceApiController::class, 'openCashDrawer'])->name('cash-drawer.open');
+        Route::post('/cash-drawers/{drawerId}/movements', [FinanceApiController::class, 'recordCashMovement'])->name('cash-drawer.move');
+        Route::post('/cash-drawers/{drawerId}/close', [FinanceApiController::class, 'closeCashDrawer'])->name('cash-drawer.close');
+        Route::post('/scholarship-awards', [FinanceApiController::class, 'proposeScholarship'])->name('scholarship.propose');
+        Route::post('/scholarship-awards/{awardId}/approve', [FinanceApiController::class, 'approveScholarship'])->name('scholarship.approve');
     });
 
     Route::prefix('payroll')->name('api.payroll.')->group(function (): void {

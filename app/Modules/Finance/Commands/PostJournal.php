@@ -11,6 +11,7 @@ use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\Journal;
 use App\Modules\Finance\Models\JournalLine;
+use App\Modules\Finance\Models\Expense;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\PayrollLiabilityFact;
 use App\Modules\Organization\Models\Branch;
@@ -79,6 +80,17 @@ final class PostJournal
                         $this->assertPayrollLiabilityAmount($liability, $debit, $credit);
                         if (Journal::query()->where('source_type', 'payroll_liability')->where('source_id', $liability->id)->exists()) {
                             throw BusinessRejection::forCode('finance.payroll_already_paid', 'this Finance payroll liability is already disbursed; correct it with a reversal');
+                        }
+                    }
+
+                    // An approved expense is a Finance source fact and may be
+                    // journalized exactly once. The partial unique index is the
+                    // concurrency-safe backstop; this check returns a clean 409.
+                    if ($sourceType === 'expense') {
+                        $expense = $this->expense($sourceId);
+                        $this->assertExpenseAmount($expense, $debit, $credit);
+                        if (Journal::query()->where('source_type', 'expense')->where('source_id', $expense->id)->exists()) {
+                            throw BusinessRejection::forCode('finance.expense_already_journalized', 'this approved expense is already journalized; correct it with a reversal');
                         }
                     }
 
@@ -154,7 +166,7 @@ final class PostJournal
         if ($sourceType === 'payroll_result') {
             throw BusinessRejection::forCode('finance.journal_payroll_source_retired', 'a payroll disbursement must reference its Finance-recognized payroll liability, not a Payroll result directly');
         }
-        if (! in_array($sourceType, ['obligation', 'payroll_liability', 'journal', 'other'], true)) {
+        if (! in_array($sourceType, ['obligation', 'payroll_liability', 'expense', 'journal', 'other'], true)) {
             throw BusinessRejection::forCode('finance.journal_source_unknown', sprintf('unknown journal source %s', $sourceType));
         }
         if ($reason === '') {
@@ -163,7 +175,7 @@ final class PostJournal
         if ($lines === []) {
             throw BusinessRejection::forCode('finance.journal_lines_required', 'a journal requires at least one complete line');
         }
-        if (in_array($sourceType, ['obligation', 'payroll_liability'], true) && trim((string) $sourceId) === '') {
+        if (in_array($sourceType, ['obligation', 'payroll_liability', 'expense'], true) && trim((string) $sourceId) === '') {
             throw BusinessRejection::forCode('finance.journal_source_required', sprintf('a %s journal requires its source id', str_replace('_', ' ', $sourceType)));
         }
         if ($sourceType === 'journal' && ($sourceId === null || $sourceId === '' || $reversalOfId === null)) {
@@ -231,6 +243,16 @@ final class PostJournal
 
             return $branch->structureScope();
         }
+        if ($sourceType === 'expense') {
+            $expense = $this->expense($sourceId);
+            $branchId = trim((string) ($expense->current_home_branch_id ?? $expense->originating_branch_id ?? ''));
+            $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+            if ($branch === null) {
+                throw BusinessRejection::forCode('finance.journal_provenance_required', 'an expense journal requires known Finance branch provenance');
+            }
+
+            return $branch->structureScope();
+        }
 
         // `other` is an explicit organization-wide accounting source. Legacy
         // payroll_result journals remain readable/reversible, but new writes
@@ -250,6 +272,17 @@ final class PostJournal
         return $liability;
     }
 
+    private function expense(?string $sourceId): Expense
+    {
+        /** @var Expense|null $expense */
+        $expense = $sourceId === null ? null : Expense::query()->whereKey($sourceId)->lockForUpdate()->first();
+        if ($expense === null || $expense->lifecycle_state !== Expense::STATE_APPROVED) {
+            throw BusinessRejection::forCode('finance.journal_source_unknown', 'the Finance expense source is unknown or not approved');
+        }
+
+        return $expense;
+    }
+
     /** @param numeric-string $debit @param numeric-string $credit */
     private function assertPayrollLiabilityAmount(PayrollLiabilityFact $liability, string $debit, string $credit): void
     {
@@ -257,6 +290,15 @@ final class PostJournal
         $absoluteAmount = str_starts_with($amount, '-') ? substr($amount, 1) : $amount;
         if (bccomp($debit, $absoluteAmount, 2) !== 0 || bccomp($credit, $absoluteAmount, 2) !== 0) {
             throw BusinessRejection::forCode('finance.payroll_liability_amount_mismatch', 'a payroll liability journal must equal the absolute amount of its Finance liability fact');
+        }
+    }
+
+    /** @param numeric-string $debit @param numeric-string $credit */
+    private function assertExpenseAmount(Expense $expense, string $debit, string $credit): void
+    {
+        $amount = (string) $expense->amount;
+        if (bccomp($debit, $amount, 2) !== 0 || bccomp($credit, $amount, 2) !== 0) {
+            throw BusinessRejection::forCode('finance.expense_amount_mismatch', 'an expense journal must equal the approved expense amount');
         }
     }
 
