@@ -57,31 +57,41 @@ final class ScorePlacement
                     if ($locked->status !== PlacementAttempt::STATUS_SUBMITTED) {
                         throw BusinessRejection::forCode('placement.section_attempt_not_submitted', 'sections can be scored only after the attempt is submitted');
                     }
+                    if ($locked->lineage_version !== PlacementAttempt::LINEAGE_VERSION) {
+                        throw BusinessRejection::forCode('placement.attempt_lineage_remediation_required', 'a pre-lineage placement attempt cannot receive new score evidence without governed remediation');
+                    }
                     /** @var PlacementSection $section */
                     $section = PlacementSection::query()->whereKey($sectionId)->firstOrFail();
-                    if ($section->test_version_id !== $locked->test_version_id) {
-                        throw BusinessRejection::forCode('placement.section_version_mismatch', 'the section does not belong to this attempt version');
+                    if ($section->test_version_id !== $locked->test_version_id || $section->lifecycle_state !== 'published') {
+                        throw BusinessRejection::forCode('placement.section_version_mismatch', 'the section must be a published section in this exact attempt version');
                     }
-                    if ($rawScore < 0) {
-                        throw BusinessRejection::forCode('placement.section_score_invalid', 'a section score cannot be negative');
+                    if ($section->can_auto_score) {
+                        throw BusinessRejection::forCode('placement.section_auto_score_authority', 'an auto-scored section is calculated only from normalized submitted answers, never manually overwritten');
+                    }
+                    if ($rawScore < 0 || $rawScore > 100) {
+                        throw BusinessRejection::forCode('placement.section_score_invalid', 'a professional section score must be between 0 and 100');
                     }
                     if ($rationale === '') {
                         throw BusinessRejection::forCode('placement.section_rationale_required', 'professional marking requires a rationale');
                     }
-                    if ($rubricId !== null) {
-                        /** @var PlacementRubric $rubric */
-                        $rubric = PlacementRubric::query()->whereKey($rubricId)->firstOrFail();
-                        if ($rubric->test_version_id !== $locked->test_version_id || $rubric->component !== $section->component) {
-                            throw BusinessRejection::forCode('placement.section_rubric_mismatch', 'the rubric does not match this section version/component');
-                        }
-                        if ($rawScore < (float) $rubric->min_score || $rawScore > (float) $rubric->max_score) {
-                            throw BusinessRejection::forCode('placement.section_score_out_of_rubric', sprintf('score %.2f is outside rubric %s [%.2f, %.2f]', $rawScore, $rubric->band, (float) $rubric->min_score, (float) $rubric->max_score));
-                        }
-                        $cefrRef ??= $rubric->cefr_ref;
+                    if ($rubricId === null || trim($rubricId) === '') {
+                        throw BusinessRejection::forCode('placement.section_rubric_required', 'professional placement marking requires a published rubric');
                     }
-                    if ($cefrRef === '' || $cefrRef === null) {
-                        throw BusinessRejection::forCode('placement.section_cefr_required', 'a section score requires a CEFR reference');
+                    /** @var PlacementRubric $rubric */
+                    $rubric = PlacementRubric::query()->whereKey($rubricId)->firstOrFail();
+                    if ($rubric->test_version_id !== $locked->test_version_id || $rubric->component !== $section->component) {
+                        throw BusinessRejection::forCode('placement.section_rubric_mismatch', 'the rubric does not match this section version/component');
                     }
+                    if ($rubric->lifecycle_state !== 'published') {
+                        throw BusinessRejection::forCode('placement.section_rubric_not_published', 'professional placement marking requires a published rubric');
+                    }
+                    if ($rawScore < (float) $rubric->min_score || $rawScore > (float) $rubric->max_score) {
+                        throw BusinessRejection::forCode('placement.section_score_out_of_rubric', sprintf('score %.2f is outside rubric %s [%.2f, %.2f]', $rawScore, $rubric->band, (float) $rubric->min_score, (float) $rubric->max_score));
+                    }
+                    if ($cefrRef !== null && trim($cefrRef) !== '' && strtoupper(trim($cefrRef)) !== strtoupper((string) $rubric->cefr_ref)) {
+                        throw BusinessRejection::forCode('placement.section_cefr_rubric_mismatch', 'the stated CEFR reference must match the published scoring rubric');
+                    }
+                    $cefrRef = (string) $rubric->cefr_ref;
 
                     /** @var PlacementSectionResult|null $result */
                     $result = PlacementSectionResult::query()->where('attempt_id', $locked->id)->where('section_id', $section->id)->lockForUpdate()->first();
@@ -95,17 +105,22 @@ final class ScorePlacement
                             'rubric_id' => $rubricId,
                             'cefr_ref' => $cefrRef,
                             'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
+                            'scoring_method' => PlacementSectionResult::SCORING_METHOD_PROFESSIONAL,
                             'scored_by' => $scorer->actorId,
                             'rationale' => $rationale,
                         ]);
                     } else {
-                        if ($result->lifecycle_state !== PlacementSectionResult::STATE_SCORED || $result->raw_score !== null) {
-                            throw BusinessRejection::forCode('placement.section_result_locked', 'only an unscored, not-approved section result can be professional-marked');
+                        if ($result->lifecycle_state !== PlacementSectionResult::STATE_SCORED
+                            || $result->raw_score !== null
+                            || $result->scoring_method !== PlacementSectionResult::SCORING_METHOD_PROFESSIONAL
+                            || $result->scored_by !== null) {
+                            throw BusinessRejection::forCode('placement.section_result_locked', 'only an unscored professional-marking stub can be completed');
                         }
                         $result->forceFill([
                             'raw_score' => $rawScore,
                             'rubric_id' => $rubricId,
                             'cefr_ref' => $cefrRef,
+                            'scored_by' => $scorer->actorId,
                             'rationale' => $rationale,
                         ])->save();
                     }
@@ -146,6 +161,12 @@ final class ScorePlacement
                     $locked = PlacementSectionResult::query()->whereKey($result->id)->lockForUpdate()->firstOrFail();
                     $attempt = PlacementAttempt::query()->findOrFail($locked->attempt_id);
                     $this->access->require($actor, $capability, $attempt->originating_branch_id);
+                    if ($attempt->lineage_version !== PlacementAttempt::LINEAGE_VERSION) {
+                        throw BusinessRejection::forCode('placement.attempt_lineage_remediation_required', 'a pre-lineage placement attempt cannot receive a new review transition without governed remediation');
+                    }
+                    if ($toState === PlacementSectionResult::STATE_MODERATED && $locked->raw_score === null) {
+                        throw BusinessRejection::forCode('placement.section_score_incomplete', 'an unscored professional-marking stub must receive its rubric score before moderation');
+                    }
                     $this->assertTransition($locked, $toState);
                     if ($toState === PlacementSectionResult::STATE_MODERATED && trim((string) $locked->scored_by) === $actor->actorId) {
                         throw AuthorizationDenied::forCode('placement.review_not_independent', 'the moderator may not be the scorer of the section under review');
@@ -175,12 +196,12 @@ final class ScorePlacement
         }
     }
 
-    /** @return array{branch_id: ?string, campus_id: ?string, organization_id: ?string} */
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
     private function branchProvenance(?string $branchId): array
     {
         $id = trim((string) ($branchId ?? ''));
         if ($id === '') {
-            return ['branch_id' => null, 'campus_id' => null, 'organization_id' => null];
+            throw BusinessRejection::forCode('placement.scoring_provenance_required', 'a placement scoring event requires an operational branch provenance');
         }
         $branch = Branch::query()->whereKey($id)->first();
         if ($branch === null || $branch->lifecycle_state !== 'active') {

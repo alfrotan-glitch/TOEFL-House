@@ -24,6 +24,7 @@ final class SchemaInvariantFeatureTest extends TestCase
     public function test_partial_unique_indexes_protect_the_core_invariants(): void
     {
         $this->assertContains('campus_assignments_one_open_per_branch', $this->indexNames('campus_assignments'));
+        $this->assertContains('campus_assignments_no_effective_overlap', $this->constraintNames('campus_assignments'), 'a branch must have exactly one effective campus attribution at any instant');
         $this->assertContains('people_single_verified_identity', $this->indexNames('people'));
         $this->assertContains('user_accounts_one_active_per_person', $this->indexNames('user_accounts'));
         $this->assertContains('position_assignments_one_open_per_person_position', $this->indexNames('position_assignments'));
@@ -89,6 +90,16 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('visitor_sources_key_unique', $this->indexNames('visitor_sources'));
         $this->assertContains('visitor_campaigns_key_unique', $this->indexNames('visitor_campaigns'));
         $this->assertContains('visitor_automation_rules_key_unique', $this->indexNames('visitor_automation_rules'));
+    }
+
+    /** @return list<string> */
+    private function constraintNames(string $table): array
+    {
+        return array_values(DB::table('pg_constraint')
+            ->join('pg_class', 'pg_class.oid', '=', 'pg_constraint.conrelid')
+            ->where('pg_class.relname', $table)
+            ->pluck('pg_constraint.conname')
+            ->all());
     }
 
     /** @return list<string> */
@@ -309,6 +320,62 @@ final class SchemaInvariantFeatureTest extends TestCase
         ]);
     }
 
+    public function test_reporting_canonical_metric_owner_lineage_is_constrained_by_the_schema(): void
+    {
+        $now = now();
+        foreach ([
+            ['00000000-0000-4000-8000-00000000030c', 'visitor_capture_count', 'crm', 'academic_period'],
+            ['00000000-0000-4000-8000-00000000030d', 'placement_profile_count', 'placement', 'academic_period'],
+            ['00000000-0000-4000-8000-00000000030e', 'active_enrollment_count', 'enrollment', 'academic_period'],
+            ['00000000-0000-4000-8000-00000000030f', 'fund_utilization', 'finance', 'financial_period'],
+        ] as [$id, $key, $owner, $periodAuthority]) {
+            DB::table('metric_definitions')->insert([
+                'id' => $id,
+                'key' => $key,
+                'name' => 'Canonical '.str_replace('_', ' ', $key),
+                'source_owner' => $owner,
+                'canonical_source_owner' => $owner,
+                'period_authority' => $periodAuthority,
+                'current_version' => 1,
+                'defined_by' => '00000000-0000-4000-8000-00000000030b',
+                'lineage_status' => 'aligned',
+                'lineage_basis' => 'catalog_2026_09_07',
+                'lineage_recorded_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
+        // Legacy labels remain representable for immutable old rows, but a
+        // new metric cannot claim the superseded Funding authority for a
+        // Finance-owned utilization calculation.
+        try {
+            DB::table('metric_definitions')->insert([
+                'id' => '00000000-0000-4000-8000-00000000030g',
+                'key' => 'fund_utilization',
+                'name' => 'Forged legacy funding metric',
+                'source_owner' => 'funding',
+                'canonical_source_owner' => 'funding',
+                'period_authority' => 'financial_period',
+                'current_version' => 1,
+                'defined_by' => '00000000-0000-4000-8000-00000000030b',
+                'lineage_status' => 'aligned',
+                'lineage_basis' => 'catalog_2026_09_07',
+                'lineage_recorded_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+            $this->fail('a new fund-utilization definition must name Finance as its canonical owner');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('new metric definition lineage must match its canonical owner', $exception->getMessage());
+        }
+
+        $this->expectException(QueryException::class);
+        DB::table('metric_definitions')->where('id', '00000000-0000-4000-8000-00000000030f')->update([
+            'source_owner' => 'funding',
+        ]);
+    }
+
     public function test_reporting_period_authority_is_constrained_by_the_schema(): void
     {
         $this->expectException(QueryException::class);
@@ -321,6 +388,19 @@ final class SchemaInvariantFeatureTest extends TestCase
             'current_version' => 1,
             'defined_by' => '00000000-0000-4000-8000-00000000031b',
         ]);
+    }
+
+    public function test_placement_release_temporal_authority_exists_at_schema_level(): void
+    {
+        $this->assertContains('placement_profile_temporal_facts_guard_trigger', $this->triggerNames('placement_profiles'), 'profile creation and release-event clocks must be immutable at the schema level');
+        $this->assertContains('placement_profiles_release_time_shape_check', $this->constraintNames('placement_profiles'), 'a release timestamp must retain its authoritative basis');
+        $this->assertContains('placement_profiles_released_at_index', $this->indexNames('placement_profiles'), 'release-period reporting requires an indexed immutable event clock');
+    }
+
+    public function test_placement_decision_fact_immutability_exists_at_schema_level(): void
+    {
+        $this->assertContains('placement_profile_decision_facts_guard_trigger', $this->triggerNames('placement_profiles'), 'a profile recommendation projection and decision actors must remain immutable across later lifecycle transitions');
+        $this->assertContains('placement_profiles_decision_fact_version_check', $this->constraintNames('placement_profiles'), 'only database-guarded placement decision-fact provenance may be labeled v3');
     }
 
     public function test_reporting_projection_completeness_is_constrained_by_the_schema(): void
@@ -336,6 +416,12 @@ final class SchemaInvariantFeatureTest extends TestCase
             'completeness' => 'approximate',
             'computed_by' => '00000000-0000-4000-8000-00000000032c',
         ]);
+    }
+
+    public function test_report_run_completeness_is_constrained_by_the_schema(): void
+    {
+        $this->assertContains('report_runs_completeness_check', $this->constraintNames('report_runs'), 'a report run must retain whether its source evidence was complete');
+        $this->assertContains('report_runs_completeness_guard_trigger', $this->triggerNames('report_runs'), 'new report runs must persist calculation completeness and explanatory metadata');
     }
 
     public function test_reporting_reconciliation_variance_identity_is_constrained_by_the_schema(): void
@@ -357,6 +443,9 @@ final class SchemaInvariantFeatureTest extends TestCase
 
     public function test_reporting_immutability_triggers_exist(): void
     {
+        $definitionTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'metric_definitions')->pluck('tgname')->all();
+        $this->assertContains('metric_definitions_lineage_guard_trigger', $definitionTriggers, 'metric owner claims and canonical lineage must be immutable at the schema level');
+
         $versionTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'metric_versions')->pluck('tgname')->all();
         $this->assertContains('metric_versions_immutable_trigger', $versionTriggers, 'metric versions must be immutable at the schema level');
 
@@ -368,6 +457,7 @@ final class SchemaInvariantFeatureTest extends TestCase
 
         $reconciliationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'metric_reconciliations')->pluck('tgname')->all();
         $this->assertContains('metric_reconciliations_immutable_trigger', $reconciliationTriggers, 'reconciliation evidence must be immutable at the schema level');
+        $this->assertContains('metric_reconciliations_provenance_guard_trigger', $reconciliationTriggers, 'new reconciliation evidence must retain target and compared-projection provenance at the schema level');
 
         $pinTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'dashboard_pins')->pluck('tgname')->all();
         $this->assertContains('dashboard_pins_immutable_trigger', $pinTriggers, 'dashboard pins must be immutable at the schema level');

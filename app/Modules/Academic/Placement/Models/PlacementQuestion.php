@@ -22,7 +22,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $points
  * @property array<string, mixed>|null $options
  * @property string|null $correct_answer
- * @property string|null $media_ref
+ * @property string|null $media_ref Legacy read-only column; authoritative
+ *   media is exposed through media().
  * @property string $lifecycle_state
  */
 final class PlacementQuestion extends Model
@@ -35,7 +36,7 @@ final class PlacementQuestion extends Model
 
     protected $fillable = [
         'id', 'section_id', 'code', 'stem', 'component', 'question_type', 'points',
-        'options', 'correct_answer', 'media_ref', 'lifecycle_state',
+        'options', 'correct_answer', 'lifecycle_state',
     ];
 
     /** @return BelongsTo<PlacementSection, $this> */

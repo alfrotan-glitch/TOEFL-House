@@ -13,8 +13,10 @@ use App\Modules\Finance\Models\FundingSource;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Organization\Models\Branch;
+use App\Modules\Organization\Models\Organization;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -44,14 +46,24 @@ final class AllocateFunds
     ) {}
 
     /** @return array{fund_id: string, correlation_id: string} */
-    public function establish(Actor $actor, string $name, string $agreementRef, string $committedAmount, ?string $restrictedCategory, ?string $restrictionNote, string $idempotencyKey): array
+    public function establish(Actor $actor, string $organizationId, string $name, string $agreementRef, string $committedAmount, ?string $restrictedCategory, ?string $restrictionNote, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['finance.fund.establish', $name, $agreementRef, $committedAmount, (string) $restrictedCategory, $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['finance.fund.establish', $organizationId, $name, $agreementRef, $committedAmount, (string) $restrictedCategory, $actor->actorId]));
 
         try {
-            return $this->idempotency->execute('finance.fund.establish', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $name, $agreementRef, $committedAmount, $restrictedCategory, $restrictionNote): array {
-                    $this->require($actor, self::CAPABILITY_ESTABLISH);
+            return $this->idempotency->execute('finance.fund.establish', $idempotencyKey,
+                $payload,
+                fn (): array => DB::transaction(function () use ($actor, $organizationId, $name, $agreementRef, $committedAmount, $restrictedCategory, $restrictionNote): array {
+                    $organizationId = trim($organizationId);
+                    /** @var Organization|null $organization */
+                    $organization = $organizationId === '' ? null : Organization::query()
+                        ->whereKey($organizationId)
+                        ->where('lifecycle_state', 'active')
+                        ->first();
+                    if ($organization === null) {
+                        throw BusinessRejection::forCode('finance.fund_organization_unknown', 'a funding source requires an active organization');
+                    }
+                    $this->require($actor, self::CAPABILITY_ESTABLISH, StructureScope::organization($organization->id));
                     if ($name === '' || $agreementRef === '') {
                         throw BusinessRejection::forCode('finance.fund_terms', 'a funding source requires a name and its agreement reference');
                     }
@@ -64,6 +76,7 @@ final class AllocateFunds
 
                     $fund = FundingSource::query()->create([
                         'id' => RandomIdentifier::new(),
+                        'organization_id' => $organization->id,
                         'name' => $name,
                         'agreement_ref' => $agreementRef,
                         'committed_amount' => $committedAmount,
@@ -72,7 +85,7 @@ final class AllocateFunds
                         'established_by' => $actor->actorId,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'finance.fund.establish', 'funding_source', $fund->id, null, [
-                        'agreement_ref' => $agreementRef, 'committed_amount' => $committedAmount, 'restricted_category' => $fund->restricted_category,
+                        'organization_id' => $organization->id, 'agreement_ref' => $agreementRef, 'committed_amount' => $committedAmount, 'restricted_category' => $fund->restricted_category,
                     ]);
 
                     return ['fund_id' => $fund->id, 'correlation_id' => $event->correlation_id];
@@ -107,6 +120,35 @@ final class AllocateFunds
                     $lockedFund = FundingSource::query()->whereKey($fund->id)->lockForUpdate()->firstOrFail();
                     /** @var ObligationLine $lockedLine */
                     $lockedLine = ObligationLine::query()->whereKey($line->id)->lockForUpdate()->firstOrFail();
+                    /** @var Obligation $obligation */
+                    $obligation = Obligation::query()->whereKey($lockedLine->obligation_id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $obligation->student_id) !== trim($studentId)) {
+                        throw BusinessRejection::forCode('finance.fund_allocation_student_mismatch', 'the fund allocation line student changed while the coverage lock was acquired');
+                    }
+                    $branchId = trim((string) $obligation->current_home_branch_id);
+                    if ($branchId === '') {
+                        $branchId = trim((string) $obligation->originating_branch_id);
+                    }
+                    $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+                    if ($branch === null || $branch->lifecycle_state !== 'active') {
+                        throw BusinessRejection::forCode('finance.fund_allocation_provenance_required', 'a fund allocation requires known active obligation branch provenance');
+                    }
+                    $scope = $branch->structureScope();
+                    $fundOrganizationId = trim((string) $lockedFund->organization_id);
+                    if ($fundOrganizationId === '' || ! Organization::query()->whereKey($fundOrganizationId)->where('lifecycle_state', 'active')->exists()) {
+                        throw BusinessRejection::forCode('finance.fund_organization_unknown', 'a fund allocation requires a funding source with active organization provenance');
+                    }
+                    if ($scope->organizationId === '' || $fundOrganizationId !== $scope->organizationId) {
+                        throw BusinessRejection::forCode('finance.fund_organization_mismatch', 'a fund allocation must remain inside its funding source organization');
+                    }
+                    // The allocation capability is deliberately evaluated on
+                    // the concrete obligation branch. The source/target
+                    // organization equality above keeps that delegated branch
+                    // operation inside the fund's owning organization without
+                    // treating an organization-A source as a B authorization
+                    // oracle.
+                    $this->require($actor, self::CAPABILITY_ALLOCATE, $scope);
+
                     $restriction = trim((string) $lockedFund->restricted_category);
                     if ($restriction !== '' && $restriction !== trim((string) $lockedLine->category)) {
                         throw BusinessRejection::forCode('finance.fund_restriction', sprintf('the fund is restricted to %s; the obligation line is %s', $restriction, $lockedLine->category));
@@ -124,17 +166,6 @@ final class AllocateFunds
                         throw BusinessRejection::forCode('finance.fund_exhausted', sprintf('the allocation exceeds the unutilized pool remainder %s', $available));
                     }
 
-                    /** @var Obligation $obligation */
-                    $obligation = Obligation::query()->whereKey($lockedLine->obligation_id)->lockForUpdate()->firstOrFail();
-                    if (trim((string) $obligation->student_id) !== trim($studentId)) {
-                        throw BusinessRejection::forCode('finance.fund_allocation_student_mismatch', 'the fund allocation line student changed while the coverage lock was acquired');
-                    }
-                    $branchId = trim((string) ($obligation->current_home_branch_id ?? $obligation->originating_branch_id ?? ''));
-                    $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
-                    if ($branch === null) {
-                        throw BusinessRejection::forCode('finance.fund_allocation_provenance_required', 'a fund allocation requires known obligation branch provenance');
-                    }
-                    $this->require($actor, self::CAPABILITY_ALLOCATE, $branch->structureScope());
                     $lineAllocationIds = FundAllocation::query()->where('obligation_line_id', $lockedLine->id)->pluck('id');
                     $lineFunded = MoneyAmount::decimal(FundAllocation::query()->whereIn('id', $lineAllocationIds)->sum('amount'));
                     $lineReversed = MoneyAmount::decimal(FinancialCorrection::query()
@@ -172,7 +203,7 @@ final class AllocateFunds
         }
     }
 
-    private function require(Actor $actor, string $capability, ?\App\Support\Authorization\StructureScope $scope = null): void
+    private function require(Actor $actor, string $capability, ?StructureScope $scope = null): void
     {
         $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {

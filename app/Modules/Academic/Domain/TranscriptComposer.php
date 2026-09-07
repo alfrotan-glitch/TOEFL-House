@@ -17,6 +17,7 @@ use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
+use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Academic\Queries\GraduationCertificationQuery;
 use App\Modules\Students\Models\Student;
 use Illuminate\Support\Collection;
@@ -32,7 +33,10 @@ use Illuminate\Support\Collection;
  */
 final class TranscriptComposer
 {
-    public function __construct(private readonly GraduationCertificationQuery $certification) {}
+    public function __construct(
+        private readonly GraduationCertificationQuery $certification,
+        private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
+    ) {}
 
     /** @return array<string, mixed> */
     public function compose(string $studentId, string $programVersionId): array
@@ -60,7 +64,7 @@ final class TranscriptComposer
                 'program_name' => $program?->name,
                 'version_summary' => $version->summary,
             ],
-            'entry' => $this->entry((string) $student->person_id, $programVersionId),
+            'entry' => $this->entry($student, $programVersionId),
             'levels' => $this->levels($studentId, $programVersionId),
             'results' => $this->results(array_values($enrollments->all())),
             'seats' => $this->seats(array_values($enrollments->all())),
@@ -70,20 +74,33 @@ final class TranscriptComposer
     }
 
     /** @return array<string, mixed>|null */
-    private function entry(string $personId, string $programVersionId): ?array
+    private function entry(Student $student, string $programVersionId): ?array
     {
+        // A transcript must never rediscover a person's "latest" placement
+        // row: retakes and timestamps are not an enrollment decision. It can
+        // cite only the exact immutable fact that Admissions/Student Lifecycle
+        // attached to this Student, after cryptographic verification.
+        $snapshotId = trim((string) ($student->academic_eligibility_snapshot_id ?? ''));
+        if ($snapshotId === '') {
+            return null;
+        }
         /** @var AcademicEligibilitySnapshot|null $snapshot */
-        $snapshot = AcademicEligibilitySnapshot::query()
-            ->where('person_id', $personId)
-            ->where('program_version_id', $programVersionId)
-            ->orderByDesc('signed_at')
-            ->first();
-        if ($snapshot === null) {
+        $snapshot = AcademicEligibilitySnapshot::query()->find($snapshotId);
+        if ($snapshot === null
+            || trim((string) $snapshot->person_id) !== trim((string) $student->person_id)
+            || trim((string) $snapshot->program_version_id) !== trim($programVersionId)
+            || ($student->placement_profile_id !== null
+                && trim((string) $snapshot->placement_profile_id) !== trim((string) $student->placement_profile_id))) {
+            return null;
+        }
+        $verification = $this->eligibilitySnapshots->verify($snapshot);
+        if (($verification['valid'] ?? false) !== true) {
             return null;
         }
 
         return [
             'snapshot_id' => $snapshot->id,
+            'snapshot_schema_version' => $snapshot->snapshot_schema_version,
             'recommended_level' => $this->levelText($snapshot->recommended_level_id),
             'payload_digest' => $snapshot->payload_sha256,
             'signed_at' => $snapshot->signed_at?->toIso8601String(),

@@ -15,6 +15,7 @@ use App\Modules\Reporting\Queries\PlacementReleaseCountCalculator;
 use App\Modules\Reporting\Queries\VisitorCaptureCountCalculator;
 use App\Modules\Reporting\Queries\VisitorConversionCountCalculator;
 use App\Modules\Reporting\Queries\VisitorConversionRateCalculator;
+use App\Modules\Reporting\Models\MetricDefinition;
 use App\Support\Errors\BusinessRejection;
 use Illuminate\Support\Facades\DB;
 
@@ -38,7 +39,9 @@ final class MetricCatalog
             'calculator' => PayrollTotalCalculator::class,
         ],
         'active_enrollment_count' => [
-            'owner' => 'academic_delivery', 'authority' => 'academic_period', 'scopes' => ['global', 'class'],
+            // Enrollment membership is an Enrollment fact, not an Academic
+            // delivery aggregate merely because a class supplies its period.
+            'owner' => 'enrollment', 'authority' => 'academic_period', 'scopes' => ['global', 'class'],
             'calculator' => ActiveEnrollmentCalculator::class,
         ],
         'attendance_rate' => [
@@ -46,7 +49,9 @@ final class MetricCatalog
             'calculator' => AttendanceRateCalculator::class,
         ],
         'fund_utilization' => [
-            'owner' => 'funding', 'authority' => 'financial_period', 'scopes' => ['fund'],
+            // Funding agreements and their monetary utilization are Finance
+            // facts. Reporting only adapts Finance's calculation.
+            'owner' => 'finance', 'authority' => 'financial_period', 'scopes' => ['fund'],
             'calculator' => FundUtilizationCalculator::class,
         ],
         'visitor_capture_count' => [
@@ -88,6 +93,28 @@ final class MetricCatalog
     public static function exists(string $metricKey): bool
     {
         return isset(self::METRICS[$metricKey]);
+    }
+
+    /**
+     * Reject a definition whose persisted lineage cannot prove that it is the
+     * catalog metric being requested. `source_owner` is intentionally not
+     * compared here: it can be a preserved historical claim such as the old
+     * `funding` label, while `canonical_source_owner` records the authority
+     * that live Reporting is allowed to use.
+     *
+     * @param array{owner: string, authority: string, scopes: list<string>, calculator: class-string<MetricCalculator>} $entry
+     */
+    public static function assertDefinitionLineage(MetricDefinition $definition, array $entry): void
+    {
+        $canonicalOwner = trim((string) ($definition->canonical_source_owner ?? ''));
+        $status = trim((string) ($definition->lineage_status ?? ''));
+        if (! in_array($status, ['aligned', 'canonicalized_claim_preserved'], true) || $canonicalOwner === '') {
+            throw BusinessRejection::forCode('reporting.metric_lineage_unresolved', 'the metric definition has no resolved canonical source authority');
+        }
+        if ($canonicalOwner !== $entry['owner']
+            || trim((string) $definition->period_authority) !== $entry['authority']) {
+            throw BusinessRejection::forCode('reporting.metric_lineage_conflict', 'the metric definition lineage does not match the canonical catalog');
+        }
     }
 
     /** Resolves the authoritative period id for a key under the metric's period authority. */

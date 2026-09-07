@@ -10,16 +10,21 @@ use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Finance\Commands\AllocateFunds;
 use App\Modules\Finance\Commands\AllocatePayment;
 use App\Modules\Finance\Commands\MaintainDiscount;
+use App\Modules\Finance\Commands\MaintainFinancialCorrection;
 use App\Modules\Finance\Commands\MaintainFinancialPeriod;
 use App\Modules\Finance\Commands\PostObligation;
 use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Commands\RefundPayment;
+use App\Modules\Finance\Queries\FinancialBalanceQuery;
 use App\Modules\Finance\Models\Discount;
+use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\FundingSource;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Models\PaymentAllocation;
+use App\Modules\Organization\Models\Organization;
 use App\Modules\Finance\Models\Refund;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
@@ -71,6 +76,26 @@ final class PaymentsFundingFeatureTest extends TestCase
         return $this->grantedActor('pay-fin-acc', ['finance.period', 'finance.obligation', 'finance.payment', 'finance.refund', 'finance.refund_approve', 'finance.discount', 'finance.discount_approve', 'finance.fund', 'finance.fund_allocate']);
     }
 
+    /**
+     * Raw-SQL allocation probes must include the same immutable provenance
+     * copied by AllocateFunds. Otherwise the provenance trigger rejects the
+     * probe before the specific Finance cap being tested can run.
+     *
+     * @return array{originating_branch_id: string, current_home_branch_id: string|null}
+     */
+    private function fundAllocationProvenance(): array
+    {
+        /** @var Obligation $obligation */
+        $obligation = Obligation::query()->findOrFail($this->obligationId);
+        $originatingBranchId = trim((string) $obligation->originating_branch_id);
+        $this->assertNotSame('', $originatingBranchId, 'the fixture obligation must have Finance provenance before testing allocation caps');
+
+        return [
+            'originating_branch_id' => $originatingBranchId,
+            'current_home_branch_id' => $obligation->current_home_branch_id,
+        ];
+    }
+
     public function test_payment_posts_once_and_allocations_respect_both_caps(): void
     {
         $teller = $this->teller();
@@ -106,6 +131,252 @@ final class PaymentsFundingFeatureTest extends TestCase
 
         $this->expectException(QueryException::class);
         DB::statement('UPDATE payments SET amount = 999999 WHERE id = ?', [$payment['payment_id']]);
+    }
+
+    public function test_current_allocation_balance_guards_are_singular_before_insert_guards(): void
+    {
+        // Find by the actual guard function, not only by the new trigger name:
+        // a retained legacy trigger with a different name would otherwise make
+        // this assertion pass while executing the same balance function twice.
+        $guards = DB::select(
+            "SELECT c.relname AS relation_name, t.tgname AS guard_name, pg_get_triggerdef(t.oid) AS guard_definition\n"
+            . "FROM pg_trigger t\n"
+            . "JOIN pg_class c ON c.oid = t.tgrelid\n"
+            . "JOIN pg_proc p ON p.oid = t.tgfoid\n"
+            . "WHERE NOT t.tgisinternal\n"
+            . "  AND ((c.relname = ? AND p.proname = ?) OR (c.relname = ? AND p.proname = ?))\n"
+            . "ORDER BY c.relname, t.tgname",
+            ['fund_allocations', 'fund_allocations_balance_guard', 'payment_allocations', 'payment_allocations_balance_guard'],
+        );
+
+        $this->assertSame([
+            ['relation_name' => 'fund_allocations', 'guard_name' => 'finance_fund_allocations_balance_guard_trigger'],
+            ['relation_name' => 'payment_allocations', 'guard_name' => 'finance_payment_allocations_balance_guard_trigger'],
+        ], array_map(static fn (object $row): array => [
+            'relation_name' => $row->relation_name,
+            'guard_name' => $row->guard_name,
+        ], $guards));
+        foreach ($guards as $guard) {
+            $this->assertStringContainsString('BEFORE INSERT', (string) $guard->guard_definition);
+        }
+    }
+
+    public function test_full_payment_allocation_is_counted_once_at_the_database_boundary(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record(
+            $teller,
+            FinancialPeriod::query()->findOrFail($this->periodId),
+            $this->studentId,
+            '8500.00',
+            'bank-transfer',
+            'RCPT-ALLOCATION-ONCE',
+            '2026-11-05',
+            'pay-fin-allocation-once-payment',
+        );
+
+        $allocation = app(AllocatePayment::class)->allocate(
+            $teller,
+            Payment::query()->findOrFail($payment['payment_id']),
+            Obligation::query()->findOrFail($this->obligationId),
+            '8500.00',
+            'pay-fin-allocation-once',
+        );
+
+        $this->assertDatabaseHas('payment_allocations', [
+            'id' => $allocation['allocation_id'],
+            'amount' => '8500.00',
+        ]);
+        $this->assertSame('0.00', app(AllocatePayment::class)->paymentRemaining(Payment::query()->findOrFail($payment['payment_id'])));
+        $this->assertSame('0.00', app(AllocatePayment::class)->obligationRemaining(Obligation::query()->findOrFail($this->obligationId)));
+    }
+
+    public function test_full_fund_allocation_is_counted_once_at_the_database_boundary(): void
+    {
+        $teller = $this->teller();
+        $fund = app(AllocateFunds::class)->establish(
+            $teller,
+            $this->bootstrapOrganizationId,
+            'Exact-cap tuition fund',
+            'agreement/exact-fund-cap',
+            '8000.00',
+            'tuition',
+            'the full commitment is tuition-only',
+            'pay-fin-exact-fund-establish',
+        );
+
+        $allocation = app(AllocateFunds::class)->allocate(
+            $teller,
+            FundingSource::query()->findOrFail($fund['fund_id']),
+            ObligationLine::query()->findOrFail($this->tuitionLineId),
+            '8000.00',
+            'full committed pool applied exactly once',
+            'pay-fin-exact-fund-allocate',
+        );
+
+        $this->assertDatabaseHas('fund_allocations', [
+            'id' => $allocation['allocation_id'],
+            'fund_id' => $fund['fund_id'],
+            'amount' => '8000.00',
+        ]);
+        $this->assertSame('500.00', app(AllocatePayment::class)->obligationRemaining(Obligation::query()->findOrFail($this->obligationId)));
+    }
+
+    public function test_reversing_settlement_first_allows_an_equal_obligation_decrease(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record(
+            $teller,
+            FinancialPeriod::query()->findOrFail($this->periodId),
+            $this->studentId,
+            '8500.00',
+            'cash',
+            'RCPT-CORRECTION-REVERSAL-FIRST',
+            '2026-11-06',
+            'pay-fin-correction-reversal-first-payment',
+        );
+        $allocation = app(AllocatePayment::class)->allocate(
+            $teller,
+            Payment::query()->findOrFail($payment['payment_id']),
+            Obligation::query()->findOrFail($this->obligationId),
+            '8500.00',
+            'pay-fin-correction-reversal-first-allocation',
+        );
+        $proposer = $this->grantedActor('pay-fin-correction-reversal-proposer', ['finance.correct']);
+        $approver = $this->grantedActor('pay-fin-correction-reversal-approver', ['finance.correct_approve']);
+
+        $reversal = app(MaintainFinancialCorrection::class)->proposeAllocationReversal(
+            $proposer,
+            PaymentAllocation::query()->findOrFail($allocation['allocation_id']),
+            '0.01',
+            'reverse the settled cent before reducing the charge',
+            'pay-fin-correction-reversal-first-propose',
+        );
+        app(MaintainFinancialCorrection::class)->approve(
+            $approver,
+            FinancialCorrection::query()->findOrFail($reversal['correction_id']),
+            'pay-fin-correction-reversal-first-approve',
+        );
+
+        $decrease = app(MaintainFinancialCorrection::class)->proposeObligationAdjustment(
+            $proposer,
+            Obligation::query()->findOrFail($this->obligationId),
+            '0.01',
+            FinancialCorrection::DIRECTION_DECREASE,
+            'reduce the charge only after its settlement was reversed',
+            'pay-fin-correction-decrease-after-reversal-propose',
+        );
+        $approved = app(MaintainFinancialCorrection::class)->approve(
+            $approver,
+            FinancialCorrection::query()->findOrFail($decrease['correction_id']),
+            'pay-fin-correction-decrease-after-reversal-approve',
+        );
+
+        $this->assertSame(FinancialCorrection::STATE_RECORDED, $approved['lifecycle_state']);
+        $this->assertDatabaseHas('financial_corrections', [
+            'id' => $decrease['correction_id'],
+            'lifecycle_state' => FinancialCorrection::STATE_RECORDED,
+        ]);
+        $this->assertSame('0.00', app(AllocatePayment::class)->obligationRemaining(Obligation::query()->findOrFail($this->obligationId)));
+    }
+
+    public function test_obligation_decrease_cannot_over_settle_an_already_paid_charge(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record(
+            $teller,
+            FinancialPeriod::query()->findOrFail($this->periodId),
+            $this->studentId,
+            '8500.00',
+            'cash',
+            'RCPT-CORRECTION-SETTLEMENT',
+            '2026-11-06',
+            'pay-fin-correction-settlement-payment',
+        );
+        app(AllocatePayment::class)->allocate(
+            $teller,
+            Payment::query()->findOrFail($payment['payment_id']),
+            Obligation::query()->findOrFail($this->obligationId),
+            '8500.00',
+            'pay-fin-correction-settlement-allocation',
+        );
+
+        $proposer = $this->grantedActor('pay-fin-correction-proposer', ['finance.correct']);
+        $approver = $this->grantedActor('pay-fin-correction-approver', ['finance.correct_approve']);
+        $correction = app(MaintainFinancialCorrection::class)->proposeObligationAdjustment(
+            $proposer,
+            Obligation::query()->findOrFail($this->obligationId),
+            '0.01',
+            FinancialCorrection::DIRECTION_DECREASE,
+            'A settled charge must not be silently reduced',
+            'pay-fin-correction-settlement-propose',
+        );
+
+        try {
+            app(MaintainFinancialCorrection::class)->approve(
+                $approver,
+                FinancialCorrection::query()->findOrFail($correction['correction_id']),
+                'pay-fin-correction-settlement-approve',
+            );
+            $this->fail('a decrease cannot create a negative derived Finance remainder');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('finance.correction_decrease_over_settled', $rejection->errorCode());
+        }
+
+        $this->assertDatabaseHas('financial_corrections', [
+            'id' => $correction['correction_id'],
+            'lifecycle_state' => FinancialCorrection::STATE_PROPOSED,
+        ]);
+        $this->assertSame('0.00', app(AllocatePayment::class)->obligationRemaining(Obligation::query()->findOrFail($this->obligationId)));
+    }
+
+    public function test_direct_sql_cannot_record_an_obligation_decrease_below_settlement(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record(
+            $teller,
+            FinancialPeriod::query()->findOrFail($this->periodId),
+            $this->studentId,
+            '8500.00',
+            'cash',
+            'RCPT-DB-CORRECTION-SETTLEMENT',
+            '2026-11-06',
+            'pay-fin-db-correction-settlement-payment',
+        );
+        app(AllocatePayment::class)->allocate(
+            $teller,
+            Payment::query()->findOrFail($payment['payment_id']),
+            Obligation::query()->findOrFail($this->obligationId),
+            '8500.00',
+            'pay-fin-db-correction-settlement-allocation',
+        );
+
+        $correctionId = RandomIdentifier::new();
+        DB::table('financial_corrections')->insert([
+            'id' => $correctionId,
+            'period_id' => $this->periodId,
+            'correction_type' => FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT,
+            'obligation_id' => $this->obligationId,
+            'payment_allocation_id' => null,
+            'fund_allocation_id' => null,
+            'amount' => '0.01',
+            'direction' => FinancialCorrection::DIRECTION_DECREASE,
+            'reason' => 'forged settled-obligation decrease',
+            'lifecycle_state' => FinancialCorrection::STATE_PROPOSED,
+            'requested_by' => 'direct-sql-correction-proposer',
+            'approved_by' => null,
+            'approved_at' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('cannot reduce the effective charge below already recorded settlement');
+        DB::table('financial_corrections')->where('id', $correctionId)->update([
+            'lifecycle_state' => FinancialCorrection::STATE_RECORDED,
+            'approved_by' => 'direct-sql-correction-approver',
+            'approved_at' => now(),
+        ]);
     }
 
     public function test_allocation_cannot_exceed_obligation_and_requires_same_payer(): void
@@ -230,10 +501,17 @@ final class PaymentsFundingFeatureTest extends TestCase
     public function test_restricted_funds_stay_restricted_and_utilization_cannot_exceed_the_pool(): void
     {
         $teller = $this->teller();
-        $fund = app(AllocateFunds::class)->establish($teller, 'Sponsor A Tuition Aid', 'agreement/SA-2026-11', '10000.00', 'tuition', 'sponsor agreement restricts use to tuition lines only', 'pay-fin-fund-1');
+        $fund = app(AllocateFunds::class)->establish($teller, $this->bootstrapOrganizationId, 'Sponsor A Tuition Aid', 'agreement/SA-2026-11', '10000.00', 'tuition', 'sponsor agreement restricts use to tuition lines only', 'pay-fin-fund-1');
 
         try {
-            app(AllocateFunds::class)->establish($teller, 'Bad Fund', 'agreement/x', '100.00', 'transport', null, 'pay-fin-fund-2');
+            (new FinancialBalanceQuery)->fundUtilization(FundingSource::query()->findOrFail($fund['fund_id']), '2000-01-31');
+            $this->fail('fund utilization must not project a source into a period before its establishment');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('finance.fund_not_established_as_of', $rejection->errorCode());
+        }
+
+        try {
+            app(AllocateFunds::class)->establish($teller, $this->bootstrapOrganizationId, 'Bad Fund', 'agreement/x', '100.00', 'transport', null, 'pay-fin-fund-2');
             $this->fail('a restricted fund requires its restriction note');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('finance.fund_restriction_note', $rejection->errorCode());
@@ -267,6 +545,122 @@ final class PaymentsFundingFeatureTest extends TestCase
 
         $this->expectException(QueryException::class);
         DB::statement("UPDATE funding_sources SET restricted_category = 'transport' WHERE id = ?", [$fund['fund_id']]);
+    }
+
+    public function test_funding_sources_require_an_explicit_authorized_organization(): void
+    {
+        $teller = $this->teller();
+        /** @var Organization $otherOrganization */
+        $otherOrganization = Organization::query()->create([
+            'id' => RandomIdentifier::new(),
+            'name' => 'Unassigned Funding Organization',
+            'lifecycle_state' => 'active',
+        ]);
+
+        try {
+            app(AllocateFunds::class)->establish(
+                $teller,
+                $otherOrganization->id,
+                'Unauthorized organization pool',
+                'agreement/foreign-owner',
+                '100.00',
+                null,
+                null,
+                'pay-fin-fund-organization-denied',
+            );
+            $this->fail('a funding manager must select an organization they govern');
+        } catch (AuthorizationDenied $denial) {
+            $this->assertSame('finance.fund_denied', $denial->errorCode());
+        }
+
+        // The Finance read authority re-reads the source and refuses an
+        // unpersisted/caller-constructed fund rather than calculating a
+        // balance from supplied fields.
+        try {
+            (new FinancialBalanceQuery)->fundUtilization(new FundingSource([
+                'id' => RandomIdentifier::new(),
+                'organization_id' => $this->bootstrapOrganizationId,
+                'committed_amount' => '100.00',
+            ]), '2026-11-30');
+            $this->fail('Finance must reject an unpersisted funding source');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('finance.fund_organization_unknown', $rejection->errorCode());
+        }
+
+        // Application authorization is not the only boundary: direct SQL
+        // cannot create a fresh organizationless monetary source either.
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('a new funding source requires an active organization provenance');
+        DB::table('funding_sources')->insert([
+            'id' => RandomIdentifier::new(),
+            'organization_id' => null,
+            'name' => 'Unlabeled raw source',
+            'agreement_ref' => 'agreement/raw-unlabeled',
+            'committed_amount' => '100.00',
+            'restricted_category' => '',
+            'restriction_note' => '',
+            'established_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_fund_allocation_cannot_cross_organizations_by_command_or_raw_sql(): void
+    {
+        $actor = $this->teller();
+        /** @var Organization $otherOrganization */
+        $otherOrganization = Organization::query()->create([
+            'id' => RandomIdentifier::new(),
+            'name' => 'Second Funding Organization',
+            'lifecycle_state' => 'active',
+        ]);
+        // Give this actor authority on both organizations. The rejection must
+        // therefore prove source/target ownership equality, not merely a
+        // missing grant on the foreign source organization.
+        $this->grantKnownAuthorityOn('organization', $otherOrganization->id);
+        $foreignFund = app(AllocateFunds::class)->establish(
+            $actor,
+            $otherOrganization->id,
+            'Second organization pool',
+            'agreement/second-organization',
+            '1000.00',
+            null,
+            null,
+            'pay-fin-fund-organization-cross-establish',
+        );
+        /** @var FundingSource $fund */
+        $fund = FundingSource::query()->findOrFail($foreignFund['fund_id']);
+        $this->assertSame($otherOrganization->id, trim((string) $fund->organization_id));
+
+        try {
+            app(AllocateFunds::class)->allocate(
+                $actor,
+                $fund,
+                ObligationLine::query()->findOrFail($this->tuitionLineId),
+                '100.00',
+                'attempt to fund another organization',
+                'pay-fin-fund-organization-cross-command',
+            );
+            $this->fail('an organization-B source must not fund an organization-A obligation');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('finance.fund_organization_mismatch', $rejection->errorCode());
+        }
+
+        // Carry every older cap/restriction/provenance prerequisite so the
+        // new raw-SQL organization guard is the only intended rejection.
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('fund allocation organization must match its obligation organization');
+        DB::table('fund_allocations')->insert([
+            'id' => RandomIdentifier::new(),
+            'fund_id' => $fund->id,
+            'obligation_line_id' => $this->tuitionLineId,
+            'amount' => '100.00',
+            'reason' => 'raw cross-organization attack',
+            'allocated_by' => 'direct-sql-attacker',
+            ...$this->fundAllocationProvenance(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 
     public function test_closed_period_rejects_payments_refunds_and_discounts(): void
@@ -444,6 +838,27 @@ final class PaymentsFundingFeatureTest extends TestCase
         ]);
     }
 
+    public function test_direct_sql_cannot_commit_a_header_only_journal(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::transaction(function (): void {
+            DB::table('journals')->insert([
+                'id' => RandomIdentifier::new(),
+                'period_id' => $this->periodId,
+                'source_type' => 'other',
+                'source_id' => null,
+                'reason' => 'forged journal header with no lines',
+                'posted_by' => 'direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            // The header guard is deliberately deferred so a command can add
+            // lines in its atomic transaction. Make it immediate here to prove
+            // that raw SQL cannot commit an orphan header.
+            DB::statement('SET CONSTRAINTS journals_completion_and_source_amount_guard_trigger IMMEDIATE');
+        });
+    }
+
     public function test_direct_sql_cannot_post_an_unbalanced_journal(): void
     {
         $arId = RandomIdentifier::new();
@@ -479,12 +894,59 @@ final class PaymentsFundingFeatureTest extends TestCase
         ]);
     }
 
+    public function test_direct_sql_cannot_post_a_non_inverse_journal_reversal(): void
+    {
+        $receivableAccountId = RandomIdentifier::new();
+        $revenueAccountId = RandomIdentifier::new();
+        DB::table('accounts')->insert([
+            ['id' => $receivableAccountId, 'code' => '1101', 'name' => 'Reversal Test Receivable', 'type' => 'asset', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => $revenueAccountId, 'code' => '4101', 'name' => 'Reversal Test Revenue', 'type' => 'revenue', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $this->expectException(QueryException::class);
+        DB::transaction(function () use ($receivableAccountId, $revenueAccountId): void {
+            $originalId = RandomIdentifier::new();
+            $reversalId = RandomIdentifier::new();
+            DB::table('journals')->insert([
+                'id' => $originalId,
+                'period_id' => $this->periodId,
+                'source_type' => 'other',
+                'source_id' => null,
+                'reason' => 'original journal for direct SQL reversal attack',
+                'posted_by' => 'direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            DB::table('journal_lines')->insert([
+                ['id' => RandomIdentifier::new(), 'journal_id' => $originalId, 'account_id' => $receivableAccountId, 'direction' => 'debit', 'amount' => '100.00', 'created_at' => now(), 'updated_at' => now()],
+                ['id' => RandomIdentifier::new(), 'journal_id' => $originalId, 'account_id' => $revenueAccountId, 'direction' => 'credit', 'amount' => '100.00', 'created_at' => now(), 'updated_at' => now()],
+            ]);
+            DB::table('journals')->insert([
+                'id' => $reversalId,
+                'period_id' => $this->periodId,
+                'source_type' => 'journal',
+                'source_id' => $originalId,
+                'reversal_of_id' => $originalId,
+                'reason' => 'forged partial reversal',
+                'posted_by' => 'direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            DB::table('journal_lines')->insert([
+                ['id' => RandomIdentifier::new(), 'journal_id' => $reversalId, 'account_id' => $receivableAccountId, 'direction' => 'credit', 'amount' => '99.99', 'created_at' => now(), 'updated_at' => now()],
+                ['id' => RandomIdentifier::new(), 'journal_id' => $reversalId, 'account_id' => $revenueAccountId, 'direction' => 'debit', 'amount' => '99.99', 'created_at' => now(), 'updated_at' => now()],
+            ]);
+            DB::statement('SET CONSTRAINTS journals_completion_and_source_amount_guard_trigger IMMEDIATE');
+        });
+    }
+
     public function test_direct_sql_cannot_fund_beyond_the_line_remainder(): void
     {
         // A large unrestricted pool (10000) so only the line cap can fire.
         $fundId = RandomIdentifier::new();
         DB::table('funding_sources')->insert([
             'id' => $fundId,
+            'organization_id' => $this->bootstrapOrganizationId,
             'name' => 'Attack Fund',
             'agreement_ref' => 'ATTACK/AG-1',
             'committed_amount' => '10000.00',
@@ -496,7 +958,11 @@ final class PaymentsFundingFeatureTest extends TestCase
         ]);
 
         // The tuition line is 8000.00 in setUp; 8000.01 exceeds it.
+        // Carry valid immutable provenance so the line cap, not the earlier
+        // provenance trigger, must reject the attack.
+        $provenance = $this->fundAllocationProvenance();
         $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('funded amount exceeds the obligation line');
         DB::table('fund_allocations')->insert([
             'id' => RandomIdentifier::new(),
             'fund_id' => $fundId,
@@ -504,6 +970,7 @@ final class PaymentsFundingFeatureTest extends TestCase
             'amount' => '8000.01',
             'reason' => 'fabricated',
             'allocated_by' => 'direct-sql-attacker',
+            ...$provenance,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -514,6 +981,7 @@ final class PaymentsFundingFeatureTest extends TestCase
         $fundId = RandomIdentifier::new();
         DB::table('funding_sources')->insert([
             'id' => $fundId,
+            'organization_id' => $this->bootstrapOrganizationId,
             'name' => 'Small Attack Fund',
             'agreement_ref' => 'ATTACK/AG-2',
             'committed_amount' => '100.00',
@@ -525,7 +993,11 @@ final class PaymentsFundingFeatureTest extends TestCase
         ]);
 
         // 100.01 is within the line remainder (8000) but exceeds the pool.
+        // Carry valid immutable provenance so the pool cap is the rejecting
+        // database authority.
+        $provenance = $this->fundAllocationProvenance();
         $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('fund utilization exceeds the committed pool');
         DB::table('fund_allocations')->insert([
             'id' => RandomIdentifier::new(),
             'fund_id' => $fundId,
@@ -533,6 +1005,7 @@ final class PaymentsFundingFeatureTest extends TestCase
             'amount' => '100.01',
             'reason' => 'fabricated',
             'allocated_by' => 'direct-sql-attacker',
+            ...$provenance,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -543,6 +1016,7 @@ final class PaymentsFundingFeatureTest extends TestCase
         $fundId = RandomIdentifier::new();
         DB::table('funding_sources')->insert([
             'id' => $fundId,
+            'organization_id' => $this->bootstrapOrganizationId,
             'name' => 'Restricted Attack Fund',
             'agreement_ref' => 'ATTACK/AG-3',
             'committed_amount' => '1000.00',
@@ -556,7 +1030,11 @@ final class PaymentsFundingFeatureTest extends TestCase
         // The transport line (500.00, category "transport") cannot receive
         // tuition-restricted funding.
         $transportLineId = (string) ObligationLine::query()->where('obligation_id', $this->obligationId)->where('category', 'transport')->value('id');
+        // Carry valid immutable provenance so the category restriction is the
+        // rejecting database authority.
+        $provenance = $this->fundAllocationProvenance();
         $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('fund restriction does not match obligation line');
         DB::table('fund_allocations')->insert([
             'id' => RandomIdentifier::new(),
             'fund_id' => $fundId,
@@ -564,6 +1042,7 @@ final class PaymentsFundingFeatureTest extends TestCase
             'amount' => '100.00',
             'reason' => 'fabricated',
             'allocated_by' => 'direct-sql-attacker',
+            ...$provenance,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

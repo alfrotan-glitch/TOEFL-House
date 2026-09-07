@@ -22,6 +22,7 @@ use App\Modules\Academic\Placement\Models\PlacementTest;
 use App\Modules\Academic\Placement\Models\PlacementTestVersion;
 use App\Modules\Documents\Commands\RegisterDocument;
 use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
+use App\Modules\Academic\Placement\Queries\PlacementAttemptableVersionQuery;
 use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
 use App\Modules\Academic\Placement\Queries\PlacementProfileQuery;
 use Illuminate\Http\JsonResponse;
@@ -63,6 +64,17 @@ final class PlacementApiController extends Controller
         }
 
         return response()->json(['versions' => $versions]);
+    }
+
+    public function attemptableVersions(string $profileId): JsonResponse
+    {
+        $profile = PlacementProfile::query()->findOrFail($profileId);
+        $this->requireBranchCapability('placement.conduct', RecordBranch::placementProfileBranch($profile), 'api.placement.attemptable_versions', 'placement_profile', $profile->id);
+
+        return response()->json([
+            'profile_id' => $profile->id,
+            'versions' => app(PlacementAttemptableVersionQuery::class)->for($profile),
+        ]);
     }
 
     public function profiles(Request $request): JsonResponse
@@ -118,16 +130,16 @@ final class PlacementApiController extends Controller
             'person_id' => ['required', 'string'],
             'program_version_id' => ['nullable', 'string'],
             'visitor_id' => ['nullable', 'string'],
-            'branch_id' => ['nullable', 'string'],
+            'branch_id' => ['required', 'string'],
         ]);
 
         $result = app(ManagePlacementProfile::class)->openProfile(
             $this->actor(),
             $input['person_id'],
-            $input['program_version_id'] ?? null,
+            $this->optional($input['program_version_id'] ?? null),
             $this->idempotencyKey('placement.profile.open'),
-            $input['visitor_id'] ?? null,
-            $input['branch_id'] ?? null,
+            $this->optional($input['visitor_id'] ?? null),
+            $input['branch_id'],
         );
 
         return response()->json(['status' => 'opened', ...$result], 201);
@@ -139,7 +151,7 @@ final class PlacementApiController extends Controller
             'profile_id' => ['required', 'string'],
             'test_version_id' => ['required', 'string'],
             'delivery_mode' => ['required', 'in:digital,physical'],
-            'proctor_person_id' => ['nullable', 'string'],
+            'proctor_person_id' => ['nullable', 'string', 'required_if:delivery_mode,physical'],
         ]);
 
         $result = app(ManagePlacementProfile::class)->startAttempt(
@@ -211,9 +223,9 @@ final class PlacementApiController extends Controller
         $input = $request->validate([
             'attempt_id' => ['required', 'string'],
             'section_id' => ['required', 'string'],
-            'raw_score' => ['required', 'numeric', 'min:0'],
-            'rubric_id' => ['nullable', 'string'],
-            'cefr_ref' => ['nullable', 'string'],
+            'raw_score' => ['required', 'numeric', 'min:0', 'max:100'],
+            'rubric_id' => ['required', 'string'],
+            'cefr_ref' => ['prohibited'],
             'rationale' => ['nullable', 'string'],
         ]);
 
@@ -222,8 +234,8 @@ final class PlacementApiController extends Controller
             PlacementAttempt::query()->findOrFail((string) $input['attempt_id']),
             $input['section_id'],
             (float) $input['raw_score'],
-            $input['rubric_id'] ?? null,
-            $input['cefr_ref'] ?? null,
+            $input['rubric_id'],
+            null,
             $input['rationale'] ?? 'Professional marking',
             $this->idempotencyKey('placement.section.score'),
         );
@@ -342,7 +354,7 @@ final class PlacementApiController extends Controller
             'program_version_id' => ['nullable', 'string'], 'total_time_minutes' => ['required', 'integer', 'min:1'],
             'grammar_weight' => ['required', 'numeric', 'min:0.1'], 'reading_weight' => ['required', 'numeric', 'min:0.1'],
             'listening_weight' => ['required', 'numeric', 'min:0.1'], 'writing_weight' => ['required', 'numeric', 'min:0.1'],
-            'speaking_weight' => ['required', 'numeric', 'min:0.1'], 'branch_id' => ['nullable', 'string'],
+            'speaking_weight' => ['required', 'numeric', 'min:0.1'], 'branch_id' => ['required', 'string'],
         ]);
         $weights = [
             'grammar' => (float) $input['grammar_weight'], 'reading' => (float) $input['reading_weight'],
@@ -351,7 +363,7 @@ final class PlacementApiController extends Controller
         ];
         $result = app(MaintainPlacementCatalog::class)->defineTest(
             $this->actor(), $input['key'], $input['name'], $this->optional($input['program_version_id'] ?? null),
-            (int) $input['total_time_minutes'], $weights, $this->idempotencyKey('placement.test.define'), $this->optional($input['branch_id'] ?? null),
+            (int) $input['total_time_minutes'], $weights, $this->idempotencyKey('placement.test.define'), $input['branch_id'],
         );
 
         return response()->json(['status' => 'defined', ...$result], 201);
@@ -417,11 +429,14 @@ final class PlacementApiController extends Controller
         $input = $request->validate([
             'section_id' => ['required', 'string'], 'code' => ['required', 'string', 'max:40'], 'stem' => ['required', 'string', 'max:2000'],
             'question_type' => ['required', 'in:mcq,short_answer,essay,speaking'], 'points' => ['required', 'numeric', 'min:0.01'],
-            'options' => ['nullable', 'array'], 'correct_answer' => ['nullable', 'string', 'max:500'], 'media_ref' => ['nullable', 'string', 'max:500'],
+            'options' => ['nullable', 'array'], 'correct_answer' => ['nullable', 'string', 'max:500'],
+            // Question media is accepted only through the checksummed media
+            // attachment authority.
+            'media_ref' => ['missing'],
         ]);
         $result = app(MaintainPlacementCatalog::class)->defineQuestion(
             $this->actor(), PlacementSection::query()->findOrFail((string) $input['section_id']), $input['code'], $input['stem'], $input['question_type'],
-            (float) $input['points'], $input['options'] ?? null, $this->optional($input['correct_answer'] ?? null), $this->optional($input['media_ref'] ?? null),
+            (float) $input['points'], $input['options'] ?? null, $this->optional($input['correct_answer'] ?? null),
             $this->idempotencyKey('placement.question.define'),
         );
 
@@ -440,7 +455,7 @@ final class PlacementApiController extends Controller
     {
         $input = $request->validate([
             'uri' => ['required', 'string', 'max:500'], 'media_type' => ['required', 'string', 'max:60'],
-            'sha256' => ['required', 'string', 'size:64'], 'mime_type' => ['required', 'string', 'max:120'],
+            'sha256' => ['required', 'string', 'regex:/^[0-9a-f]{64}$/'], 'mime_type' => ['required', 'string', 'max:120'],
         ]);
         $result = app(MaintainPlacementCatalog::class)->attachMedia(
             $this->actor(), PlacementQuestion::query()->findOrFail($questionId), $input['uri'], $input['media_type'], $input['sha256'], $input['mime_type'],

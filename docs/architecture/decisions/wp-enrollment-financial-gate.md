@@ -63,6 +63,11 @@ transition to `active`; `requested` remains a pending seat.
   columns it stamps onto the enrollment row.
 - **No financial truth is duplicated:** only the assessment evidence (ids and
   amounts, not a second balance ledger) is frozen on the enrollment.
+- **Signed evidence is the only consumer input:** `satisfied`, `uncovered`,
+  `remaining`, and `assessed_at` in a query transport envelope are discarded
+  at the Academic boundary and normalized from the HMAC-protected evidence.
+  A substituted envelope therefore cannot change what Academic stores or
+  audits.
 
 ### Historical correctness and auditability
 
@@ -76,6 +81,13 @@ transition to `active`; `requested` remains a pending seat.
 - Approved credits, installment plans, and exceptions are immutable after
   approval (database trigger), so re-verification of historical evidence is
   deterministic against the immutable Finance facts.
+- The enrollment database boundary rejects an `active` seat without complete,
+  satisfied evidence structurally bound to that seat and freezes the activation
+  snapshot against later rewrites. PostgreSQL deliberately does **not** receive
+  the application HMAC key; the command verifies the HMAC and database roles
+  must not grant arbitrary enrollment DML to untrusted principals. This is an
+  explicit deployment trust boundary, not a claim that a raw database
+  superuser cannot forge application-held cryptographic evidence.
 
 ### Capabilities
 

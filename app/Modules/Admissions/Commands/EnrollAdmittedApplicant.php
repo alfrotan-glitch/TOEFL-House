@@ -177,19 +177,29 @@ final class EnrollAdmittedApplicant
         if ($profile === null || trim((string) $profile->person_id) !== trim((string) $applicant->person_id)) {
             throw BusinessRejection::forCode('admissions.placement_person_mismatch', 'the admission placement profile does not belong to the applicant person');
         }
-        if ($profile->lifecycle_state !== PlacementProfile::STATE_RELEASED) {
-            throw BusinessRejection::forCode('admissions.placement_not_released', 'student conversion requires a released placement profile');
+        if ($profile->lineage_version !== PlacementProfile::LINEAGE_VERSION) {
+            throw BusinessRejection::forCode('admissions.placement_lineage_remediation_required', 'student conversion cannot consume pre-lineage placement evidence without governed remediation');
         }
         if ($applicant->academic_eligibility_snapshot_id === null) {
             throw BusinessRejection::forCode('admissions.eligibility_snapshot_missing', 'student conversion requires the signed academic eligibility snapshot consumed at registration');
         }
 
-        $snapshot = $this->eligibilitySnapshots->for($profile);
+        // Conversion consumes the exact snapshot bound at registration, not
+        // whichever snapshot is currently pointed to by a profile. A later
+        // legitimate retake supersedes the profile operationally but must not
+        // invalidate an already-admitted historical eligibility fact.
+        $snapshot = $this->eligibilitySnapshots->byId($applicant->academic_eligibility_snapshot_id);
         if ($snapshot === null || ($snapshot['verification']['valid'] ?? false) !== true) {
             throw BusinessRejection::forCode('admissions.eligibility_snapshot_unverified', 'the placement eligibility snapshot could not be verified at conversion');
         }
-        if ((string) ($snapshot['snapshot']['id'] ?? '') !== trim((string) $applicant->academic_eligibility_snapshot_id)) {
-            throw BusinessRejection::forCode('admissions.eligibility_snapshot_mismatch', 'the applicant does not reference the current verified placement eligibility snapshot');
+        if ((string) ($snapshot['snapshot']['snapshot_schema_version'] ?? '') !== \App\Modules\Academic\Placement\Domain\AcademicEligibilitySnapshotBuilder::SCHEMA_VERSION
+            || (string) ($snapshot['snapshot']['placement_recommendation_id'] ?? '') !== trim((string) $profile->placement_recommendation_id)) {
+            throw BusinessRejection::forCode('admissions.eligibility_snapshot_lineage_invalid', 'student conversion requires the v2 snapshot bound to the applicant placement recommendation');
+        }
+        if ((string) ($snapshot['snapshot']['placement_profile_id'] ?? '') !== trim((string) $profile->id)
+            || (string) ($snapshot['snapshot']['person_id'] ?? '') !== trim((string) $applicant->person_id)
+            || (string) ($snapshot['snapshot']['originating_branch_id'] ?? '') !== trim((string) ($applicant->current_home_branch_id ?? $applicant->originating_branch_id ?? ''))) {
+            throw BusinessRejection::forCode('admissions.eligibility_snapshot_mismatch', 'the applicant eligibility snapshot does not match its person, placement profile, and branch lineage');
         }
     }
 }

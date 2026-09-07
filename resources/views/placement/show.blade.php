@@ -6,15 +6,20 @@
 <div class="card">
     <h1>Placement Profile</h1>
     <p class="sub">Person {{ $profile->person_id }} · state <strong>{{ $profile->lifecycle_state }}</strong> · overall CEFR <strong>{{ $profile->overall_cefr_ref ?? '—' }}</strong></p>
+    @if ($profile->released_at !== null)
+        <p class="sub">Released at <strong>{{ $profile->released_at }}</strong> · immutable time basis <strong>{{ $profile->release_time_basis }}</strong>.</p>
+    @elseif (in_array($profile->lifecycle_state, ['released', 'superseded'], true) || $profile->released_by !== null)
+        <p class="sub">Release history exists, but its exact timestamp predates the authoritative release-event clock and remains unresolved.</p>
+    @endif
     <div class="toolbar">
         @if ($profile->recommended_level_id)
             <div><strong>{{ $profile->recommendedLevel?->level_key ?? '—' }}</strong> recommended level</div>
         @endif
-        @if ($profile->recommended_class_id)
-            <div><strong>{{ $profile->recommendedClass?->id ?? '—' }}</strong> recommended class</div>
+        @if ($profile->recommended_level_id)
+            <div class="sub">Placement establishes academic-level eligibility only. Enrollment and Scheduling choose any class/offering separately.</div>
         @endif
     </div>
-    @if (\in_array($profile->lifecycle_state, ['draft','scored'], true))
+    @if ($profile->lifecycle_state === 'draft')
         <form method="POST" action="{{ route('placement.attempt.start') }}">
             @csrf
             <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
@@ -26,7 +31,7 @@
                     @endforeach
                 </select>
                 <select name="delivery_mode" required><option value="digital">Digital</option><option value="physical">Physical</option></select>
-                <input name="proctor_person_id" placeholder="Proctor person id (optional)">
+                <input name="proctor_person_id" placeholder="Proctor person id (required for physical delivery)">
                 <button type="submit" class="btn small">Start attempt</button>
             </div>
         </form>
@@ -42,20 +47,40 @@
                 @foreach ($questions as $question)
                     <div style="margin-bottom:8px">
                         <strong>{{ $question->code }} ({{ $question->question_type }})</strong>: {{ $question->stem }}
-                        @if ($question->media_ref)
-                            <em>media {{ $question->media_ref }}</em>
-                        @endif
+                        @foreach ($question->media as $media)
+                            <em>media {{ $media->media_type }} · {{ $media->uri }} · SHA-256 {{ $media->sha256 }}</em>
+                        @endforeach
                         <input name="answers[{{ $question->id }}]" type="text" required>
                     </div>
                 @endforeach
                 <button type="submit" class="btn">Submit &amp; auto-score</button>
             </form>
         @else
-            <form method="POST" action="{{ route('placement.attempt.submit-physical', $inProgressAttempt->id) }}">
-                @csrf
-                <input name="evidence_ref" placeholder="Evidence ref (answer sheet / recording)" required>
-                <button type="submit" class="btn small">Record physical evidence</button>
-            </form>
+            @if ($physicalAnswerSheetRequired)
+                <p class="sub">This physical version has automatic sections. Transcribe every published answer from the accountable answer sheet; the server will derive automatic scores and retain the sheet reference.</p>
+                <form method="POST" action="{{ route('placement.attempt.ingest-answers', $inProgressAttempt->id) }}">
+                    @csrf
+                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                    <input name="evidence_ref" placeholder="Evidence ref (answer sheet / recording)" required>
+                    @foreach ($questions as $question)
+                        <div style="margin-top:8px">
+                            <strong>{{ $question->code }} ({{ $question->question_type }})</strong>: {{ $question->stem }}
+                            @foreach ($question->media as $media)
+                                <em>media {{ $media->media_type }} · {{ $media->uri }} · SHA-256 {{ $media->sha256 }}</em>
+                            @endforeach
+                            <input name="answers[{{ $question->id }}]" type="text" required>
+                        </div>
+                    @endforeach
+                    <button type="submit" class="btn">Record answer sheet &amp; server-score</button>
+                </form>
+            @else
+                <form method="POST" action="{{ route('placement.attempt.submit-physical', $inProgressAttempt->id) }}">
+                    @csrf
+                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                    <input name="evidence_ref" placeholder="Evidence ref (answer sheet / recording)" required>
+                    <button type="submit" class="btn small">Record physical evidence</button>
+                </form>
+            @endif
         @endif
     </div>
 @endif
@@ -76,7 +101,7 @@
                         <td>{{ $result->cefr_ref ?? '—' }}</td>
                         <td>{{ $result->lifecycle_state }}</td>
                         <td>
-                            @if ($result->lifecycle_state === 'scored')
+                            @if ($result->lifecycle_state === 'scored' && $result->raw_score !== null)
                                 <form method="POST" action="{{ route('placement.section.moderate', $result->id) }}" style="display:inline">
                                     @csrf
                                     <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
@@ -94,23 +119,39 @@
                 @endforeach
             </tbody>
         </table>
-        <form method="POST" action="{{ route('placement.section.score') }}" style="margin-top:10px">
-            @csrf
-            @php $attempt = $attempts->first(); @endphp
-            @if ($attempt)
+        @php
+            $unscoredProfessionalResults = $scoreableAttempt === null
+                ? collect()
+                : $section_results->filter(fn ($result) => $result->attempt_id === $scoreableAttempt->id
+                    && $result->scoring_method === 'professional'
+                    && $result->lifecycle_state === 'scored'
+                    && $result->raw_score === null);
+        @endphp
+        @if ($scoreableAttempt !== null && $unscoredProfessionalResults->isNotEmpty())
+            <form method="POST" action="{{ route('placement.section.score') }}" style="margin-top:10px">
+                @csrf
                 <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
-                <input type="hidden" name="attempt_id" value="{{ $attempt->id }}">
+                <input type="hidden" name="attempt_id" value="{{ $scoreableAttempt->id }}">
                 <select name="section_id" required>
-                    @foreach ($section_results->filter(fn($r) => $r->raw_score === null) as $r)
-                        <option value="{{ $r->section_id }}">{{ $r->component }}</option>
+                    @foreach ($unscoredProfessionalResults as $result)
+                        <option value="{{ $result->section_id }}">{{ $result->component }}</option>
                     @endforeach
                 </select>
-                <input name="raw_score" type="number" step="0.01" placeholder="Score" required>
-                <input name="cefr_ref" placeholder="CEFR" required>
+                <select name="rubric_id" required>
+                    @foreach ($rubrics->groupBy('component') as $component => $componentRubrics)
+                        <optgroup label="{{ ucfirst($component) }} rubric">
+                            @foreach ($componentRubrics as $rubric)
+                                <option value="{{ $rubric->id }}">{{ $rubric->band }} · {{ $rubric->min_score }}–{{ $rubric->max_score }} → {{ $rubric->cefr_ref }}</option>
+                            @endforeach
+                        </optgroup>
+                    @endforeach
+                </select>
+                <input name="raw_score" type="number" min="0" max="100" step="0.01" placeholder="Score" required>
                 <input name="rationale" placeholder="Rationale">
                 <button type="submit" class="btn small">Professional mark</button>
-            @endif
-        </form>
+            </form>
+            <p class="sub">The selected published rubric is authoritative for CEFR. A rubric from a different component is rejected server-side.</p>
+        @endif
     @endif
 </div>
 
@@ -145,7 +186,7 @@
                 <button type="submit" class="btn small">Release</button>
             </form>
         @endif
-        @if (\in_array($profile->lifecycle_state, ['scored','recommended'], true))
+        @if ($profile->lifecycle_state === 'scored')
             <form method="POST" action="{{ route('placement.recommend', $profile->id) }}">
                 @csrf
                 <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">

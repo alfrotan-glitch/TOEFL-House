@@ -63,17 +63,34 @@
 
 <div class="card">
     <h2>Report runs (newest first)</h2>
+    <p class="sub">Only runs whose persisted target-and-organization provenance is currently authorized are shown. Platform-global runs are intentionally excluded from organization reporting views. A run with incomplete or legacy-unclassified source evidence retains its audit row but its numeric result is withheld.</p>
     @if ($runs->isEmpty())
         <p class="empty">No report runs yet.</p>
     @else
         <table class="grid">
-            <tr><th>Metric</th><th>Period</th><th>Scope</th><th>Result</th><th>Reproducibility hash</th></tr>
+            <tr><th>Metric</th><th>Period</th><th>Scope</th><th>Organization</th><th>Evidence status</th><th>Result</th><th>Reproducibility hash</th></tr>
             @foreach ($runs as $run)
                 <tr>
                     <td>{{ $run->metric_name ?? '—' }} <span class="muted">({{ $run->metric_key ?? '—' }})</span></td>
                     <td>{{ $run->period_key }}</td>
                     <td>{{ $run->scope_type }}@if ($run->scope_id) / {{ \Illuminate\Support\Str::limit($run->scope_id, 12) }} @endif</td>
-                    <td>{{ $run->result }}</td>
+                    <td class="muted">{{ $run->organization_id }}</td>
+                    <td>
+                        @if ($run->completeness === 'complete')
+                            Complete
+                        @elseif ($run->completeness === 'incomplete')
+                            <span class="muted">Withheld — source evidence incomplete</span>
+                        @else
+                            <span class="muted">Withheld — historic evidence classification unavailable</span>
+                        @endif
+                    </td>
+                    <td>
+                        @if ($run->completeness === 'complete')
+                            {{ $run->result }}
+                        @else
+                            <span class="muted">—</span>
+                        @endif
+                    </td>
                     <td class="muted" style="font-size:12px">{{ \Illuminate\Support\Str::limit($run->reproducibility_hash, 16) }}</td>
                 </tr>
             @endforeach
@@ -133,13 +150,12 @@
                                     <input name="period_key" type="text" required>
                                     <label>Scope type</label>
                                     <select name="scope_type" required>
-                                        <option value="global">Global</option>
                                         <option value="branch">Branch</option>
                                         <option value="student">Student</option>
                                         <option value="class">Class</option>
                                         <option value="fund">Fund</option>
                                     </select>
-                                    <label>Scope id (required except global)</label>
+                                    <label>Scope id (required)</label>
                                     <input name="scope_id" type="text">
                                     <div class="actions"><button type="submit" class="btn small">Pin</button></div>
                                 </form>

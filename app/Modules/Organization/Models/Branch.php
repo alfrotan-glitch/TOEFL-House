@@ -34,12 +34,21 @@ final class Branch extends Model implements StructureUnit
     public function activeCampusAssignment(?CarbonImmutable $asOf = null): ?CampusAssignment
     {
         $day = ($asOf ?? CarbonImmutable::now())->startOfDay()->toDateString();
-        /** @var CampusAssignment|null $assignment */
-        $assignment = $this->campusAssignments()
+        $assignments = $this->campusAssignments()
             ->where('effective_from', '<=', $day)
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $day))
             ->reorder('effective_from', 'desc')
-            ->first();
+            // The exclusion constraint is the concurrency-safe authority,
+            // but fail closed for a pre-convergence/malformed database rather
+            // than selecting an arbitrary organization root.
+            ->limit(2)
+            ->get();
+        if ($assignments->count() !== 1) {
+            return null;
+        }
+
+        /** @var CampusAssignment $assignment */
+        $assignment = $assignments->first();
 
         return $assignment;
     }

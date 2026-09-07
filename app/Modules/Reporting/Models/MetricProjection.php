@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $scope_type
  * @property string|null $organization_id
  * @property string $value
- * @property string $completeness
+ * @property 'complete'|'stale'|'incomplete' $completeness
  * @property array<string, mixed> $meta
  */
 final class MetricProjection extends Model

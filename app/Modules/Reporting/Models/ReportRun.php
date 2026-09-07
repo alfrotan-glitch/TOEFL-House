@@ -14,6 +14,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $reproducibility_hash
  * @property string $result
  * @property string|null $organization_id
+ * @property 'complete'|'incomplete'|null $completeness
+ * @property array<string, mixed>|null $meta
  * @property array<string, mixed> $filters
  */
 final class ReportRun extends Model
@@ -22,7 +24,7 @@ final class ReportRun extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'metric_version_id', 'period_key', 'scope_type', 'scope_id', 'organization_id', 'filters', 'result', 'reproducibility_hash', 'executed_by'];
+    protected $fillable = ['id', 'metric_version_id', 'period_key', 'scope_type', 'scope_id', 'organization_id', 'filters', 'result', 'completeness', 'meta', 'reproducibility_hash', 'executed_by'];
 
-    protected $casts = ['filters' => 'array'];
+    protected $casts = ['filters' => 'array', 'meta' => 'array'];
 }

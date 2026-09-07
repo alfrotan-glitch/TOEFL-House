@@ -46,7 +46,7 @@ final class PlacementProfileQuery
      */
     public function search(?string $term, ?string $lifecycleState, ?string $programVersionId, ?array $branchIds = null): Collection
     {
-        $query = PlacementProfile::query()->with(['person', 'recommendedLevel', 'recommendedClass'])->orderByDesc('updated_at')->limit(200);
+        $query = PlacementProfile::query()->with(['person', 'recommendedLevel'])->orderByDesc('updated_at')->limit(200);
         if ($branchIds !== null) {
             $query->where(function ($scope) use ($branchIds): void {
                 $scope->whereIn('current_home_branch_id', $branchIds)

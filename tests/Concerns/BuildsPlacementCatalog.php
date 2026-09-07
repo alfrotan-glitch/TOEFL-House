@@ -19,6 +19,8 @@ use App\Modules\Academic\Placement\Models\PlacementSection;
 use App\Modules\Academic\Placement\Models\PlacementSectionResult;
 use App\Modules\Academic\Placement\Models\PlacementTest;
 use App\Modules\Academic\Placement\Models\PlacementTestVersion;
+use App\Modules\Organization\Models\Branch;
+use App\Support\Identifiers\RandomIdentifier;
 
 /**
  * Shared fixture builder for the Placement Decision System: a published
@@ -34,12 +36,20 @@ trait BuildsPlacementCatalog
 
     private string $programVersionId;
 
+    /** Operational branch shared by every placement catalog/profile fact. */
+    private string $placementBranchId = '';
+
     private string $testVersionId;
 
     private string $physicalVersionId = '';
 
+    private string $physicalProfessionalVersionId = '';
+
     /** @var array<string, string> */
     private array $physicalQuestions = [];
+
+    /** @var array<string, string> */
+    private array $physicalProfessionalQuestions = [];
 
     /** @var array<string, string> */
     private array $questions = [];
@@ -49,6 +59,7 @@ trait BuildsPlacementCatalog
 
     private function setUpPlacementCatalog(): void
     {
+        $this->ensurePlacementBranch();
         $officer = $this->placementOfficer('plc-setup-1');
         $academic = $this->academicOfficer('plc-acad-1');
 
@@ -69,6 +80,7 @@ trait BuildsPlacementCatalog
             90,
             ['grammar' => 20, 'reading' => 20, 'listening' => 20, 'writing' => 20, 'speaking' => 20],
             'plc-test-1',
+            $this->placementBranchId,
         );
         $catalog->transitionTest($this->placementOfficer('plc-cat-2'), PlacementTest::query()->findOrFail($test['test_id']), 'published', 'plc-test-pub');
         $version = $catalog->createVersion($this->placementOfficer('plc-cat-3'), PlacementTest::query()->findOrFail($test['test_id']), 'standard v1', 'plc-ver-draft');
@@ -80,15 +92,26 @@ trait BuildsPlacementCatalog
             $sectionId = $section['section_id'];
             $this->sectionIds[$component] = $sectionId;
             $sec = PlacementSection::query()->findOrFail($sectionId);
-            $catalog->transitionSection($this->placementOfficer('plc-cat-5'), $sec, 'published', 'plc-'.$component.'-section-pub');
 
             foreach (['a', 'b'] as $index) {
-                $q = $catalog->defineQuestion($this->placementOfficer('plc-cat-6'), $sec, $component.'-'.$index, ucfirst($component).' question '.$index, 'mcq', 1, null, 'A', null, 'plc-'.$component.'-q-'.$index);
+                $q = $catalog->defineQuestion($this->placementOfficer('plc-cat-6'), $sec, $component.'-'.$index, ucfirst($component).' question '.$index, 'mcq', 1, null, 'A', 'plc-'.$component.'-q-'.$index);
                 $question = PlacementQuestion::query()->findOrFail($q['question_id']);
+                if ($component === 'grammar' && $index === 'a') {
+                    $catalog->attachMedia(
+                        $this->placementOfficer('plc-cat-media'),
+                        $question,
+                        'placement-media/grammar-a.mp3',
+                        'audio',
+                        hash('sha256', 'placement-media/grammar-a.mp3/v1'),
+                        'audio/mpeg',
+                        'plc-grammar-a-media',
+                    );
+                }
                 $catalog->transitionQuestion($this->placementOfficer('plc-cat-7'), $question, 'published', 'plc-'.$component.'-q-'.$index.'-pub');
                 $this->questions[$question->id] = $component;
             }
             $this->addRubric($catalog, $component);
+            $catalog->transitionSection($this->placementOfficer('plc-cat-5'), PlacementSection::query()->findOrFail($sectionId), 'published', 'plc-'.$component.'-section-pub');
         }
 
         // Productive sections that require professional marking.
@@ -96,22 +119,23 @@ trait BuildsPlacementCatalog
             $section = $catalog->defineSection($this->placementOfficer('plc-cat-8'), PlacementTestVersion::query()->findOrFail($this->testVersionId), $component, ucfirst($component), $component, ['writing' => 3, 'speaking' => 4][$component], 20, 'digital', false, 'plc-'.$component.'-section');
             $this->sectionIds[$component] = $section['section_id'];
             $sec = PlacementSection::query()->findOrFail($section['section_id']);
-            $catalog->transitionSection($this->placementOfficer('plc-cat-9'), $sec, 'published', 'plc-'.$component.'-section-pub');
-            $q = $catalog->defineQuestion($this->placementOfficer('plc-cat-10'), $sec, $component.'-task', ucfirst($component).' task', 'essay', 10, null, null, null, 'plc-'.$component.'-q');
+            $q = $catalog->defineQuestion($this->placementOfficer('plc-cat-10'), $sec, $component.'-task', ucfirst($component).' task', 'essay', 10, null, null, 'plc-'.$component.'-q');
             $question = PlacementQuestion::query()->findOrFail($q['question_id']);
             $catalog->transitionQuestion($this->placementOfficer('plc-cat-11'), $question, 'published', 'plc-'.$component.'-q-pub');
             $this->questions[$question->id] = $component;
             $this->addRubric($catalog, $component);
+            $catalog->transitionSection($this->placementOfficer('plc-cat-9'), PlacementSection::query()->findOrFail($section['section_id']), 'published', 'plc-'.$component.'-section-pub');
         }
 
         $catalog->publishVersion($this->placementOfficer('plc-cat-12'), PlacementTestVersion::query()->findOrFail($this->testVersionId), 'plc-version-pub');
     }
 
-    private function addRubric(MaintainPlacementCatalog $catalog, string $component): void
+    private function addRubric(MaintainPlacementCatalog $catalog, string $component, ?string $versionId = null, string $fixturePrefix = 'plc'): void
     {
+        $versionId ??= $this->testVersionId;
         foreach ([['A1', 0, 39.99, 'A1'], ['A2', 40, 54.99, 'A2'], ['B1', 55, 69.99, 'B1'], ['B2', 70, 84.99, 'B2'], ['C1', 85, 100, 'C1']] as [$band, $min, $max, $cefr]) {
-            $rubric = $catalog->defineRubric($this->placementOfficer('plc-cat-20'), PlacementTestVersion::query()->findOrFail($this->testVersionId), $component, $band, $min, $max, $cefr, $component.' '.$band.' band', 'plc-'.$component.'-rubric-'.$band);
-            $catalog->transitionRubric($this->placementOfficer('plc-cat-21'), PlacementRubric::query()->findOrFail($rubric['rubric_id']), 'published', 'plc-'.$component.'-rubric-'.$band.'-pub');
+            $rubric = $catalog->defineRubric($this->placementOfficer($fixturePrefix.'-cat-20'), PlacementTestVersion::query()->findOrFail($versionId), $component, $band, $min, $max, $cefr, $component.' '.$band.' band', $fixturePrefix.'-'.$component.'-rubric-'.$band);
+            $catalog->transitionRubric($this->placementOfficer($fixturePrefix.'-cat-21'), PlacementRubric::query()->findOrFail($rubric['rubric_id']), 'published', $fixturePrefix.'-'.$component.'-rubric-'.$band.'-pub');
         }
     }
 
@@ -120,8 +144,24 @@ trait BuildsPlacementCatalog
         return $prefix.'-'.(++$this->actorSequence).'-'.substr((string) microtime(), -4);
     }
 
+    private function ensurePlacementBranch(): void
+    {
+        if ($this->placementBranchId !== '') {
+            return;
+        }
+        $branch = Branch::query()->create([
+            'id' => RandomIdentifier::new(),
+            'name' => 'Placement Fixture Branch',
+            'lifecycle_state' => 'active',
+        ]);
+        $this->placementBranchId = $branch->id;
+        $this->attachBranchToBootstrapOrganization($branch->id);
+        $this->grantKnownAuthorityOn('branch', $branch->id);
+    }
+
     private function setUpPhysicalAutoCatalog(): void
     {
+        $this->ensurePlacementBranch();
         $catalog = app(MaintainPlacementCatalog::class);
         $test = $catalog->defineTest(
             $this->placementOfficer('plc-phys-cat-1'),
@@ -131,43 +171,121 @@ trait BuildsPlacementCatalog
             90,
             ['grammar' => 20, 'reading' => 20, 'listening' => 20, 'writing' => 20, 'speaking' => 20],
             'plc-phys-test-1',
+            $this->placementBranchId,
         );
         $catalog->transitionTest($this->placementOfficer('plc-phys-cat-2'), PlacementTest::query()->findOrFail($test['test_id']), 'published', 'plc-phys-test-pub');
         $version = $catalog->createVersion($this->placementOfficer('plc-phys-cat-3'), PlacementTest::query()->findOrFail($test['test_id']), 'physical v1', 'plc-phys-ver');
         $this->physicalVersionId = $version['version_id'];
 
-        foreach (['grammar', 'reading', 'listening'] as $component) {
+        // Physical delivery still needs the complete five-component scoring
+        // contract. It is all auto-scored so this fixture exercises the
+        // proctored evidence path without duplicating professional marking.
+        foreach (['grammar', 'reading', 'listening', 'writing', 'speaking'] as $order => $component) {
             $section = $catalog->defineSection(
                 $this->placementOfficer('plc-phys-cat-4'),
                 PlacementTestVersion::query()->findOrFail($version['version_id']),
                 $component,
                 ucfirst($component),
                 $component,
-                ['grammar' => 0, 'reading' => 1, 'listening' => 2][$component],
+                $order,
                 15,
                 'physical',
                 true,
                 'plc-phys-'.$component.'-section',
             );
             $sec = PlacementSection::query()->findOrFail($section['section_id']);
-            $catalog->transitionSection($this->placementOfficer('plc-phys-cat-5'), $sec, 'published', 'plc-phys-'.$component.'-section-pub');
             foreach (['a', 'b'] as $index) {
-                $q = $catalog->defineQuestion($this->placementOfficer('plc-phys-cat-6'), $sec, $component.'-'.$index, ucfirst($component).' question '.$index, 'mcq', 1, null, 'A', null, 'plc-phys-'.$component.'-q-'.$index);
+                $q = $catalog->defineQuestion($this->placementOfficer('plc-phys-cat-6'), $sec, $component.'-'.$index, ucfirst($component).' question '.$index, 'mcq', 1, null, 'A', 'plc-phys-'.$component.'-q-'.$index);
                 $question = PlacementQuestion::query()->findOrFail($q['question_id']);
                 $catalog->transitionQuestion($this->placementOfficer('plc-phys-cat-7'), $question, 'published', 'plc-phys-'.$component.'-q-'.$index.'-pub');
                 $this->physicalQuestions[$question->id] = $component;
             }
+            $this->addRubric($catalog, $component, $this->physicalVersionId, 'plc-phys');
+            $catalog->transitionSection($this->placementOfficer('plc-phys-cat-5'), PlacementSection::query()->findOrFail($section['section_id']), 'published', 'plc-phys-'.$component.'-section-pub');
         }
         $catalog->publishVersion($this->placementOfficer('plc-phys-cat-8'), PlacementTestVersion::query()->findOrFail($version['version_id']), 'plc-phys-version-pub');
     }
 
+    /**
+     * A valid all-professionally-marked physical version. Its paper/recording
+     * is the authoritative evidence, so it deliberately has no answer key or
+     * normalized responses. This proves that evidence-only physical intake is
+     * a reachable governed workflow rather than a legacy escape hatch.
+     */
+    private function setUpPhysicalProfessionalCatalog(): void
+    {
+        $this->ensurePlacementBranch();
+        $catalog = app(MaintainPlacementCatalog::class);
+        $test = $catalog->defineTest(
+            $this->placementOfficer('plc-physical-prof-cat-1'),
+            'placement-physical-professional',
+            'Professionally Marked Physical Placement',
+            $this->programVersionId,
+            90,
+            ['grammar' => 20, 'reading' => 20, 'listening' => 20, 'writing' => 20, 'speaking' => 20],
+            'plc-physical-prof-test-1',
+            $this->placementBranchId,
+        );
+        $catalog->transitionTest($this->placementOfficer('plc-physical-prof-cat-2'), PlacementTest::query()->findOrFail($test['test_id']), 'published', 'plc-physical-prof-test-pub');
+        $version = $catalog->createVersion($this->placementOfficer('plc-physical-prof-cat-3'), PlacementTest::query()->findOrFail($test['test_id']), 'professionally marked physical v1', 'plc-physical-prof-ver');
+        $this->physicalProfessionalVersionId = $version['version_id'];
+
+        foreach (['grammar', 'reading', 'listening', 'writing', 'speaking'] as $order => $component) {
+            $section = $catalog->defineSection(
+                $this->placementOfficer('plc-physical-prof-cat-4'),
+                PlacementTestVersion::query()->findOrFail($version['version_id']),
+                $component,
+                ucfirst($component),
+                $component,
+                $order,
+                15,
+                'physical',
+                false,
+                'plc-physical-prof-'.$component.'-section',
+            );
+            $sectionRecord = PlacementSection::query()->findOrFail($section['section_id']);
+            // A short-answer item has no server key in a professional physical
+            // section; the proctored artifact and accountable marker govern it.
+            $question = $catalog->defineQuestion(
+                $this->placementOfficer('plc-physical-prof-cat-6'),
+                $sectionRecord,
+                $component.'-prompt',
+                ucfirst($component).' professionally marked prompt',
+                'short_answer',
+                1,
+                null,
+                null,
+                'plc-physical-prof-'.$component.'-q',
+            );
+            $questionRecord = PlacementQuestion::query()->findOrFail($question['question_id']);
+            $catalog->transitionQuestion($this->placementOfficer('plc-physical-prof-cat-7'), $questionRecord, 'published', 'plc-physical-prof-'.$component.'-q-pub');
+            $this->physicalProfessionalQuestions[$questionRecord->id] = $component;
+            $this->addRubric($catalog, $component, $this->physicalProfessionalVersionId, 'plc-physical-prof');
+            $catalog->transitionSection($this->placementOfficer('plc-physical-prof-cat-5'), $sectionRecord, 'published', 'plc-physical-prof-'.$component.'-section-pub');
+        }
+        $catalog->publishVersion($this->placementOfficer('plc-physical-prof-cat-8'), PlacementTestVersion::query()->findOrFail($version['version_id']), 'plc-physical-prof-version-pub');
+    }
+
     private function completeReleasedPlacement(string $personId, string $prefix): PlacementProfile
+    {
+        return $this->completePlacement($personId, $prefix, true);
+    }
+
+    /** Builds a decision through independent approval but does not release it. */
+    private function completeApprovedPlacement(string $personId, string $prefix): PlacementProfile
+    {
+        return $this->completePlacement($personId, $prefix, false);
+    }
+
+    private function completePlacement(string $personId, string $prefix, bool $release): PlacementProfile
     {
         $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile(
             $this->placementOfficer($this->actorId($prefix.'-open')),
             $personId,
             $this->programVersionId,
             $prefix.'-open',
+            null,
+            $this->placementBranchId,
         )['profile_id']);
         $attempt = PlacementAttempt::query()->findOrFail(app(ManagePlacementProfile::class)->startAttempt(
             $this->placementOfficer($this->actorId($prefix.'-start')),
@@ -199,6 +317,16 @@ trait BuildsPlacementCatalog
         app(RecommendPlacement::class)->recommend($this->placementRecommender($this->actorId($prefix.'-rec')), $profile, $prefix.'-rec');
         app(DecidePlacement::class)->review($this->placementModerator($this->actorId($prefix.'-review')), $profile, $prefix.'-review');
         app(DecidePlacement::class)->approve($this->placementApprover($this->actorId($prefix.'-approve')), $profile, $prefix.'-approve');
+        if (! $release) {
+            $approved = $profile->fresh();
+            if ($approved === null) {
+                $this->fail('placement profile disappeared after approval');
+            }
+            $this->assertSame('approved', $approved->lifecycle_state);
+
+            return $approved;
+        }
+
         app(DecidePlacement::class)->release($this->placementReleaser($this->actorId($prefix.'-release')), $profile, $prefix.'-release');
         $released = $profile->fresh();
         if ($released === null) {

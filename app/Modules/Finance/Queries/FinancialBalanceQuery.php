@@ -13,7 +13,9 @@ use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FundAllocation;
 use App\Modules\Finance\Models\FundingSource;
+use App\Modules\Organization\Models\Organization;
 use App\Support\MoneyAmount;
+use App\Support\Errors\BusinessRejection;
 
 /**
  * Finance's single derived-balance authority.
@@ -132,8 +134,27 @@ final class FinancialBalanceQuery
     /** @return array{allocated: string, committed: string, utilization: string} */
     public function fundUtilization(FundingSource $fund, string $periodEnd): array
     {
+        // Do not calculate from a caller-constructed/stale source model, and
+        // never turn legacy null provenance into an organizationless Finance
+        // balance. Finance owns this monetary dimension and its tenant anchor.
+        /** @var FundingSource|null $authoritativeFund */
+        $authoritativeFund = FundingSource::query()->whereKey($fund->id)->first();
+        $organizationId = trim((string) ($authoritativeFund?->organization_id ?? ''));
+        if ($authoritativeFund === null || $organizationId === '' || ! Organization::query()
+            ->whereKey($organizationId)
+            ->where('lifecycle_state', 'active')
+            ->exists()) {
+            throw BusinessRejection::forCode('finance.fund_organization_unknown', 'fund utilization requires an active funding-source organization provenance');
+        }
+
+        // A source cannot have utilization before it was established. Do not
+        // retroactively apply its immutable commitment to an earlier period.
+        if (! FundingSource::query()->whereKey($authoritativeFund->id)->whereDate('created_at', '<=', $periodEnd)->exists()) {
+            throw BusinessRejection::forCode('finance.fund_not_established_as_of', 'fund utilization cannot be calculated before the funding source was established');
+        }
+
         $allocationIds = FundAllocation::query()
-            ->where('fund_id', $fund->id)
+            ->where('fund_id', $authoritativeFund->id)
             ->whereDate('created_at', '<=', $periodEnd)
             ->pluck('id');
         $allocated = MoneyAmount::decimal(FundAllocation::query()
@@ -143,11 +164,14 @@ final class FinancialBalanceQuery
             ->whereIn('fund_allocation_id', $allocationIds)
             ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
             ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-            ->whereDate('created_at', '<=', $periodEnd)
+            // A proposed correction does not alter monetary truth. Its
+            // effective Finance date is the independent approval, not the
+            // earlier proposal creation timestamp.
+            ->whereDate('approved_at', '<=', $periodEnd)
             ->sum('amount'));
         $net = bcsub($allocated, $reversed, 2);
 
-        $committed = (string) $fund->committed_amount;
+        $committed = (string) $authoritativeFund->committed_amount;
 
         return [
             'allocated' => $net,

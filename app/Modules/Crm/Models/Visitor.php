@@ -41,6 +41,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string $contact_key
  * @property string $created_by
  * @property string|null $updated_by
+ * @property \Carbon\CarbonImmutable|null $captured_at
+ * @property string|null $capture_time_basis
  */
 final class Visitor extends Model
 {
@@ -86,6 +88,11 @@ final class Visitor extends Model
         'id', 'visitor_code', 'person_id', 'source_id', 'campaign_id', 'full_name', 'phone', 'email',
         'preferred_channel', 'visitor_type', 'status', 'rating', 'interest', 'notes', 'assigned_to',
         'origin_branch_id', 'contact_key', 'created_by', 'updated_by',
+    ];
+
+    protected $casts = [
+        // Database-owned capture time; it is intentionally not mass-assignable.
+        'captured_at' => 'immutable_datetime',
     ];
 
     /** @return BelongsTo<Person, $this> */

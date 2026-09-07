@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $agreement_ref
  * @property numeric-string $committed_amount
  * @property string|null $restricted_category
+ * @property string|null $organization_id
  */
 final class FundingSource extends Model
 {
@@ -23,5 +24,5 @@ final class FundingSource extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'name', 'agreement_ref', 'committed_amount', 'restricted_category', 'restriction_note', 'established_by'];
+    protected $fillable = ['id', 'organization_id', 'name', 'agreement_ref', 'committed_amount', 'restricted_category', 'restriction_note', 'established_by'];
 }

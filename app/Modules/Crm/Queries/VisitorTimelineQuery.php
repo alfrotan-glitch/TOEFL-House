@@ -28,13 +28,21 @@ final class VisitorTimelineQuery
         $rows = collect();
 
         if ($visitor->conversion !== null) {
+            $authorityTimed = $visitor->conversion->conversion_time_basis === 'authority_audit_event'
+                && $visitor->conversion->converted_at !== null;
             $rows->push([
                 'kind' => 'conversion',
                 'id' => $visitor->conversion->id,
-                'at' => $visitor->conversion->converted_at?->toDateTimeString() ?? $visitor->conversion->created_at?->toDateTimeString() ?? '',
+                // A CRM mirror-row created_at is not the downstream
+                // conversion occurrence and must never substitute for it.
+                'at' => $authorityTimed ? $visitor->conversion->converted_at?->toDateTimeString() : null,
+                'time_basis' => $visitor->conversion->conversion_time_basis,
+                'time_evidence_status' => $authorityTimed ? 'authority_event_recorded' : 'historic_unclassified',
                 'type' => $visitor->conversion->conversion_type,
                 'authority' => $visitor->conversion->authority,
-                'summary' => 'Authoritative conversion trace recorded; CRM does not own the downstream record.',
+                'summary' => $authorityTimed
+                    ? 'Authoritative conversion trace recorded; CRM does not own the downstream record.'
+                    : 'Authoritative conversion trace retained, but its historic downstream event time is unclassified.',
                 'converted_by' => $visitor->conversion->converted_by,
                 'authority_audit_event_id' => $visitor->conversion->authority_audit_event_id,
                 'correlation_id' => $visitor->conversion->correlation_id,
@@ -46,13 +54,19 @@ final class VisitorTimelineQuery
             ->orderByDesc('converted_at')
             ->limit($limit)
             ->get() as $handoff) {
+            $authorityTimed = $handoff->conversion_time_basis === 'authority_audit_event'
+                && $handoff->converted_at !== null;
             $rows->push([
                 'kind' => 'conversion_handoff',
                 'id' => $handoff->id,
-                'at' => (string) $handoff->converted_at,
+                'at' => $authorityTimed ? $handoff->converted_at?->toDateTimeString() : null,
+                'time_basis' => $handoff->conversion_time_basis,
+                'time_evidence_status' => $authorityTimed ? 'authority_event_recorded' : 'historic_unclassified',
                 'type' => 'student',
                 'authority' => 'students',
-                'summary' => 'Applicant-to-Student handoff evidence recorded; CRM does not own the Student.',
+                'summary' => $authorityTimed
+                    ? 'Applicant-to-Student handoff evidence recorded; CRM does not own the Student.'
+                    : 'Applicant-to-Student handoff evidence retained, but its historic authority-event time is unclassified.',
                 'student_id' => $handoff->student_id,
                 'authority_audit_event_id' => $handoff->authority_audit_event_id,
                 'correlation_id' => $handoff->correlation_id,
@@ -105,13 +119,19 @@ final class VisitorTimelineQuery
                 ->limit($limit)
                 ->get() as $audit) {
                 $after = is_array($audit->after_state) ? $audit->after_state : [];
+                $databaseTimed = $audit->occurred_time_basis === 'database_insert'
+                    && $audit->occurred_at !== null;
                 $rows->push([
                     'kind' => 'followup_lifecycle',
                     'id' => $audit->id,
-                    'at' => (string) $audit->occurred_at,
+                    'at' => $databaseTimed ? $audit->occurred_at?->toDateTimeString() : null,
+                    'time_basis' => $audit->occurred_time_basis,
+                    'time_evidence_status' => $databaseTimed ? 'database_recorded' : 'historic_unclassified',
                     'type' => $audit->operation,
                     'status' => isset($after['status']) ? (string) $after['status'] : null,
-                    'summary' => isset($after['reason']) ? (string) $after['reason'] : 'Follow-up lifecycle evidence recorded.',
+                    'summary' => isset($after['reason'])
+                        ? (string) $after['reason']
+                        : ($databaseTimed ? 'Follow-up lifecycle evidence recorded.' : 'Follow-up lifecycle evidence retained, but its historic event time is unclassified.'),
                     'agent_id' => $audit->actor_id,
                     'correlation_id' => $audit->correlation_id,
                 ]);
@@ -126,15 +146,19 @@ final class VisitorTimelineQuery
             ->limit($limit)
             ->get() as $audit) {
             $after = is_array($audit->after_state) ? $audit->after_state : [];
+            $databaseTimed = $audit->occurred_time_basis === 'database_insert'
+                && $audit->occurred_at !== null;
             $rows->push([
                 'kind' => 'lifecycle',
                 'id' => $audit->id,
-                'at' => (string) $audit->occurred_at,
+                'at' => $databaseTimed ? $audit->occurred_at?->toDateTimeString() : null,
+                'time_basis' => $audit->occurred_time_basis,
+                'time_evidence_status' => $databaseTimed ? 'database_recorded' : 'historic_unclassified',
                 'type' => $audit->operation,
                 'status' => isset($after['status']) ? (string) $after['status'] : null,
                 'summary' => isset($after['reason']) && is_string($after['reason']) && trim($after['reason']) !== ''
                     ? $after['reason']
-                    : 'Immutable CRM lifecycle evidence recorded.',
+                    : ($databaseTimed ? 'Immutable CRM lifecycle evidence recorded.' : 'Immutable CRM lifecycle evidence retained, but its historic event time is unclassified.'),
                 'agent_id' => $audit->actor_id,
                 'correlation_id' => $audit->correlation_id,
             ]);
@@ -145,13 +169,19 @@ final class VisitorTimelineQuery
             ->orderByDesc('changed_at')
             ->limit($limit)
             ->get() as $statusChange) {
+            $databaseTimed = ($statusChange->change_time_basis ?? null) === 'database_transition'
+                && ($statusChange->changed_at ?? null) !== null;
             $rows->push([
                 'kind' => 'status_change',
                 'id' => (string) $statusChange->id,
-                'at' => (string) $statusChange->changed_at,
+                'at' => $databaseTimed ? (string) $statusChange->changed_at : null,
+                'time_basis' => $statusChange->change_time_basis ?? null,
+                'time_evidence_status' => $databaseTimed ? 'database_transition' : 'historic_unclassified',
                 'type' => 'crm.visitor.status_history',
                 'status' => (string) $statusChange->to_status,
-                'summary' => sprintf('Lifecycle changed from %s to %s.', $statusChange->from_status ?? 'none', $statusChange->to_status),
+                'summary' => $databaseTimed
+                    ? sprintf('Lifecycle changed from %s to %s.', $statusChange->from_status ?? 'none', $statusChange->to_status)
+                    : sprintf('Lifecycle changed from %s to %s; historic transition time is unclassified.', $statusChange->from_status ?? 'none', $statusChange->to_status),
                 'agent_id' => (string) $statusChange->changed_by,
                 'correlation_id' => (string) $statusChange->correlation_id,
             ]);

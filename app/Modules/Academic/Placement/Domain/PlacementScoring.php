@@ -75,7 +75,11 @@ final class PlacementScoring
         $expected = trim(strtolower((string) $question->correct_answer));
         $actual = trim(strtolower($value));
 
-        return $expected !== '' && $actual !== '' && ($expected === $actual || self::matchesOption($question, $value));
+        // `correct_answer` is the sole scored answer key. Treating the mere
+        // presence of a submitted option key as correct would award points to
+        // every valid distractor and turns presentation options into a second,
+        // contradictory scoring authority.
+        return $expected !== '' && $actual !== '' && $expected === $actual;
     }
 
     /**
@@ -106,17 +110,4 @@ final class PlacementScoring
         return $band?->cefr_ref;
     }
 
-    private static function matchesOption(PlacementQuestion $question, string $value): bool
-    {
-        if (! is_array($question->options) || $question->options === []) {
-            return false;
-        }
-        foreach ($question->options as $option) {
-            if (is_array($option) && isset($option['key']) && trim(strtolower((string) $option['key'])) === trim(strtolower($value))) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

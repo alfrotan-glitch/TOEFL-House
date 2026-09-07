@@ -18,6 +18,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\Signing\CanonicalJson;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -39,10 +40,10 @@ final class RunReport
     ) {}
 
     /** @param array<string, string> $filters
-     * @return array{run_id: string, result: string, reproducibility_hash: string, correlation_id: string} */
+     * @return array{run_id: string, result: string, completeness: 'complete'|'incomplete', reproducibility_hash: string, correlation_id: string} */
     public function run(Actor $actor, string $metricKey, string $periodKey, string $scopeType, ?string $scopeId, array $filters, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['reporting.report.run', $metricKey, $periodKey, $scopeType, (string) $scopeId, json_encode($filters), $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['reporting.report.run', $metricKey, $periodKey, $scopeType, (string) $scopeId, CanonicalJson::encode($filters), $actor->actorId]));
 
         try {
             return $this->idempotency->execute('reporting.report.run', $idempotencyKey, $payload,
@@ -54,15 +55,17 @@ final class RunReport
                     if (($scopeType === 'global') !== ($scopeId === null)) {
                         throw BusinessRejection::forCode('reporting.scope_shape', 'global scope takes no scope id; every other scope requires one');
                     }
-                    if (in_array($scopeType, ['global', 'fund'], true)) {
-                        // Organization-wide scopes require organization-rooted
-                        // authority; branch/campus grants are not wildcards.
+                    if ($scopeType === 'global') {
+                        // Global is explicit platform scope. Every target-bound
+                        // scope, including Finance-owned funds, is resolved and
+                        // authorized by ReportingScope below.
                         $this->require($actor);
                     }
                     $organizationId = $this->scopes->authorize($actor, self::CAPABILITY, $scopeType, $scopeId);
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
+                    MetricCatalog::assertDefinitionLineage($metric, $entry);
                     $periodId = MetricCatalog::resolvePeriod($entry['authority'], $periodKey);
 
                     /** @var MetricVersion $version */
@@ -71,7 +74,27 @@ final class RunReport
                     /** @var MetricCalculator $calculator */
                     $calculator = app($entry['calculator']);
                     $computed = $calculator->compute($periodId, $scopeId);
-                    $hash = hash('sha256', implode('|', [$metricKey, $version->id, $version->version_no, $version->calculation_spec, $periodKey, $scopeType, (string) $scopeId, json_encode($filters), $computed['value']]));
+                    $completeness = (string) ($computed['completeness'] ?? 'complete');
+                    if (! in_array($completeness, ['complete', 'incomplete'], true)) {
+                        throw new \LogicException('a metric calculator returned an unsupported report-run completeness state');
+                    }
+                    $meta = $computed['meta'];
+                    // Completeness and explanatory metadata are part of the
+                    // reproducible result. The same number with a different
+                    // evidence basis must never hash as the same report.
+                    $hash = hash('sha256', implode('|', [
+                        $metricKey,
+                        $version->id,
+                        $version->version_no,
+                        $version->calculation_spec,
+                        $periodKey,
+                        $scopeType,
+                        (string) $scopeId,
+                        CanonicalJson::encode($filters),
+                        $computed['value'],
+                        $completeness,
+                        CanonicalJson::encode($meta),
+                    ]));
 
                     $run = ReportRun::query()->create([
                         'id' => RandomIdentifier::new(),
@@ -82,14 +105,23 @@ final class RunReport
                         'organization_id' => $organizationId,
                         'filters' => $filters,
                         'result' => $computed['value'],
+                        'completeness' => $completeness,
+                        'meta' => $meta,
                         'reproducibility_hash' => $hash,
                         'executed_by' => $actor->actorId,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'reporting.report.run', 'report_run', $run->id, null, [
-                        'metric' => $metricKey, 'period' => $periodKey, 'scope_type' => $scopeType, 'scope_id' => $scopeId, 'organization_id' => $organizationId, 'result' => $computed['value'],
+                        'metric' => $metricKey, 'period' => $periodKey, 'scope_type' => $scopeType, 'scope_id' => $scopeId, 'organization_id' => $organizationId,
+                        'result' => $computed['value'], 'completeness' => $completeness, 'meta' => $meta,
                     ]);
 
-                    return ['run_id' => $run->id, 'result' => $computed['value'], 'reproducibility_hash' => $hash, 'correlation_id' => $event->correlation_id];
+                    return [
+                        'run_id' => $run->id,
+                        'result' => $computed['value'],
+                        'completeness' => $completeness,
+                        'reproducibility_hash' => $hash,
+                        'correlation_id' => $event->correlation_id,
+                    ];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

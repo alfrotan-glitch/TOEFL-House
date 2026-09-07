@@ -6,9 +6,9 @@ namespace App\Modules\Reporting\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
-use App\Modules\Organization\Models\Branch;
 use App\Modules\Organization\Models\Organization;
 use App\Modules\Reporting\Domain\MetricCatalog;
+use App\Modules\Reporting\Domain\ReportingScope;
 use App\Modules\Reporting\Models\Dashboard;
 use App\Modules\Reporting\Models\DashboardPin;
 use App\Modules\Reporting\Models\MetricDefinition;
@@ -21,14 +21,13 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Dashboards hold no independent truth: a pin references a registered
- * metric with an explicit period and scope, and only a computed (not
- * stale) projection of the current version may be pinned — incomplete or
- * stale slices are withheld, never silently presented.
+ * metric with an explicit period and scope, and only a complete projection
+ * of the current version may be pinned — stale or historically incomplete
+ * slices are withheld, never silently presented.
  */
 final class MaintainDashboard
 {
@@ -36,6 +35,7 @@ final class MaintainDashboard
 
     public function __construct(
         private readonly AccessDecision $access,
+        private readonly ReportingScope $scopes,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -91,24 +91,25 @@ final class MaintainDashboard
                     if (($scopeType === 'global') !== ($scopeId === null) || ($scopeId !== null && trim($scopeId) === '')) {
                         throw BusinessRejection::forCode('reporting.pin_scope_shape', 'global pins take no scope id; every other pin requires one');
                     }
-                    if ($scopeType === 'branch') {
-                        /** @var Branch|null $branch */
-                        $branch = Branch::query()->whereKey($scopeId)->first();
-                        if ($branch === null || $branch->lifecycle_state !== 'active') {
-                            throw BusinessRejection::forCode('reporting.pin_branch_scope_unknown', 'a branch pin requires an active branch scope');
-                        }
-                        try {
-                            $branchScope = $branch->structureScope();
-                        } catch (ModelNotFoundException) {
-                            throw BusinessRejection::forCode('reporting.pin_branch_scope_unknown', 'a branch pin requires current active campus provenance');
-                        }
-                        if (trim((string) $branchScope->organizationId) !== trim((string) $lockedDashboard->organization_id)) {
-                            throw BusinessRejection::forCode('reporting.pin_scope_conflict', 'the branch pin and dashboard organization provenance no longer agree');
-                        }
+                    // Every dashboard is organization-owned. A platform-global
+                    // projection is deliberately not an organization result and
+                    // therefore cannot be pinned into this tenant view.
+                    if ($scopeType === 'global') {
+                        throw BusinessRejection::forCode('reporting.pin_global_scope_forbidden', 'organization-owned dashboards cannot pin global projections');
+                    }
+                    // Resolve every target through the same scope authority
+                    // used by report execution. A dashboard's organization
+                    // authorization alone must not turn an inactive, malformed,
+                    // or foreign target into a valid tenant pin.
+                    $targetOrganizationId = $this->scopes->authorize($actor, self::CAPABILITY, $scopeType, $scopeId);
+                    if ($targetOrganizationId === null
+                        || $targetOrganizationId !== trim((string) $lockedDashboard->organization_id)) {
+                        throw BusinessRejection::forCode('reporting.pin_scope_conflict', 'the pin target and dashboard organization provenance do not agree');
                     }
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
+                    MetricCatalog::assertDefinitionLineage($metric, $entry);
 
                     /** @var MetricVersion $currentVersion */
                     $currentVersion = MetricVersion::query()->where('metric_id', $metric->id)->where('version_no', $metric->current_version)->firstOrFail();
@@ -123,7 +124,14 @@ final class MaintainDashboard
                         throw BusinessRejection::forCode('reporting.pin_no_projection', 'pin a computed projection: this slice has never been computed');
                     }
                     if ($projection->completeness !== 'complete') {
-                        throw BusinessRejection::forCode('reporting.pin_stale', 'stale slices are withheld from dashboards until rebuilt');
+                        throw BusinessRejection::forCode('reporting.pin_stale', 'stale or historically incomplete slices are withheld from dashboards until their evidence is resolved and rebuilt');
+                    }
+                    $projectionOrganizationId = trim((string) ($projection->organization_id ?? ''));
+                    if ($projectionOrganizationId === '' || $projectionOrganizationId !== trim((string) $lockedDashboard->organization_id)) {
+                        // Dashboards are organization-owned projections. A
+                        // global/null or foreign snapshot cannot be pinned
+                        // into one merely because its metric/scope key fits.
+                        throw BusinessRejection::forCode('reporting.pin_scope_conflict', 'the computed projection organization does not match the dashboard');
                     }
                     if (DashboardPin::query()->where('dashboard_id', $dashboard->id)->where('metric_id', $metric->id)->where('period_key', $periodKey)->where('scope_type', $scopeType)->where(fn ($query) => $scopeId === null ? $query->whereNull('scope_id') : $query->where('scope_id', $scopeId))->exists()) {
                         throw BusinessRejection::forCode('reporting.pin_exists', 'this slice is already pinned');

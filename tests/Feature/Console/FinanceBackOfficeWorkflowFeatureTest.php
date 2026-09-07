@@ -354,6 +354,7 @@ final class FinanceBackOfficeWorkflowFeatureTest extends TestCase
 
         // A restricted fund without its restriction note is refused.
         $this->post('/finance/funds', [
+            'organization_id' => $this->bootstrapOrganizationId,
             'name' => 'Grant A', 'agreement_ref' => 'grant/A',
             'committed_amount' => '1000.00', 'restricted_category' => 'tuition',
         ], ['referer' => 'http://localhost/finance'])
@@ -363,6 +364,7 @@ final class FinanceBackOfficeWorkflowFeatureTest extends TestCase
 
         // Restricted to tuition, and an unrestricted pool.
         $this->post('/finance/funds', [
+            'organization_id' => $this->bootstrapOrganizationId,
             'name' => 'Grant A', 'agreement_ref' => 'grant/A',
             'committed_amount' => '1000.00', 'restricted_category' => 'tuition',
             'restriction_note' => 'grant agreement A: tuition only',
@@ -370,6 +372,7 @@ final class FinanceBackOfficeWorkflowFeatureTest extends TestCase
         $restrictedId = DB::table($funds)->where('name', 'Grant A')->value('id');
 
         $this->post('/finance/funds', [
+            'organization_id' => $this->bootstrapOrganizationId,
             'name' => 'General pool', 'agreement_ref' => 'gen/1',
             'committed_amount' => '1000.00',
         ])->assertRedirect('/finance');

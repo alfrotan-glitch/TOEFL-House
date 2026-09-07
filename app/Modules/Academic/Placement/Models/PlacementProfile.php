@@ -30,10 +30,21 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $lifecycle_state
  * @property string|null $originating_branch_id
  * @property string|null $current_home_branch_id
+ * @property string|null $placement_recommendation_id
  * @property string|null $academic_eligibility_snapshot_id
+ * @property string|null $released_at
+ * @property string|null $release_time_basis
+ * @property string|null $lineage_version
+ * @property string|null $decision_fact_version
  */
 final class PlacementProfile extends Model
 {
+    /** Marker for profiles created after evidence-lineage convergence. */
+    public const LINEAGE_VERSION = 'placement-evidence-v2';
+
+    /** Database-owned marker for immutable profile decision facts. */
+    public const DECISION_FACT_VERSION = 'placement-decision-facts-v3';
+
     public const STATE_DRAFT = 'draft';
 
     public const STATE_SCORED = 'scored';
@@ -59,7 +70,7 @@ final class PlacementProfile extends Model
         'recommended_offering_id', 'recommended_class_id', 'overall_cefr_ref',
         'lifecycle_state', 'originating_branch_id', 'current_home_branch_id',
         'reviewed_by', 'approved_by', 'released_by', 'created_by',
-        'academic_eligibility_snapshot_id',
+        'placement_recommendation_id', 'academic_eligibility_snapshot_id', 'lineage_version',
     ];
 
     /** @return BelongsTo<Person, $this> */
@@ -108,6 +119,12 @@ final class PlacementProfile extends Model
     public function recommendations(): HasMany
     {
         return $this->hasMany(PlacementRecommendation::class, 'profile_id');
+    }
+
+    /** @return BelongsTo<PlacementRecommendation, $this> */
+    public function recommendation(): BelongsTo
+    {
+        return $this->belongsTo(PlacementRecommendation::class, 'placement_recommendation_id');
     }
 
     /** @return HasMany<AcademicEligibilitySnapshot, $this> */

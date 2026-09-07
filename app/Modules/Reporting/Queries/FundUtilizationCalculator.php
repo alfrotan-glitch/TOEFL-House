@@ -6,6 +6,7 @@ namespace App\Modules\Reporting\Queries;
 
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\FundingSource;
+use App\Modules\Organization\Models\Organization;
 use App\Modules\Finance\Queries\FinancialBalanceQuery;
 use App\Modules\Reporting\Domain\MetricCalculator;
 use App\Support\Errors\BusinessRejection;
@@ -25,8 +26,15 @@ final class FundUtilizationCalculator implements MetricCalculator
         }
         /** @var FundingSource|null $fund */
         $fund = FundingSource::query()->find($scopeId);
-        if ($fund === null) {
-            throw BusinessRejection::forCode('reporting.fund_unknown', 'the scoped fund does not exist');
+        $organizationId = trim((string) ($fund?->organization_id ?? ''));
+        if ($fund === null || $organizationId === '' || ! Organization::query()
+            ->whereKey($organizationId)
+            ->where('lifecycle_state', 'active')
+            ->exists()) {
+            // The calculator can also be invoked by internal rebuild jobs.
+            // It must not turn a legacy, unlabeled Finance source into an
+            // unscoped report merely because a caller skipped ReportingScope.
+            throw BusinessRejection::forCode('reporting.fund_unknown', 'the scoped fund requires active organization provenance');
         }
         $periodEnd = FinancialPeriod::query()->whereKey($periodId)->value('date_to');
         if ($periodEnd === null) {
@@ -36,6 +44,7 @@ final class FundUtilizationCalculator implements MetricCalculator
 
         return ['value' => $result['utilization'], 'meta' => [
             'allocated' => $result['allocated'], 'committed' => $result['committed'],
+            'organization_id' => $organizationId,
         ]];
     }
 }

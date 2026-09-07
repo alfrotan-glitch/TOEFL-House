@@ -25,8 +25,13 @@ final class PlacementBand
 
     public static function forPercentage(float $percentage): string
     {
+        // Section and recommendation snapshots are persisted to two decimal
+        // places. Classify that canonical score rather than a binary floating
+        // intermediate, which otherwise leaves gaps such as 39.995 between
+        // the 39.99 and 40.00 bands and disagrees with PostgreSQL NUMERIC.
+        $canonicalPercentage = round($percentage, 2);
         foreach (self::BANDS as $band) {
-            if ($percentage >= $band['min'] && $percentage <= $band['max']) {
+            if ($canonicalPercentage >= $band['min'] && $canonicalPercentage <= $band['max']) {
                 return $band['level'];
             }
         }
@@ -42,7 +47,7 @@ final class PlacementBand
 
     public static function rank(string $cefr): int
     {
-        $index = array_search(strtoupper($cefr), self::ORDER, true);
+        $index = array_search(strtoupper(trim($cefr)), self::ORDER, true);
 
         return $index === false ? -1 : $index;
     }

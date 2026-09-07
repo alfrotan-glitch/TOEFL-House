@@ -12,6 +12,9 @@ use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
 use App\Modules\Academic\Commands\ManageAssessmentResult;
 use App\Modules\Academic\Commands\RecordAttendance;
+use App\Modules\Academic\Domain\TranscriptComposer;
+use App\Modules\Academic\Placement\Commands\DecidePlacement;
+use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
@@ -263,6 +266,31 @@ final class TranscriptIssuanceFeatureTest extends TestCase
         $this->assertSame(1, Document::query()->where('id', $first['document_id'])->count());
     }
 
+    public function test_transcript_entry_uses_the_students_immutable_consumed_snapshot_not_a_later_retake(): void
+    {
+        $studentId = $this->studentWithEntry('entry-lineage');
+        /** @var Student $student */
+        $student = Student::query()->findOrFail($studentId);
+        $entrySnapshotId = (string) $student->academic_eligibility_snapshot_id;
+        /** @var PlacementProfile $entryProfile */
+        $entryProfile = PlacementProfile::query()->findOrFail($student->placement_profile_id);
+
+        // A later released retake is valid Placement history, but it has not
+        // been consumed by this Student's admission and cannot rewrite an
+        // official academic document.
+        app(DecidePlacement::class)->supersede(
+            $this->placementReleaser('trx-entry-supersede'),
+            $entryProfile,
+            'trx-entry-supersede',
+        );
+        $retake = $this->completeReleasedPlacement((string) $student->person_id, 'trx-entry-retake');
+        $this->assertNotSame($entrySnapshotId, (string) $retake->academic_eligibility_snapshot_id);
+
+        $payload = app(TranscriptComposer::class)->compose($studentId, $this->programVersionId);
+        $this->assertSame($entrySnapshotId, (string) ($payload['entry']['snapshot_id'] ?? ''));
+        $this->assertSame('academic-context-snapshot-v2', (string) ($payload['entry']['snapshot_schema_version'] ?? ''));
+    }
+
     public function test_transcript_issue_and_print_over_http(): void
     {
         $studentId = $this->studentWithEntry('web');
@@ -305,7 +333,7 @@ final class TranscriptIssuanceFeatureTest extends TestCase
         $profile = $this->completeReleasedPlacement($personId, 'tp-'.substr(md5($seed), 0, 6));
 
         $registered = app(RegisterApplicant::class)->register(
-            $this->admissionsClerk('trx-clerk-'.$seed), $personId, 'IELTS Preparation', 'trx-reg-'.$seed, $profile->id,
+            $this->admissionsClerk('trx-clerk-'.$seed), $personId, 'IELTS Preparation', 'trx-reg-'.$seed, $profile->id, $this->placementBranchId,
         );
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);

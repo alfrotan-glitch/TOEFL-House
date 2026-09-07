@@ -22,6 +22,7 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Audit\RejectedOperation;
 use App\Modules\Finance\Domain\FinancialCoverageLock;
+use App\Modules\Finance\Domain\FinancialGateEvidence;
 use App\Modules\Finance\Queries\FinancialGateQuery;
 use App\Modules\Students\Models\Student;
 use App\Support\Authorization\Actor;
@@ -460,7 +461,7 @@ final class MaintainEnrollment
      */
     private function freezeFinancialGate(Enrollment $enrollment, Actor $actor): void
     {
-        $assessment = $this->financialGates->assess($enrollment);
+        $assessment = $this->verifiedFinancialGateAssessment($enrollment, $this->financialGates->assess($enrollment));
         $this->applyGateEvidence($enrollment, $assessment);
         $enrollment->save();
 
@@ -491,22 +492,29 @@ final class MaintainEnrollment
      */
     private function persistDeniedGate(Enrollment $enrollment, EnrollmentFinancialGateDenied $denial, Actor $actor): never
     {
-        DB::transaction(function () use ($enrollment, $denial): void {
+        /** @var array<string, mixed> $assessment */
+        $assessment = DB::transaction(function () use ($enrollment, $denial): array {
             $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->first();
             if ($locked === null) {
-                return;
+                throw BusinessRejection::forCode('academic.enrollment_unknown', 'the enrollment no longer exists while recording its financial gate denial');
             }
-            $this->applyGateEvidence($locked, $denial->assessment());
+            $verified = $this->verifiedFinancialGateAssessment($locked, $denial->assessment());
+            $this->applyGateEvidence($locked, $verified);
             $locked->save();
+
+            return $verified;
         });
 
+        // Audit only the same normalized, HMAC-bound assessment that was
+        // committed on the enrollment. Never reintroduce envelope values from
+        // the original transport object at the audit boundary.
         $this->rejectedOperation->reject(
             $denial,
             $actor,
             'academic.enrollment.financial_gate',
             'enrollment',
             $enrollment->id,
-            $denial->assessment(),
+            $assessment,
         );
     }
 
@@ -535,7 +543,7 @@ final class MaintainEnrollment
      */
     private function exitGateSnapshot(Enrollment $enrollment): array
     {
-        $assessment = $this->financialGates->assess($enrollment);
+        $assessment = $this->verifiedFinancialGateAssessment($enrollment, $this->financialGates->assess($enrollment));
 
         return [
             'satisfied' => $assessment['satisfied'],
@@ -597,6 +605,42 @@ final class MaintainEnrollment
         return ['kind' => $kind, 'id' => $id];
     }
 
+    /**
+     * Finance is the sole authority that derives gate standing. Academic may
+     * persist or audit an assessment only after verifying the Finance HMAC and
+     * its binding to this exact enrollment. Without this boundary check, a
+     * stale or substituted array returned by an adapter could turn a signed
+     * evidence format into an unauthenticated activation input.
+     *
+     * @param array<string, mixed> $assessment
+     * @return array<string, mixed>
+     */
+    private function verifiedFinancialGateAssessment(Enrollment $enrollment, array $assessment): array
+    {
+        $verified = FinancialGateEvidence::verifiedAssessment($assessment);
+        if ($verified === null) {
+            throw BusinessRejection::forCode('finance.gate_evidence_invalid', 'Academic may consume only an integrity-verified Finance financial-gate assessment');
+        }
+
+        $evidence = $verified['evidence'];
+        $expectedOfferingId = trim((string) ($enrollment->offering_id ?? ''));
+        $expectedOfferingId = $expectedOfferingId === '' ? null : $expectedOfferingId;
+        $evidenceOfferingId = $evidence['offering_id'] ?? null;
+        $evidenceClassId = $evidence['class_id'] ?? null;
+        $normalizedEvidenceOfferingId = is_string($evidenceOfferingId) ? trim($evidenceOfferingId) : $evidenceOfferingId;
+        $normalizedEvidenceOfferingId = $normalizedEvidenceOfferingId === '' ? null : $normalizedEvidenceOfferingId;
+        if (($evidence['schema_version'] ?? null) !== FinancialGateEvidence::SCHEMA_VERSION
+            || trim((string) ($evidence['student_id'] ?? '')) !== trim((string) $enrollment->student_id)
+            || ($evidenceOfferingId !== null && ! is_string($evidenceOfferingId))
+            || $normalizedEvidenceOfferingId !== $expectedOfferingId
+            || ! is_string($evidenceClassId)
+            || trim($evidenceClassId) !== trim((string) $enrollment->class_id)) {
+            throw BusinessRejection::forCode('finance.gate_evidence_context_invalid', 'the signed Finance financial-gate assessment is not bound to this enrollment context');
+        }
+
+        return $verified;
+    }
+
     /** @param array<string, mixed> $assessment */
     private function applyGateEvidence(Enrollment $enrollment, array $assessment): void
     {
@@ -611,15 +655,26 @@ final class MaintainEnrollment
 
     private function currentEligibilitySnapshotId(string $studentId): ?string
     {
-        $snapshotId = Student::query()->whereKey($studentId)->value('academic_eligibility_snapshot_id');
+        /** @var Student $student */
+        $student = Student::query()->findOrFail($studentId);
+        $snapshotId = $student->academic_eligibility_snapshot_id;
         if ($snapshotId === null) {
             return null;
         }
         /** @var AcademicEligibilitySnapshot $snapshot */
         $snapshot = AcademicEligibilitySnapshot::query()->findOrFail($snapshotId);
+        if (trim((string) $snapshot->person_id) !== trim((string) $student->person_id)
+            || ($student->placement_profile_id !== null
+                && trim((string) $snapshot->placement_profile_id) !== trim((string) $student->placement_profile_id))) {
+            throw BusinessRejection::forCode('academic.eligibility_snapshot_subject_mismatch', 'the student eligibility snapshot does not belong to the student placement evidence');
+        }
         $verification = $this->eligibilitySnapshots->verify($snapshot);
         if (! $verification['valid']) {
             throw BusinessRejection::forCode('academic.eligibility_snapshot_unverified', 'the student eligibility snapshot could not be verified: '.$verification['reason']);
+        }
+        if ($snapshot->snapshot_schema_version !== \App\Modules\Academic\Placement\Domain\AcademicEligibilitySnapshotBuilder::SCHEMA_VERSION
+            || trim((string) $snapshot->placement_profile_id) !== trim((string) $student->placement_profile_id)) {
+            throw BusinessRejection::forCode('academic.eligibility_snapshot_lineage_invalid', 'new enrollment may consume only the Student-linked v2 placement eligibility snapshot');
         }
 
         return $snapshot->id;

@@ -205,6 +205,7 @@ Route::prefix('v1')->middleware('employee')->group(function (): void {
         Route::get('/versions', [PlacementApiController::class, 'versions'])->name('versions');
         Route::get('/profiles', [PlacementApiController::class, 'profiles'])->name('profiles');
         Route::get('/profiles/{profileId}', [PlacementApiController::class, 'show'])->name('profiles.show');
+        Route::get('/profiles/{profileId}/attemptable-versions', [PlacementApiController::class, 'attemptableVersions'])->name('profiles.attemptable-versions');
         Route::get('/profiles/{profileId}/finance-link', [PlacementApiController::class, 'financeLink'])->name('profiles.finance-link');
         Route::get('/profiles/{profileId}/eligibility-snapshot', [PlacementApiController::class, 'eligibilitySnapshot'])->name('profiles.eligibility-snapshot');
         Route::post('/profiles', [PlacementApiController::class, 'openProfile'])->name('profiles.open');

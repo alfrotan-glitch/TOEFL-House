@@ -20,5 +20,16 @@ final class MetricDefinition extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'key', 'name', 'source_owner', 'period_authority', 'current_version', 'defined_by'];
+    /**
+     * `source_owner` is the immutable claim captured when this definition was
+     * created. `canonical_source_owner` and lineage fields record the live
+     * catalog authority without rewriting an earlier claim.
+     *
+     * @var list<string>
+     */
+    protected $fillable = [
+        'id', 'key', 'name', 'source_owner', 'canonical_source_owner',
+        'period_authority', 'current_version', 'defined_by', 'lineage_status',
+        'lineage_basis', 'lineage_recorded_at',
+    ];
 }

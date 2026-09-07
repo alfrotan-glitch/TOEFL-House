@@ -42,7 +42,7 @@ final class VisitorConversionRecorder
         private readonly IdempotentExecution $idempotency,
     ) {}
 
-    /** @return array{conversion_id: string, visitor_id: string, status: string, correlation_id: string} */
+    /** @return array{conversion_id: string, visitor_id: string, status: string, converted_at: string|null, conversion_time_basis: string|null, correlation_id: string} */
     public function record(
         Actor $actor,
         Visitor $visitor,
@@ -109,9 +109,14 @@ final class VisitorConversionRecorder
                     'student_id' => $studentId,
                     'converted_by' => $actor->actorId,
                     'authority_audit_event_id' => $authorityAuditEventId,
-                    'converted_at' => now()->toDateTimeString(),
                     'correlation_id' => RandomIdentifier::new(),
                 ]);
+
+                // The database copies the bound downstream authority audit
+                // event's clock; reload before audit/transport output instead
+                // of treating CRM mirror insertion time as conversion evidence.
+                /** @var VisitorConversion $conversion */
+                $conversion = VisitorConversion::query()->whereKey($conversion->id)->firstOrFail();
 
                 $before = ['status' => $locked->status];
                 VisitorStatus::requireTransition($locked->status, Visitor::STATUS_CONVERTED);
@@ -124,10 +129,19 @@ final class VisitorConversionRecorder
                     'prev_status' => $before['status'], 'status' => Visitor::STATUS_CONVERTED,
                     'downstream_entity' => $downstreamEntity, 'downstream_id' => $downstreamId, 'authority' => $authority,
                     'authority_audit_event_id' => $authorityAuditEventId,
+                    'converted_at' => $conversion->converted_at?->toDateTimeString(),
+                    'conversion_time_basis' => $conversion->conversion_time_basis,
                     ...$this->branchProvenance($conversionType, $downstreamId),
                 ]);
 
-                return ['conversion_id' => $conversion->id, 'visitor_id' => $locked->id, 'status' => Visitor::STATUS_CONVERTED, 'correlation_id' => $event->correlation_id];
+                return [
+                    'conversion_id' => $conversion->id,
+                    'visitor_id' => $locked->id,
+                    'status' => Visitor::STATUS_CONVERTED,
+                    'converted_at' => $conversion->converted_at?->toDateTimeString(),
+                    'conversion_time_basis' => $conversion->conversion_time_basis,
+                    'correlation_id' => $event->correlation_id,
+                ];
                 }),
             );
         } catch (QueryException $exception) {
@@ -157,7 +171,7 @@ final class VisitorConversionRecorder
         }
     }
 
-    /** @return array{conversion_id: string, visitor_id: string, status: string, correlation_id: string} */
+    /** @return array{conversion_id: string, visitor_id: string, status: string, converted_at: string|null, conversion_time_basis: string|null, correlation_id: string} */
     private function recordStudentHandoff(
         Actor $actor,
         Visitor $visitor,
@@ -185,9 +199,11 @@ final class VisitorConversionRecorder
             'person_id' => $personId,
             'authority_audit_event_id' => $authorityAuditEventId,
             'converted_by' => $actor->actorId,
-            'converted_at' => now()->toDateTimeString(),
             'correlation_id' => RandomIdentifier::new(),
         ]);
+        // Match the audit entry to the bound downstream authority event clock.
+        /** @var VisitorConversionHandoff $handoff */
+        $handoff = VisitorConversionHandoff::query()->whereKey($handoff->id)->firstOrFail();
         $event = $this->audit->record($actor->actorId, 'crm.conversion.handoff', 'visitor_conversion_handoff', $handoff->id, null, [
             'visitor_id' => $visitor->id,
             'source_conversion_id' => $sourceConversion->id,
@@ -197,12 +213,21 @@ final class VisitorConversionRecorder
             'status' => Visitor::STATUS_CONVERTED,
             'authority' => 'students',
             'authority_audit_event_id' => $authorityAuditEventId,
+            'converted_at' => $handoff->converted_at?->toDateTimeString(),
+            'conversion_time_basis' => $handoff->conversion_time_basis,
             'origin_branch_id' => $visitor->origin_branch_id,
             ...$this->branchScope($visitor->origin_branch_id),
             ...$this->branchProvenance('student', $downstreamId),
         ]);
 
-        return ['conversion_id' => $handoff->id, 'visitor_id' => $visitor->id, 'status' => Visitor::STATUS_CONVERTED, 'correlation_id' => $event->correlation_id];
+        return [
+            'conversion_id' => $handoff->id,
+            'visitor_id' => $visitor->id,
+            'status' => Visitor::STATUS_CONVERTED,
+            'converted_at' => $handoff->converted_at?->toDateTimeString(),
+            'conversion_time_basis' => $handoff->conversion_time_basis,
+            'correlation_id' => $event->correlation_id,
+        ];
     }
 
     private function closeOpenFollowups(Visitor $visitor, Actor $actor): void

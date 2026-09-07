@@ -11,6 +11,10 @@ use Illuminate\Database\Eloquent\Model;
  * Immutable transaction log of successful domain operations. This is the
  * canonical event/outbox boundary; integration_deliveries is only the
  * endpoint-specific delivery projection and must not become domain truth.
+ * Its event clock is copied by the database from the immutable audit parent.
+ *
+ * @property \Carbon\CarbonImmutable|null $occurred_at
+ * @property 'audit_event'|null $occurred_time_basis
  */
 final class DomainEvent extends Model
 {
@@ -25,13 +29,13 @@ final class DomainEvent extends Model
     protected $fillable = [
         'id', 'audit_event_id', 'actor_id', 'event_type', 'event_version',
         'aggregate_type', 'aggregate_id', 'correlation_id', 'payload',
-        'payload_digest', 'context', 'occurred_at',
+        'payload_digest', 'context',
     ];
 
     protected $casts = [
         'payload' => 'array',
         'context' => 'array',
-        'occurred_at' => 'datetime',
+        'occurred_at' => 'immutable_datetime',
     ];
 
     public function save(array $options = []): bool

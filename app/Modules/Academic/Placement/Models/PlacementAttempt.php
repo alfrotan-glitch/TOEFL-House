@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $delivery_mode
  * @property int $attempt_no
  * @property string $status
+ * @property string|null $lineage_version
  * @property string|null $evidence_ref
  * @property string|null $anti_tamper_hmac
  * @property bool $tamper_flagged
@@ -29,6 +30,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 final class PlacementAttempt extends Model
 {
+    /** Marker for post-convergence attempts with explicit evidence lineage. */
+    public const LINEAGE_VERSION = 'placement-evidence-v2';
+
     public const STATUS_SCHEDULED = 'scheduled';
 
     public const STATUS_IN_PROGRESS = 'in_progress';
@@ -44,7 +48,7 @@ final class PlacementAttempt extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'id', 'profile_id', 'test_version_id', 'delivery_mode', 'attempt_no', 'status',
+        'id', 'profile_id', 'test_version_id', 'delivery_mode', 'attempt_no', 'status', 'lineage_version',
         'started_at', 'ended_at', 'duration_seconds', 'evidence_ref', 'anti_tamper_hmac',
         'tamper_flagged', 'tamper_reason', 'proctor_person_id', 'originating_branch_id',
         'current_home_branch_id', 'correlation_id',

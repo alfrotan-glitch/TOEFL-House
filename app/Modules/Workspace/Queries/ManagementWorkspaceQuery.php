@@ -92,18 +92,31 @@ final class ManagementWorkspaceQuery
                     }
                 })
                 ->orderByDesc('created_at')->limit(10)->get([
-                'id', 'metric_version_id', 'period_key', 'scope_type', 'scope_id', 'organization_id', 'result', 'reproducibility_hash', 'created_at',
-            ])->map(static fn ($run): array => [
-                'id' => (string) $run->id,
-                'metric_version_id' => (string) $run->metric_version_id,
-                'period_key' => (string) $run->period_key,
-                'scope_type' => (string) $run->scope_type,
-                'scope_id' => $run->scope_id,
-                'organization_id' => $run->organization_id,
-                'result' => (string) $run->result,
-                'reproducibility_hash' => (string) $run->reproducibility_hash,
-                'created_at' => optional($run->created_at)->toIso8601String(),
-            ])->values()->all()
+                'id', 'metric_version_id', 'period_key', 'scope_type', 'scope_id', 'organization_id', 'result', 'completeness', 'reproducibility_hash', 'created_at',
+            ])->map(static function ($run): array {
+                $completeness = $run->completeness;
+                $evidenceStatus = $completeness === 'complete'
+                    ? 'complete'
+                    : ($completeness === 'incomplete' ? 'incomplete' : 'historic_unclassified');
+
+                return [
+                    'id' => (string) $run->id,
+                    'metric_version_id' => (string) $run->metric_version_id,
+                    'period_key' => (string) $run->period_key,
+                    'scope_type' => (string) $run->scope_type,
+                    'scope_id' => $run->scope_id,
+                    'organization_id' => $run->organization_id,
+                    // A retained result is not displayable operational truth
+                    // when its source cohort was incomplete (or predates the
+                    // completeness classification). Never leak it through the
+                    // workspace after Reporting intentionally withheld it.
+                    'result' => $completeness === 'complete' ? (string) $run->result : null,
+                    'completeness' => $completeness,
+                    'evidence_status' => $evidenceStatus,
+                    'reproducibility_hash' => (string) $run->reproducibility_hash,
+                    'created_at' => optional($run->created_at)->toIso8601String(),
+                ];
+            })->values()->all()
             : [];
 
         return [

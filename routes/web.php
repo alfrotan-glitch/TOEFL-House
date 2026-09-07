@@ -189,6 +189,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('attempts', [PlacementController::class, 'startAttempt'])->name('attempt.start');
         Route::post('attempts/{attemptId}/submit', [PlacementController::class, 'submitDigital'])->name('attempt.submit');
         Route::post('attempts/{attemptId}/submit-physical', [PlacementController::class, 'submitPhysical'])->name('attempt.submit-physical');
+        Route::post('attempts/{attemptId}/ingest-answers', [PlacementController::class, 'ingestPhysicalAnswers'])->name('attempt.ingest-answers');
         Route::post('sections/score', [PlacementController::class, 'scoreSection'])->name('section.score');
         Route::post('sections/results/{sectionResultId}/moderate', [PlacementController::class, 'moderateSection'])->name('section.moderate');
         Route::post('sections/results/{sectionResultId}/approve', [PlacementController::class, 'approveSection'])->name('section.approve');
@@ -206,7 +207,10 @@ Route::middleware('employee')->group(function (): void {
         Route::post('sections', [PlacementController::class, 'defineSection'])->name('section.define');
         Route::post('sections/{sectionId}/transition', [PlacementController::class, 'transitionSection'])->name('section.transition');
         Route::post('questions', [PlacementController::class, 'defineQuestion'])->name('question.define');
+        Route::post('questions/{questionId}/transition', [PlacementController::class, 'transitionQuestion'])->name('question.transition');
+        Route::post('questions/{questionId}/media', [PlacementController::class, 'attachQuestionMedia'])->name('question.media.attach');
         Route::post('rubrics', [PlacementController::class, 'defineRubric'])->name('rubric.define');
+        Route::post('rubrics/{rubricId}/transition', [PlacementController::class, 'transitionRubric'])->name('rubric.transition');
     });
 
     // Teachers & HR

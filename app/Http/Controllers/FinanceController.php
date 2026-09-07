@@ -39,6 +39,8 @@ use App\Modules\Finance\Models\Reconciliation;
 use App\Modules\Finance\Models\Refund;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Organization\Models\Organization;
 use App\Modules\Payroll\Models\SettlementProposal;
 use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
@@ -82,7 +84,70 @@ final class FinanceController extends Controller
             ->select('id');
         $branchJournalIds = Journal::query()->where('source_type', 'obligation')->whereIn('source_id', $obligationIds)->select('id');
         $visibleJournalIds = Journal::query()->whereIn('id', $branchJournalIds)->orWhereIn('reversal_of_id', $branchJournalIds)->select('id');
-        $globalFundingSources = $globalFinanceAuthority ? FundingSource::query()->orderBy('name')->get() : collect();
+
+        // Funding pools are Finance-owned organization facts, not global
+        // reference data. A generic Finance/period/chart capability must not
+        // disclose another organization's agreement, restriction, or pool.
+        $fundEstablishOrganizationIds = $this->authorizedOrganizations(AllocateFunds::CAPABILITY_ESTABLISH);
+        $fundingLineBranches = $this->authorizedBranches(AllocateFunds::CAPABILITY_ALLOCATE);
+        // Allocation authority is evaluated on the concrete obligation branch.
+        // Convert only those authorized branches to their current owning
+        // organizations before reading source pools; an unrelated Finance
+        // grant must never make a pool visible.
+        $fundingAuthorityBranchOrganizations = Branch::query()
+            ->whereIn('id', $fundingLineBranches)
+            ->get()
+            ->mapWithKeys(static fn (Branch $branch): array => [(string) $branch->id => $branch->structureScope()->organizationId]);
+        $fundAllocateOrganizationIds = array_values(array_unique(array_merge(
+            $this->authorizedOrganizations(AllocateFunds::CAPABILITY_ALLOCATE),
+            $fundingAuthorityBranchOrganizations->filter(static fn (mixed $organizationId): bool => is_string($organizationId) && $organizationId !== '')->values()->all(),
+        ), SORT_STRING));
+        sort($fundAllocateOrganizationIds);
+        $fundReadOrganizationIds = array_values(array_unique(array_merge($fundEstablishOrganizationIds, $fundAllocateOrganizationIds), SORT_STRING));
+        sort($fundReadOrganizationIds);
+        $fundingSources = FundingSource::query()
+            ->whereIn('organization_id', $fundReadOrganizationIds)
+            ->orderBy('name')
+            ->get();
+        $allocatableFundingSourceIds = $fundingSources
+            ->whereIn('organization_id', $fundAllocateOrganizationIds)
+            ->pluck('id')
+            ->all();
+        $fundingObligationLines = ObligationLine::query()
+            ->whereIn('obligation_id', Obligation::query()->where(function ($query) use ($fundingLineBranches): void {
+                $query->whereIn('current_home_branch_id', $fundingLineBranches)
+                    ->orWhere(function ($query) use ($fundingLineBranches): void {
+                        $query->whereNull('current_home_branch_id')->whereIn('originating_branch_id', $fundingLineBranches);
+                    });
+            })->select('id'))
+            ->orderByDesc('id')
+            ->limit(500)
+            ->get();
+        $fundingObligationBranches = Obligation::query()
+            ->whereIn('id', $fundingObligationLines->pluck('obligation_id'))
+            ->get(['id', 'current_home_branch_id', 'originating_branch_id'])
+            ->mapWithKeys(static fn (Obligation $obligation): array => [
+                (string) $obligation->id => trim((string) $obligation->current_home_branch_id) !== ''
+                    ? trim((string) $obligation->current_home_branch_id)
+                    : trim((string) $obligation->originating_branch_id),
+            ]);
+        $fundingBranchOrganizations = Branch::query()
+            ->whereIn('id', $fundingObligationBranches->filter()->unique()->values())
+            ->get()
+            ->mapWithKeys(static fn (Branch $branch): array => [(string) $branch->id => $branch->structureScope()->organizationId]);
+        $fundingObligationLinesByOrganization = $fundingObligationLines
+            ->filter(static function (ObligationLine $line) use ($fundingObligationBranches, $fundingBranchOrganizations, $fundAllocateOrganizationIds): bool {
+                $organizationId = $fundingBranchOrganizations->get($fundingObligationBranches->get($line->obligation_id, ''));
+
+                return is_string($organizationId) && in_array($organizationId, $fundAllocateOrganizationIds, true);
+            })
+            ->groupBy(static fn (ObligationLine $line): string => (string) $fundingBranchOrganizations->get($fundingObligationBranches->get($line->obligation_id, '')));
+        $fundEstablishOrganizations = Organization::query()
+            ->whereIn('id', $fundEstablishOrganizationIds)
+            ->where('lifecycle_state', 'active')
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
         $globalPeriods = $globalFinanceAuthority ? FinancialPeriod::query()->orderBy('period_key')->get() : collect();
         $globalAccounts = $globalFinanceAuthority ? Account::query()->orderBy('code')->get() : collect();
         $globalReconciliations = $globalFinanceAuthority ? Reconciliation::query()->orderByDesc('id')->limit(100)->get() : collect();
@@ -98,8 +163,16 @@ final class FinanceController extends Controller
             'credits' => FinancialCredit::query()->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(100)->get(),
             'installmentPlans' => EnrollmentInstallmentPlan::query()->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(100)->get(),
             'gateExceptions' => FinancialGateException::query()->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(100)->get(),
-            'fundingSources' => $globalFundingSources,
-            'fundAllocations' => FundAllocation::query()->whereIn('obligation_line_id', $obligationLineIds)->orderByDesc('id')->limit(200)->get(),
+            'fundingSources' => $fundingSources,
+            'allocatableFundingSourceIds' => $allocatableFundingSourceIds,
+            'fundingObligationLinesByOrganization' => $fundingObligationLinesByOrganization,
+            'fundEstablishOrganizations' => $fundEstablishOrganizations,
+            'fundOrganizationNames' => Organization::query()->whereIn('id', $fundReadOrganizationIds)->pluck('name', 'id'),
+            'fundAllocations' => FundAllocation::query()
+                ->whereIn('fund_id', $allocatableFundingSourceIds)
+                ->orderByDesc('id')
+                ->limit(200)
+                ->get(),
             'financialCorrections' => FinancialCorrection::query()->whereIn('id', $financialCorrectionIds)->orderByDesc('id')->limit(200)->get(),
             'periods' => $globalPeriods,
             'students' => Student::query()->whereIn('id', $studentIds)->orderBy('student_code')->limit(300)->get(),
@@ -307,7 +380,7 @@ final class FinanceController extends Controller
         // the command sees the lines. A partially filled slot is invalid.
         $input = $request->validate([
             'period_id' => ['required', 'string'],
-            'source_type' => ['required', 'in:obligation,payroll_result,other'],
+            'source_type' => ['required', 'in:obligation,payroll_liability,other'],
             'source_id' => ['nullable', 'string'],
             'reason' => ['required', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1', 'max:4'],
@@ -495,6 +568,7 @@ final class FinanceController extends Controller
     public function establishFund(Request $request): RedirectResponse
     {
         $input = $request->validate([
+            'organization_id' => ['required', 'string'],
             'name' => ['required', 'string', 'max:120'],
             'agreement_ref' => ['required', 'string', 'max:120'],
             'committed_amount' => ['required', 'numeric', 'money', 'gt:0'],
@@ -504,6 +578,7 @@ final class FinanceController extends Controller
 
         app(AllocateFunds::class)->establish(
             $this->actor(),
+            $input['organization_id'],
             $input['name'],
             $input['agreement_ref'],
             $input['committed_amount'],

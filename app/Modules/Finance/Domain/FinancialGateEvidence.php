@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Finance\Domain;
 
+use App\Support\MoneyAmount;
 use App\Support\Signing\CanonicalJson;
 
 /**
@@ -47,6 +48,62 @@ final class FinancialGateEvidence
 
         return hash_equals(hash('sha256', $canonical), $digest)
             && hash_equals(hash_hmac('sha256', $canonical, self::secret()), $signature);
+    }
+
+    /**
+     * Accept only the signed part of a Finance assessment at a consuming
+     * boundary. The convenience fields returned alongside evidence are a
+     * transport envelope, not a second source of financial truth: callers
+     * must never persist or audit them without deriving them back from the
+     * HMAC-protected evidence.
+     *
+     * @param array<string, mixed> $assessment
+     * @return array{evidence: array<string, mixed>, digest: string, signature: string, satisfied: bool, uncovered: numeric-string, remaining: numeric-string, assessed_at: string}|null
+     */
+    public static function verifiedAssessment(array $assessment): ?array
+    {
+        $evidence = $assessment['evidence'] ?? null;
+        $digest = $assessment['digest'] ?? null;
+        $signature = $assessment['signature'] ?? null;
+        if (! is_array($evidence) || ! is_string($digest) || ! is_string($signature)) {
+            return null;
+        }
+
+        try {
+            if (! self::verify($evidence, $digest, $signature)) {
+                return null;
+            }
+        } catch (\Throwable) {
+            // Canonicalization must be total at this trust boundary: malformed
+            // adapter data is invalid evidence, never an application failure.
+            return null;
+        }
+
+        $satisfied = $evidence['satisfied'] ?? null;
+        $assessedAt = $evidence['assessed_at'] ?? null;
+        if (! is_bool($satisfied) || ! is_string($assessedAt) || trim($assessedAt) === '') {
+            return null;
+        }
+
+        try {
+            $uncovered = MoneyAmount::decimal($evidence['uncovered'] ?? null);
+            $remaining = MoneyAmount::decimal($evidence['remaining'] ?? null);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+        if (! MoneyAmount::nonNegative($uncovered) || ! MoneyAmount::nonNegative($remaining)) {
+            return null;
+        }
+
+        return [
+            'evidence' => $evidence,
+            'digest' => $digest,
+            'signature' => $signature,
+            'satisfied' => $satisfied,
+            'uncovered' => $uncovered,
+            'remaining' => $remaining,
+            'assessed_at' => $assessedAt,
+        ];
     }
 
     private static function secret(): string

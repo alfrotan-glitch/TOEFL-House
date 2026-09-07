@@ -22,7 +22,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $person_id
  * @property string $authority_audit_event_id
  * @property string $converted_by
- * @property string $converted_at
+ * @property \Carbon\CarbonImmutable $converted_at
+ * @property string|null $conversion_time_basis
  * @property string $correlation_id
  */
 final class VisitorConversionHandoff extends Model

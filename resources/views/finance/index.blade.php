@@ -367,12 +367,12 @@
                 <select name="source_type" required>
                     <option value="other">Other</option>
                     <option value="obligation">Obligation</option>
-                    <option value="payroll_result">Payroll result</option>
+                    <option value="payroll_liability">Finance-recognized payroll liability</option>
                 </select>
             </div>
             <div>
                 <label>Source reference</label>
-                <input name="source_id" type="text" placeholder="optional">
+                <input name="source_id" type="text" placeholder="required for obligation or payroll liability">
             </div>
         </div>
         <div class="fields">
@@ -587,57 +587,78 @@
 <div class="card">
     <h2>Funding sources</h2>
     <p class="sub">An immutable funding agreement establishes a pool and its restriction; allocations apply fund money to student obligation lines of the permitted use only and never exceed the committed pool.</p>
-    <form method="POST" action="{{ route('finance.fund.establish') }}">
-        @csrf
-        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
-        <div class="row">
-            <div>
-                <label>Name</label>
-                <input name="name" type="text" required>
+    @if ($fundEstablishOrganizations->isNotEmpty())
+        <form method="POST" action="{{ route('finance.fund.establish') }}">
+            @csrf
+            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+            <div class="row">
+                <div>
+                    <label>Owning organization</label>
+                    <select name="organization_id" required>
+                        <option value="">Organization…</option>
+                        @foreach ($fundEstablishOrganizations as $organization)
+                            <option value="{{ $organization->id }}">{{ $organization->name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <label>Name</label>
+                    <input name="name" type="text" required>
+                </div>
+                <div>
+                    <label>Agreement reference</label>
+                    <input name="agreement_ref" type="text" required>
+                </div>
+                <div>
+                    <label>Committed amount</label>
+                    <input name="committed_amount" type="text" inputmode="decimal" required>
+                </div>
+                <div>
+                    <label>Restricted category (optional)</label>
+                    <input name="restricted_category" type="text">
+                </div>
+                <div>
+                    <label>Restriction note (required when restricted)</label>
+                    <input name="restriction_note" type="text">
+                </div>
             </div>
-            <div>
-                <label>Agreement reference</label>
-                <input name="agreement_ref" type="text" required>
-            </div>
-            <div>
-                <label>Committed amount</label>
-                <input name="committed_amount" type="text" inputmode="decimal" required>
-            </div>
-            <div>
-                <label>Restricted category (optional)</label>
-                <input name="restricted_category" type="text">
-            </div>
-            <div>
-                <label>Restriction note (required when restricted)</label>
-                <input name="restriction_note" type="text">
-            </div>
-        </div>
-        <div class="actions"><button type="submit" class="btn">Establish funding source</button></div>
-    </form>
+            <div class="actions"><button type="submit" class="btn">Establish funding source</button></div>
+        </form>
+    @else
+        <p class="empty">You do not have organization-scoped authority to establish a funding source.</p>
+    @endif
     @if ($fundingSources->isEmpty())
         <p class="empty">No funding sources recorded.</p>
     @else
         <table class="grid" style="margin-top:8px">
-            <tr><th>Name</th><th>Committed</th><th>Restriction</th><th>Allocate</th></tr>
+            <tr><th>Name</th><th>Organization</th><th>Committed</th><th>Restriction</th><th>Allocate</th></tr>
             @foreach ($fundingSources as $fundingSource)
+                @php($eligibleFundingLines = $fundingObligationLinesByOrganization->get($fundingSource->organization_id, collect()))
                 <tr>
                     <td>{{ $fundingSource->name }}</td>
+                    <td>{{ $fundOrganizationNames->get($fundingSource->organization_id, '—') }}</td>
                     <td>{{ $fundingSource->committed_amount }}</td>
                     <td class="muted">{{ $fundingSource->restricted_category ?? '—' }}</td>
                     <td>
-                        <form method="POST" action="{{ route('finance.fund.allocate', $fundingSource->id) }}" style="display:inline">
-                            @csrf
-                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
-                            <select name="obligation_line_id" required>
-                                <option value="">Obligation line…</option>
-                                @foreach ($obligationLines as $line)
-                                    <option value="{{ $line->id }}">{{ \Illuminate\Support\Str::limit($line->obligation_id, 12) }} / {{ $line->category }} ({{ $line->amount }})</option>
-                                @endforeach
-                            </select>
-                            <input name="amount" type="text" inputmode="decimal" placeholder="Amount" required>
-                            <input name="reason" type="text" placeholder="Reason" required>
-                            <button type="submit" class="btn small">Allocate</button>
-                        </form>
+                        @if (in_array($fundingSource->id, $allocatableFundingSourceIds, true) && $eligibleFundingLines->isNotEmpty())
+                            <form method="POST" action="{{ route('finance.fund.allocate', $fundingSource->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="obligation_line_id" required>
+                                    <option value="">Obligation line…</option>
+                                    @foreach ($eligibleFundingLines as $line)
+                                        <option value="{{ $line->id }}">{{ \Illuminate\Support\Str::limit($line->obligation_id, 12) }} / {{ $line->category }} ({{ $line->amount }})</option>
+                                    @endforeach
+                                </select>
+                                <input name="amount" type="text" inputmode="decimal" placeholder="Amount" required>
+                                <input name="reason" type="text" placeholder="Reason" required>
+                                <button type="submit" class="btn small">Allocate</button>
+                            </form>
+                        @elseif (in_array($fundingSource->id, $allocatableFundingSourceIds, true))
+                            <span class="muted">No eligible obligation line in this organization.</span>
+                        @else
+                            <span class="muted">No allocation authority for this organization.</span>
+                        @endif
                     </td>
                 </tr>
             @endforeach

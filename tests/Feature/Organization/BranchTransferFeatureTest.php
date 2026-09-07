@@ -10,7 +10,7 @@ use App\Modules\Organization\Queries\EffectiveStructureQuery;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Identifiers\RandomIdentifier;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Database\QueryException;
 use Tests\Concerns\BuildsActors;
 use Tests\Concerns\OperatesStructure;
 use Tests\TestCase;
@@ -105,7 +105,7 @@ final class BranchTransferFeatureTest extends TestCase
         $secondCampus = $this->establishActiveCampus($organization, 'Second');
         $branch = $this->establishActiveBranch($firstCampus);
 
-        $this->expectException(UniqueConstraintViolationException::class);
+        $this->expectException(QueryException::class);
         CampusAssignment::query()->create([
             'id' => RandomIdentifier::new(),
             'branch_id' => $branch->id,
@@ -113,6 +113,26 @@ final class BranchTransferFeatureTest extends TestCase
             'effective_from' => '2026-09-01',
             'effective_to' => null,
             'transfer_correlation_id' => 'race-simulation',
+        ]);
+    }
+
+    public function test_closed_historical_attribution_cannot_overlap_the_current_attribution(): void
+    {
+        $organization = $this->establishActiveOrganization();
+        $firstCampus = $this->establishActiveCampus($organization, 'First');
+        $secondCampus = $this->establishActiveCampus($organization, 'Second');
+        $branch = $this->establishActiveBranch($firstCampus);
+
+        // This does not violate the old one-open-row index, but it creates
+        // two effective organization roots during March 2026 and must fail.
+        $this->expectException(QueryException::class);
+        CampusAssignment::query()->create([
+            'id' => RandomIdentifier::new(),
+            'branch_id' => $branch->id,
+            'campus_id' => $secondCampus->id,
+            'effective_from' => '2026-03-01',
+            'effective_to' => '2026-04-01',
+            'transfer_correlation_id' => 'overlap-probe',
         ]);
     }
 

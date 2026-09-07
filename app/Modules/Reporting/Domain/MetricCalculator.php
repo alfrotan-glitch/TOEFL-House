@@ -12,7 +12,12 @@ namespace App\Modules\Reporting\Domain;
 interface MetricCalculator
 {
     /**
-     * @return array{value: string, meta: array<string, mixed>}
+     * `completeness` is optional because most authoritative calculations are
+     * fully known. A calculator must return `incomplete` rather than turn
+     * unresolved historical provenance or temporal evidence into a deceptively
+     * complete slice.
+     *
+     * @return array{value: string, meta: array<string, mixed>, completeness?: 'complete'|'incomplete'}
      */
     public function compute(string $periodId, ?string $scopeId): array;
 }

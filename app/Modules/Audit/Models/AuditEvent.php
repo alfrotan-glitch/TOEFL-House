@@ -21,6 +21,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $correlation_id
  * @property array<string, mixed>|null $before_state
  * @property array<string, mixed>|null $after_state
+ * @property \Carbon\CarbonImmutable|null $occurred_at
+ * @property 'database_insert'|null $occurred_time_basis
  */
 final class AuditEvent extends Model
 {
@@ -30,12 +32,13 @@ final class AuditEvent extends Model
 
     protected $fillable = [
         'id', 'actor_id', 'operation', 'target_type', 'target_id',
-        'correlation_id', 'before_state', 'after_state', 'occurred_at',
+        'correlation_id', 'before_state', 'after_state',
     ];
 
     protected $casts = [
         'before_state' => 'array',
         'after_state' => 'array',
+        'occurred_at' => 'immutable_datetime',
     ];
 
     public $timestamps = false;

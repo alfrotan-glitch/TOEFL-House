@@ -7,7 +7,10 @@ namespace Tests\Feature\Placement;
 use App\Modules\Academic\Commands\ManageAcademicAppeal;
 use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Academic\Placement\Commands\DecidePlacement;
+use App\Modules\Academic\Placement\Commands\ManagePlacementProfile;
 use App\Modules\Academic\Placement\Models\PlacementProfile;
+use App\Modules\Academic\Placement\Models\PlacementQuestion;
+use App\Modules\Academic\Placement\Models\PlacementQuestionMedia;
 use App\Modules\Documents\Commands\DefineDocumentClassification;
 use App\Modules\Identity\Models\UserAccount;
 use App\Support\Errors\BusinessRejection;
@@ -37,9 +40,49 @@ final class PlacementWebFeatureTest extends TestCase
         $this->post('/login', ['username' => $username, 'password' => 'placement-password'])->assertRedirect('/');
     }
 
+    public function test_in_progress_attempt_renders_only_checksums_media_authority(): void
+    {
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('plc-media-person', []);
+        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile(
+            $this->placementOfficer('plc-media-open'),
+            $person->id,
+            $this->programVersionId,
+            'plc-media-open',
+            null,
+            $this->placementBranchId,
+        )['profile_id']);
+        app(ManagePlacementProfile::class)->startAttempt(
+            $this->placementOfficer('plc-media-start'),
+            $profile,
+            $this->testVersionId,
+            'digital',
+            'plc-media-start',
+        );
+
+        $question = PlacementQuestion::query()->where('code', 'grammar-a')->firstOrFail();
+        $this->assertNull($question->media_ref, 'new catalog questions must not retain the legacy display pointer');
+        $this->assertDatabaseHas('placement_question_media', [
+            'question_id' => $question->id,
+            'uri' => 'placement-media/grammar-a.mp3',
+            'lifecycle_state' => 'active',
+        ]);
+        $this->assertSame(1, PlacementQuestionMedia::query()->where('question_id', $question->id)->where('lifecycle_state', 'active')->count());
+
+        // Delivery staff do not need catalog-maintenance authority to start
+        // or render the compatible frozen version for their own profile.
+        $viewer = $this->grantedActor('plc-media-viewer', ['placement.conduct']);
+        $this->signInAs($viewer->actorId, 'placement.media.viewer');
+        $this->get(route('placement.show', $profile->id))
+            ->assertOk()
+            ->assertSee('v1 (published)')
+            ->assertSee('placement-media/grammar-a.mp3')
+            ->assertSee('SHA-256');
+    }
+
     public function test_placement_report_registers_through_documents(): void
     {
-        $officer = $this->grantedActor('plc-doc-officer', ['documents.classify', 'documents.register']);
+        $officer = $this->grantedActor('plc-doc-officer', ['placement.conduct', 'documents.classify', 'documents.register']);
         $classificationId = app(DefineDocumentClassification::class)->defineClassification($officer, 'placement', 'Academic', 'restricted', 'plc-doc-class')['classification_id'];
 
         $this->setUpPlacementCatalog();
@@ -47,6 +90,10 @@ final class PlacementWebFeatureTest extends TestCase
         $profile = $this->completeReleasedPlacement($person->id, 'plc-doc');
 
         $this->signInAs($officer->actorId, 'placement.doc');
+        $this->get(route('placement.show', $profile->id))
+            ->assertOk()
+            ->assertSee('Released at')
+            ->assertSee('database_transition');
         $this->post(route('placement.report.register', $profile->id), [
             'classification_id' => $classificationId,
             'title' => 'Placement Report',

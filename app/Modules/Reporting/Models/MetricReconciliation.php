@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Model;
  * source; immutable history.
  *
  * @property string $id
+ * @property string|null $organization_id
+ * @property string|null $metric_projection_id
  * @property string $variance
  * @property string $status
  */
@@ -20,5 +22,5 @@ final class MetricReconciliation extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'metric_id', 'period_key', 'scope_type', 'scope_id', 'reported_value', 'authoritative_value', 'variance', 'status', 'explanation', 'reconciled_by'];
+    protected $fillable = ['id', 'metric_id', 'metric_projection_id', 'period_key', 'scope_type', 'scope_id', 'organization_id', 'reported_value', 'authoritative_value', 'variance', 'status', 'explanation', 'reconciled_by'];
 }

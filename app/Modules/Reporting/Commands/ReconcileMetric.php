@@ -58,15 +58,17 @@ final class ReconcileMetric
                     if ($scopeId === '') {
                         throw BusinessRejection::forCode('reporting.scope_shape', 'the scope id may not be empty');
                     }
-                    if (in_array($scopeType, ['global', 'fund'], true)) {
-                        // Organization-wide scopes require organization-rooted
-                        // authority; branch/campus grants are not wildcards.
+                    if ($scopeType === 'global') {
+                        // Global is explicit platform scope. Every target-bound
+                        // scope, including Finance-owned funds, is resolved and
+                        // authorized by ReportingScope below.
                         $this->require($actor);
                     }
                     $organizationId = $this->scopes->authorize($actor, self::CAPABILITY, $scopeType, $scopeId);
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
+                    MetricCatalog::assertDefinitionLineage($metric, $entry);
                     $periodId = MetricCatalog::resolvePeriod($entry['authority'], $periodKey);
                     /** @var MetricVersion $version */
                     $version = MetricVersion::query()->where('metric_id', $metric->id)->where('version_no', $metric->current_version)->firstOrFail();
@@ -74,6 +76,17 @@ final class ReconcileMetric
                     /** @var MetricCalculator $calculator */
                     $calculator = app($entry['calculator']);
                     $authoritative = $calculator->compute($periodId, $scopeId);
+                    $authoritativeCompleteness = (string) ($authoritative['completeness'] ?? 'complete');
+                    if (! in_array($authoritativeCompleteness, ['complete', 'incomplete'], true)) {
+                        throw new \LogicException('a metric calculator returned an unsupported reconciliation completeness state');
+                    }
+                    // A numerical value from a deliberately incomplete source
+                    // is diagnostic metadata, not a comparable accounting or
+                    // operational fact. Never record a misleading “matched”
+                    // reconciliation against unresolved source evidence.
+                    if ($authoritativeCompleteness !== 'complete') {
+                        throw BusinessRejection::forCode('reporting.authoritative_evidence_incomplete', 'the authoritative metric evidence is incomplete and cannot be reconciled until its provenance is resolved');
+                    }
 
                     /** @var MetricProjection|null $reported */
                     $reported = MetricProjection::query()
@@ -87,6 +100,9 @@ final class ReconcileMetric
                     if ($reported === null) {
                         throw BusinessRejection::forCode('reporting.nothing_reported', 'no projection exists to reconcile');
                     }
+                    if ($reported->completeness !== 'complete') {
+                        throw BusinessRejection::forCode('reporting.projection_stale', 'only a complete current projection may be reconciled');
+                    }
                     $reportedOrganizationId = trim((string) $reported->organization_id);
                     if (($organizationId === null && $reportedOrganizationId !== '') || ($organizationId !== null && $reportedOrganizationId !== $organizationId)) {
                         throw BusinessRejection::forCode('reporting.projection_scope_conflict', 'the reported projection has stale organization provenance for its current scope');
@@ -97,9 +113,11 @@ final class ReconcileMetric
                     $reconciliation = MetricReconciliation::query()->create([
                         'id' => RandomIdentifier::new(),
                         'metric_id' => $metric->id,
+                        'metric_projection_id' => $reported->id,
                         'period_key' => $periodKey,
                         'scope_type' => $scopeType,
                         'scope_id' => $scopeId,
+                        'organization_id' => $organizationId,
                         'reported_value' => (string) $reported->value,
                         'authoritative_value' => $authoritative['value'],
                         'variance' => $variance,
@@ -108,6 +126,7 @@ final class ReconcileMetric
                     ]);
                     $event = $this->audit->record($actor->actorId, 'reporting.reconcile', 'metric_reconciliation', $reconciliation->id, null, [
                         'metric' => $metricKey, 'period' => $periodKey, 'status' => $status, 'variance' => $variance,
+                        'scope_type' => $scopeType, 'scope_id' => $scopeId, 'organization_id' => $organizationId, 'metric_projection_id' => $reported->id,
                     ]);
 
                     return ['reconciliation_id' => $reconciliation->id, 'status' => $status, 'variance' => $variance, 'correlation_id' => $event->correlation_id];

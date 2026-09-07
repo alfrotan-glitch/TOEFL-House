@@ -196,7 +196,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         $obligation = $this->postTuitionObligation('sponsor', $period, $setup['student_id']);
 
         $fundManager = $this->grantedActor('gate-sponsor-manager', ['finance.fund', 'finance.fund_allocate']);
-        $established = app(AllocateFunds::class)->establish($fundManager, 'Sponsorship Pool', 'gate-sponsor-agreement', '1000.00', 'tuition', 'sponsorship', 'gate-fund-establish');
+        $established = app(AllocateFunds::class)->establish($fundManager, $this->bootstrapOrganizationId, 'Sponsorship Pool', 'gate-sponsor-agreement', '1000.00', 'tuition', 'sponsorship', 'gate-fund-establish');
         $line = ObligationLine::query()->where('obligation_id', $obligation->id)->firstOrFail();
         app(AllocateFunds::class)->allocate($fundManager, FundingSource::query()->findOrFail($established['fund_id']), $line, '1000.00', 'sponsorship settlement', 'gate-fund-allocate');
 
@@ -375,6 +375,85 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         $tampered['remaining'] = '9999.99';
 
         $this->assertFalse(FinancialGateEvidence::verify($tampered, (string) $enrollment->financial_gate_evidence_sha256, (string) $enrollment->financial_gate_signature));
+    }
+
+    public function test_signed_evidence_normalizes_unsigned_transport_envelope_amounts(): void
+    {
+        $evidence = [
+            'schema_version' => FinancialGateEvidence::SCHEMA_VERSION,
+            'assessed_at' => '2026-09-07T09:00:00+00:00',
+            'student_id' => 'gate-student',
+            'offering_id' => null,
+            'class_id' => 'gate-class',
+            'obligations' => [],
+            'uncovered' => '1000.00',
+            'coverage' => ['payment_discount_funding' => '1000.00', 'credit' => '0.00', 'installment' => '0.00', 'exception' => '0.00'],
+            'credits' => [],
+            'installment_plans' => [],
+            'exceptions' => [],
+            'remaining' => '0.00',
+            'satisfied' => true,
+        ];
+        $signed = FinancialGateEvidence::sign($evidence);
+
+        $verified = FinancialGateEvidence::verifiedAssessment([
+            'evidence' => $evidence,
+            'digest' => $signed['digest'],
+            'signature' => $signed['signature'],
+            // These envelope values model a substituted adapter response. They
+            // are deliberately not signed and must never become audit/row data.
+            'satisfied' => false,
+            'uncovered' => '0.00',
+            'remaining' => '999999.99',
+            'assessed_at' => '1999-01-01T00:00:00+00:00',
+        ]);
+
+        $this->assertNotNull($verified);
+        $this->assertTrue($verified['satisfied']);
+        $this->assertSame('1000.00', $verified['uncovered']);
+        $this->assertSame('0.00', $verified['remaining']);
+        $this->assertSame('2026-09-07T09:00:00+00:00', $verified['assessed_at']);
+
+        $invalidEvidence = $evidence;
+        $invalidEvidence['remaining'] = '-0.01';
+        $invalidSigned = FinancialGateEvidence::sign($invalidEvidence);
+        $this->assertNull(FinancialGateEvidence::verifiedAssessment([
+            'evidence' => $invalidEvidence,
+            'digest' => $invalidSigned['digest'],
+            'signature' => $invalidSigned['signature'],
+        ]), 'even a correctly signed malformed assessment must fail closed at the consuming boundary');
+    }
+
+    public function test_direct_sql_cannot_activate_without_complete_satisfied_finance_gate_evidence(): void
+    {
+        $setup = $this->makeEnrollmentRequest('raw-activation');
+        $triggerNames = DB::table('pg_trigger')
+            ->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')
+            ->where('pg_class.relname', 'enrollments')
+            ->where('pg_trigger.tgisinternal', false)
+            ->pluck('tgname')
+            ->all();
+        $this->assertContains('enrollments_financial_gate_activation_guard_trigger', $triggerNames);
+
+        $this->expectException(QueryException::class);
+        DB::table('enrollments')->where('id', $setup['enrollment_id'])->update([
+            'lifecycle_state' => 'active',
+        ]);
+    }
+
+    public function test_direct_sql_cannot_rewrite_finance_gate_evidence_after_activation(): void
+    {
+        $setup = $this->makeEnrollmentRequest('raw-history');
+        app(MaintainEnrollment::class)->activate(
+            $this->academicOfficer('gate-activate-raw-history'),
+            Enrollment::query()->findOrFail($setup['enrollment_id']),
+            'gate-activate-raw-history',
+        );
+
+        $this->expectException(QueryException::class);
+        DB::table('enrollments')->where('id', $setup['enrollment_id'])->update([
+            'financial_gate_satisfied' => false,
+        ]);
     }
 
     public function test_finance_fact_proposals_are_idempotent(): void

@@ -15,39 +15,55 @@ namespace App\Support\Signing;
  */
 final class AcademicEligibilitySigner
 {
-    public const KEY_VERSION = 'app_key_v1';
+    /** The signer used by pre-convergence v1 snapshots. */
+    public const LEGACY_KEY_VERSION = 'app_key_v1';
+
+    /** The domain-separated signer used by v2 exact-lineage snapshots. */
+    public const KEY_VERSION = 'app_key_v2';
 
     public const ALGORITHM = 'hmac-sha256';
 
-    public const CONTRACT = 'academic-eligibility-snapshot-v1';
+    public const LEGACY_CONTRACT = 'academic-eligibility-snapshot-v1';
 
-    public static function sign(string $canonical): string
+    public const CONTRACT = 'academic-eligibility-snapshot-v2';
+
+    public static function sign(string $canonical, string $keyVersion = self::KEY_VERSION): string
     {
-        return hash_hmac('sha256', $canonical, self::secret());
+        $secret = self::secretFor($keyVersion);
+        if ($secret === null) {
+            throw new \InvalidArgumentException('unsupported academic eligibility signing key version');
+        }
+
+        return hash_hmac('sha256', $canonical, $secret);
     }
 
     public static function verify(string $canonical, string $signature, string $keyVersion = self::KEY_VERSION): bool
     {
-        if ($keyVersion !== self::KEY_VERSION) {
-            return false;
-        }
-        if (strlen($signature) !== 64 || ! ctype_xdigit($signature)) {
+        $secret = self::secretFor($keyVersion);
+        if ($secret === null || strlen($signature) !== 64 || ! ctype_xdigit($signature)) {
             return false;
         }
 
-        return hash_equals(hash_hmac('sha256', $canonical, self::secret()), strtolower($signature));
+        return hash_equals(hash_hmac('sha256', $canonical, $secret), strtolower($signature));
     }
 
     /** @param array<string, mixed> $payload */
-    public static function verifyPayload(array $payload, string $signature): bool
+    public static function verifyPayload(array $payload, string $signature, string $keyVersion = self::KEY_VERSION): bool
     {
-        return self::verify(CanonicalJson::encode($payload), $signature);
+        return self::verify(CanonicalJson::encode($payload), $signature, $keyVersion);
     }
 
-    private static function secret(): string
+    private static function secretFor(string $keyVersion): ?string
     {
-        $appKey = (string) config('app.key', '');
+        $contract = match ($keyVersion) {
+            self::LEGACY_KEY_VERSION => self::LEGACY_CONTRACT,
+            self::KEY_VERSION => self::CONTRACT,
+            default => null,
+        };
+        if ($contract === null) {
+            return null;
+        }
 
-        return hash_hmac('sha256', self::CONTRACT, $appKey);
+        return hash_hmac('sha256', $contract, (string) config('app.key', ''));
     }
 }

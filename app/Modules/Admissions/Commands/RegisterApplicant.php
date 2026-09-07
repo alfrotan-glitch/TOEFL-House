@@ -84,7 +84,7 @@ final class RegisterApplicant
                     }
                     $snapshotId = null;
                     if ($placementProfileId !== null && $placementProfileId !== '') {
-                        $snapshotId = $this->requireReleasedEligibilitySnapshotFor($placementProfileId, $personId);
+                        $snapshotId = $this->requireReleasedEligibilitySnapshotFor($placementProfileId, $personId, $originatingBranchId);
                     }
 
                     $applicant = Applicant::query()->create([
@@ -118,7 +118,7 @@ final class RegisterApplicant
         }
     }
 
-    private function requireReleasedEligibilitySnapshotFor(string $placementProfileId, string $personId): string
+    private function requireReleasedEligibilitySnapshotFor(string $placementProfileId, string $personId, string $applicantBranchId): string
     {
         /** @var PlacementProfile|null $profile */
         $profile = PlacementProfile::query()->find($placementProfileId);
@@ -128,6 +128,16 @@ final class RegisterApplicant
         if ($profile->lifecycle_state !== PlacementProfile::STATE_RELEASED) {
             throw BusinessRejection::forCode('admissions.placement_not_released', 'admission registration may reference only a released placement profile');
         }
+        if ($profile->lineage_version !== PlacementProfile::LINEAGE_VERSION) {
+            throw BusinessRejection::forCode('admissions.placement_lineage_remediation_required', 'admission registration cannot consume pre-lineage placement evidence without governed remediation');
+        }
+        $profileBranchId = trim((string) ($profile->current_home_branch_id ?? $profile->originating_branch_id ?? ''));
+        if ($profileBranchId === '' || $profileBranchId !== trim($applicantBranchId)) {
+            // A cross-branch placement handoff needs an explicit authority and
+            // evidence model. Linking it implicitly would disclose and reuse
+            // branch-owned assessment evidence without either.
+            throw BusinessRejection::forCode('admissions.placement_branch_mismatch', 'an applicant placement reference must match the applicant operational branch');
+        }
 
         $snapshot = $this->eligibilitySnapshots->for($profile);
         if ($snapshot === null) {
@@ -135,6 +145,15 @@ final class RegisterApplicant
         }
         if (! $snapshot['verification']['valid']) {
             throw BusinessRejection::forCode('admissions.eligibility_snapshot_unverified', 'the placement eligibility snapshot could not be verified: '.$snapshot['verification']['reason']);
+        }
+        if ((string) ($snapshot['snapshot']['snapshot_schema_version'] ?? '') !== \App\Modules\Academic\Placement\Domain\AcademicEligibilitySnapshotBuilder::SCHEMA_VERSION
+            || (string) ($snapshot['snapshot']['placement_recommendation_id'] ?? '') !== trim((string) $profile->placement_recommendation_id)) {
+            throw BusinessRejection::forCode('admissions.eligibility_snapshot_lineage_invalid', 'admission registration requires the profile-pointer-bound v2 placement eligibility snapshot');
+        }
+        if ((string) ($snapshot['snapshot']['person_id'] ?? '') !== $personId
+            || (string) ($snapshot['snapshot']['placement_profile_id'] ?? '') !== $profile->id
+            || (string) ($snapshot['snapshot']['originating_branch_id'] ?? '') !== $profileBranchId) {
+            throw BusinessRejection::forCode('admissions.eligibility_snapshot_mismatch', 'the signed placement snapshot does not match the applicant evidence lineage');
         }
 
         return (string) $snapshot['snapshot']['id'];

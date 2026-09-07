@@ -38,7 +38,7 @@ final class ComputeProjection
         private readonly AttemptedOperation $attemptedOperation,
     ) {}
 
-    /** @return array{projection_id: string, value: string, correlation_id: string} */
+    /** @return array{projection_id: string, value: string, completeness: 'complete'|'incomplete', correlation_id: string} */
     public function compute(Actor $actor, string $metricKey, string $periodKey, string $scopeType, ?string $scopeId, string $idempotencyKey): array
     {
         $payload = hash('sha256', implode('|', ['reporting.projection.compute', $metricKey, $periodKey, $scopeType, (string) $scopeId, $actor->actorId]));
@@ -56,15 +56,17 @@ final class ComputeProjection
                     if ($scopeId === '') {
                         throw BusinessRejection::forCode('reporting.scope_shape', 'the scope id may not be empty');
                     }
-                    if (in_array($scopeType, ['global', 'fund'], true)) {
-                        // Organization-wide scopes require organization-rooted
-                        // authority; branch/campus grants are not wildcards.
+                    if ($scopeType === 'global') {
+                        // Global is explicit platform scope. Every target-bound
+                        // scope, including Finance-owned funds, is resolved and
+                        // authorized by ReportingScope below.
                         $this->require($actor);
                     }
                     $organizationId = $this->scopes->authorize($actor, self::CAPABILITY, $scopeType, $scopeId);
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
+                    MetricCatalog::assertDefinitionLineage($metric, $entry);
                     $periodId = MetricCatalog::resolvePeriod($entry['authority'], $periodKey);
 
                     /** @var MetricVersion $version */
@@ -73,6 +75,10 @@ final class ComputeProjection
                     /** @var MetricCalculator $calculator */
                     $calculator = app($entry['calculator']);
                     $computed = $calculator->compute($periodId, $scopeId);
+                    $completeness = (string) ($computed['completeness'] ?? 'complete');
+                    if (! in_array($completeness, ['complete', 'incomplete'], true)) {
+                        throw new \LogicException('a metric calculator returned an unsupported projection completeness state');
+                    }
 
                     /** @var MetricProjection|null $projection */
                     $projection = MetricProjection::query()
@@ -82,7 +88,12 @@ final class ComputeProjection
                         ->where(fn ($query) => $scopeId === null ? $query->whereNull('scope_id') : $query->where('scope_id', $scopeId))
                         ->lockForUpdate()
                         ->first();
-                    if ($projection !== null && $scopeType === 'branch' && (string) $projection->organization_id !== $organizationId) {
+                    $projectionOrganizationId = trim((string) ($projection?->organization_id ?? ''));
+                    if ($projection !== null && (($organizationId === null && $projectionOrganizationId !== '') || ($organizationId !== null && $projectionOrganizationId !== $organizationId))) {
+                        // Do not overwrite an old unknown/wrong tenant snapshot
+                        // during a rebuild. It is evidence requiring explicit
+                        // reconciliation, never a field that can be silently
+                        // repaired by the projection process.
                         throw BusinessRejection::forCode('reporting.projection_scope_conflict', 'the existing metric projection has different organization provenance');
                     }
                     if ($projection === null) {
@@ -94,7 +105,7 @@ final class ComputeProjection
                             'scope_id' => $scopeId,
                             'organization_id' => $organizationId,
                             'value' => $computed['value'],
-                            'completeness' => 'complete',
+                            'completeness' => $completeness,
                             'meta' => $computed['meta'],
                             'computed_at' => now(),
                             'computed_by' => $actor->actorId,
@@ -103,7 +114,7 @@ final class ComputeProjection
                         $projection->forceFill([
                             'organization_id' => $organizationId,
                             'value' => $computed['value'],
-                            'completeness' => 'complete',
+                            'completeness' => $completeness,
                             'meta' => $computed['meta'],
                             'computed_at' => now(),
                             'computed_by' => $actor->actorId,
@@ -111,10 +122,16 @@ final class ComputeProjection
                         $projection->save();
                     }
                     $event = $this->audit->record($actor->actorId, 'reporting.projection.compute', 'metric_projection', $projection->id, null, [
-                        'metric' => $metricKey, 'period' => $periodKey, 'scope_type' => $scopeType, 'scope_id' => $scopeId, 'organization_id' => $organizationId, 'value' => $computed['value'],
+                        'metric' => $metricKey, 'period' => $periodKey, 'scope_type' => $scopeType, 'scope_id' => $scopeId, 'organization_id' => $organizationId,
+                        'value' => $computed['value'], 'completeness' => $completeness, 'meta' => $computed['meta'],
                     ]);
 
-                    return ['projection_id' => $projection->id, 'value' => $computed['value'], 'correlation_id' => $event->correlation_id];
+                    return [
+                        'projection_id' => $projection->id,
+                        'value' => $computed['value'],
+                        'completeness' => $completeness,
+                        'correlation_id' => $event->correlation_id,
+                    ];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

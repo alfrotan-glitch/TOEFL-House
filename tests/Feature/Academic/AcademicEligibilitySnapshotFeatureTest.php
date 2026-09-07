@@ -10,10 +10,13 @@ use App\Modules\Academic\Commands\MaintainEnrollment;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Placement\Commands\DecidePlacement;
+use App\Modules\Academic\Placement\Domain\AcademicEligibilitySnapshotBuilder;
 use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
 use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
+use App\Modules\Academic\Queries\AcademicHistoryQuery;
 use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
@@ -21,8 +24,10 @@ use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Students\Models\Student;
 use App\Support\Signing\AcademicEligibilitySigner;
+use App\Support\Signing\CanonicalJson;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsPlacementCatalog;
 use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
@@ -48,7 +53,7 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $snapshot = app(AcademicEligibilitySnapshotQuery::class)->for($profile);
         $this->assertNotNull($snapshot);
         $this->assertTrue($snapshot['verification']['valid']);
-        $this->assertSame('academic-context-snapshot-v1', $snapshot['snapshot']['snapshot_schema_version']);
+        $this->assertSame('academic-context-snapshot-v2', $snapshot['snapshot']['snapshot_schema_version']);
         $this->assertSame(1, (int) $snapshot['snapshot']['version_no']);
         $this->assertSame('hmac-sha256', $snapshot['snapshot']['signature_algorithm']);
         $this->assertSame(64, strlen((string) $snapshot['snapshot']['signature']));
@@ -91,6 +96,7 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
             'IELTS Preparation',
             'elig2-reg',
             $profile->id,
+            $this->placementBranchId,
         );
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
         $this->assertSame($profile->academic_eligibility_snapshot_id, (string) $applicant->academic_eligibility_snapshot_id);
@@ -167,6 +173,113 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $this->assertTrue(app(AcademicEligibilitySnapshotQuery::class)->verify($secondRow)['valid']);
     }
 
+    public function test_verified_legacy_snapshot_cannot_waive_a_new_prerequisite_decision(): void
+    {
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('elig-legacy-decision-person', []);
+        $profile = $this->completeReleasedPlacement($person->id, 'elig-legacy-decision');
+        $registered = app(RegisterApplicant::class)->register(
+            $this->admissionsClerk('elig-legacy-decision-clerk'),
+            $person->id,
+            'IELTS Preparation',
+            'elig-legacy-decision-register',
+            $profile->id,
+            $this->placementBranchId,
+        );
+        /** @var Applicant $applicant */
+        $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
+        $initiated = app(DecideAdmission::class)->initiate(
+            $this->admissionsClerk('elig-legacy-decision-initiate'),
+            $applicant,
+            true,
+            'verified entry evidence',
+            'placement/'.$profile->id,
+            'elig-legacy-decision-initiate',
+        );
+        $decision = AdmissionDecision::query()->findOrFail($initiated['decision_id']);
+        app(DecideAdmission::class)->review($this->admissionsReviewer('elig-legacy-decision-review'), $decision, 'elig-legacy-decision-review');
+        app(DecideAdmission::class)->approve($this->admissionsApprover('elig-legacy-decision-approve'), $decision, 'elig-legacy-decision-approve');
+        $converted = app(EnrollAdmittedApplicant::class)->convert(
+            $this->admissionsApprover('elig-legacy-decision-convert'),
+            $applicant,
+            'elig-legacy-decision-convert',
+        );
+        /** @var Student $student */
+        $student = Student::query()->findOrFail($converted['student_id']);
+
+        $a1 = ProgramVersionLevel::query()
+            ->where('program_version_id', $this->programVersionId)
+            ->where('level_key', 'A1')
+            ->firstOrFail();
+        $a2 = ProgramVersionLevel::query()
+            ->where('program_version_id', $this->programVersionId)
+            ->where('level_key', 'A2')
+            ->firstOrFail();
+        app(MaintainAcademicStructure::class)->definePrerequisite(
+            $this->academicOfficer('elig-legacy-decision-academic'),
+            $a2->id,
+            $a1->id,
+            'elig-legacy-decision-prerequisite',
+        );
+        // The actual v2 entry recommendation is B1 and legitimately covers
+        // A2, which makes the legacy regression contrast explicit.
+        $this->assertSame([], (new AcademicHistoryQuery)->prerequisiteViolations($student->id, $a2));
+
+        // This fixture represents a signed legacy row that existed before the
+        // v2 INSERT/link guards were deployed. Disabling guards is strictly a
+        // fixture operation; production direct-SQL attacks are covered in the
+        // Placement authority test and the guards are restored immediately.
+        $legacyId = \App\Support\Identifiers\RandomIdentifier::new();
+        $legacyPayload = [
+            'legacy_snapshot' => $legacyId,
+            'person_id' => $student->person_id,
+            'program_version_id' => $this->programVersionId,
+        ];
+        $legacyCanonical = CanonicalJson::encode($legacyPayload);
+        $this->withTriggerDisabled('academic_eligibility_snapshots', 'placement_v2_snapshot_guard_trigger', function () use ($legacyId, $legacyPayload, $legacyCanonical, $profile, $student): void {
+            AcademicEligibilitySnapshot::query()->create([
+                'id' => $legacyId,
+                'placement_profile_id' => $profile->id,
+                'placement_recommendation_id' => $profile->placement_recommendation_id,
+                'person_id' => $student->person_id,
+                'visitor_id' => $profile->visitor_id,
+                'snapshot_schema_version' => AcademicEligibilitySnapshotBuilder::LEGACY_SCHEMA_VERSION,
+                // The v2 row owns version one for this profile; legacy rows
+                // can still have their historical version numbering.
+                'version_no' => 2,
+                'program_version_id' => $this->programVersionId,
+                'recommended_level_id' => $profile->recommended_level_id,
+                'recommended_class_id' => null,
+                'recommended_offering_id' => null,
+                'academic_period_id' => null,
+                'originating_branch_id' => $profile->originating_branch_id,
+                'current_home_branch_id' => $profile->current_home_branch_id,
+                'payload' => $legacyPayload,
+                'payload_canonical_json' => $legacyCanonical,
+                'payload_sha256' => hash('sha256', $legacyCanonical),
+                'signature_algorithm' => AcademicEligibilitySigner::ALGORITHM,
+                'signature' => AcademicEligibilitySigner::sign($legacyCanonical, AcademicEligibilitySigner::LEGACY_KEY_VERSION),
+                'signing_key_version' => AcademicEligibilitySigner::LEGACY_KEY_VERSION,
+                'signed_by' => $profile->released_by,
+                'signed_at' => now(),
+                'supersedes_snapshot_id' => null,
+            ]);
+        });
+        $this->withTriggerDisabled('students', 'placement_v2_student_evidence_guard_trigger', function () use ($student, $legacyId): void {
+            DB::table('students')->where('id', $student->id)->update([
+                'academic_eligibility_snapshot_id' => $legacyId,
+                'updated_at' => now(),
+            ]);
+        });
+
+        /** @var AcademicEligibilitySnapshot $legacy */
+        $legacy = AcademicEligibilitySnapshot::query()->findOrFail($legacyId);
+        $this->assertTrue(app(AcademicEligibilitySnapshotQuery::class)->verify($legacy)['valid']);
+        $violations = (new AcademicHistoryQuery)->prerequisiteViolations($student->id, $a2);
+        $this->assertCount(1, $violations);
+        $this->assertSame('missing_advance', $violations[0]['evidence']);
+    }
+
     public function test_signature_verifier_rejects_altered_canonical_payload(): void
     {
         $this->setUpPlacementCatalog();
@@ -178,5 +291,15 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $payload = $snapshot['payload'];
         $payload['recommendation']['rationale'] = 'tampered rationale';
         $this->assertFalse(AcademicEligibilitySigner::verifyPayload($payload, (string) $snapshot['snapshot']['signature']));
+    }
+
+    private function withTriggerDisabled(string $table, string $trigger, callable $operation): void
+    {
+        DB::statement(sprintf('ALTER TABLE %s DISABLE TRIGGER %s', $table, $trigger));
+        try {
+            $operation();
+        } finally {
+            DB::statement(sprintf('ALTER TABLE %s ENABLE TRIGGER %s', $table, $trigger));
+        }
     }
 }

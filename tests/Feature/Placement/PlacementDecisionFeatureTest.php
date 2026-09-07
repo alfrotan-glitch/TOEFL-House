@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Placement;
 
+use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Placement\Commands\DecidePlacement;
 use App\Modules\Academic\Placement\Commands\ManagePlacementProfile;
 use App\Modules\Academic\Placement\Commands\RecommendPlacement;
@@ -15,6 +16,8 @@ use App\Modules\Academic\Placement\Models\PlacementResponse;
 use App\Modules\Academic\Placement\Models\PlacementRubric;
 use App\Modules\Academic\Placement\Models\PlacementSectionResult;
 use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
+use App\Modules\Reporting\Queries\PlacementRecommendationRateCalculator;
+use App\Modules\Reporting\Queries\PlacementReleaseCountCalculator;
 use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
@@ -27,6 +30,7 @@ use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Students\Models\Student;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsPlacementCatalog;
@@ -52,6 +56,8 @@ final class PlacementDecisionFeatureTest extends TestCase
             $person->id,
             $this->programVersionId,
             'plc-open',
+            null,
+            $this->placementBranchId,
         );
         $profile = PlacementProfile::query()->findOrFail($profileResult['profile_id']);
 
@@ -78,6 +84,13 @@ final class PlacementDecisionFeatureTest extends TestCase
         }
         $this->assertNotNull($submitted->anti_tamper_hmac);
         $this->assertSame('submitted', $submitted->status);
+        // Professional stubs are deliberately appended after the submitted
+        // attempt envelope; automatic facts were created while in-progress.
+        $this->assertSame(2, PlacementSectionResult::query()
+            ->where('attempt_id', $attempt->id)
+            ->where('scoring_method', PlacementSectionResult::SCORING_METHOD_PROFESSIONAL)
+            ->whereNull('raw_score')
+            ->count());
 
         foreach (['writing', 'speaking'] as $component) {
             $sectionId = $this->sectionIds[$component];
@@ -90,6 +103,44 @@ final class PlacementDecisionFeatureTest extends TestCase
         $refreshed = $profile->fresh();
         $this->assertNotNull($refreshed);
         $this->assertSame('scored', $refreshed->lifecycle_state);
+
+        // A privileged-looking raw insert cannot choose a more favourable or
+        // otherwise arbitrary level: the database derives the snapshot and
+        // deterministic target from the frozen section facts and weights.
+        $rawRecommender = $this->placementRecommender('plc-rec-raw-1');
+        $c1LevelId = (string) DB::table('program_version_levels')
+            ->where('program_version_id', $this->programVersionId)
+            ->where('level_key', 'C1')
+            ->value('id');
+        try {
+            DB::transaction(function () use ($profile, $attempt, $c1LevelId, $rawRecommender): void {
+                DB::table('placement_recommendations')->insert([
+                    'id' => RandomIdentifier::new(),
+                    'profile_id' => $profile->id,
+                    'attempt_id' => $attempt->id,
+                    'program_version_id' => $this->programVersionId,
+                    'lineage_version' => PlacementRecommendation::LINEAGE_VERSION,
+                    'recommended_level_id' => $c1LevelId,
+                    'recommended_class_id' => null,
+                    'recommended_offering_id' => null,
+                    'rationale' => 'forged favourable recommendation',
+                    'model_version' => 'placement-rubric-v1',
+                    'score_snapshot' => json_encode([
+                        'overall_percentage' => 84.0,
+                        'overall_cefr' => 'B2',
+                        'component_percentages' => ['grammar' => 100.0, 'reading' => 100.0, 'listening' => 100.0, 'writing' => 60.0, 'speaking' => 60.0],
+                        'component_cefr' => ['grammar' => 'C1', 'reading' => 'C1', 'listening' => 'C1', 'writing' => 'B1', 'speaking' => 'B1'],
+                        'model_version' => 'placement-rubric-v1',
+                    ], JSON_THROW_ON_ERROR),
+                    'recommended_by' => $rawRecommender->actorId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            });
+            $this->fail('raw SQL must not choose a placement level inconsistent with immutable scores');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('must select the deterministic active academic level', $exception->getMessage());
+        }
 
         // A recommendation is generated after scoring, before section review.
         $recommendation = app(RecommendPlacement::class)->recommend($this->placementRecommender('plc-rec-1'), $profile, 'plc-rec');
@@ -129,14 +180,89 @@ final class PlacementDecisionFeatureTest extends TestCase
         $refreshed = $profile->fresh();
         $this->assertNotNull($refreshed);
         $this->assertSame('released', $refreshed->lifecycle_state);
+        $this->assertSame(PlacementProfile::DECISION_FACT_VERSION, (string) $refreshed->decision_fact_version, 'the profile recommendation projection must be stamped by the database decision-fact guard');
+        $this->assertNotNull($refreshed->released_at, 'the release transition must retain an immutable event timestamp');
+        $this->assertSame('database_transition', (string) $refreshed->release_time_basis);
         $this->assertSame(1, PlacementRecommendation::query()->where('profile_id', $profile->id)->count());
+    }
+
+    public function test_release_metric_uses_immutable_event_time_after_supersession_and_metadata_updates(): void
+    {
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('plc-release-metric-person', []);
+        $released = $this->completeReleasedPlacement($person->id, 'plc-release-metric');
+        $releaseAt = (string) $released->released_at;
+
+        $now = CarbonImmutable::now('UTC');
+        $period = app(MaintainAcademicStructure::class)->definePeriod(
+            $this->academicOfficer('plc-release-metric-academic'),
+            'Placement release reporting window',
+            $now->subDay(),
+            $now->addDay(),
+            'plc-release-metric-period',
+        );
+        $calculator = app(PlacementReleaseCountCalculator::class);
+        $beforeMetadataChange = $calculator->compute($period['period_id'], $this->placementBranchId);
+        $this->assertSame('1', $beforeMetadataChange['value']);
+        $this->assertSame('complete', $beforeMetadataChange['completeness']);
+
+        // Updating transport metadata must not move the release into a new
+        // period, and later supersession must not erase its original cohort.
+        DB::table('placement_profiles')->where('id', $released->id)->update([
+            'updated_at' => '2099-01-01 00:00:00',
+        ]);
+        $afterMetadataChange = $calculator->compute($period['period_id'], $this->placementBranchId);
+        $this->assertSame('1', $afterMetadataChange['value']);
+
+        app(DecidePlacement::class)->supersede(
+            $this->placementReleaser('plc-release-metric-supersede'),
+            $released,
+            'plc-release-metric-supersede',
+        );
+        $afterSupersession = $calculator->compute($period['period_id'], $this->placementBranchId);
+        $this->assertSame('1', $afterSupersession['value']);
+        $this->assertSame($releaseAt, (string) PlacementProfile::query()->findOrFail($released->id)->released_at);
+    }
+
+    public function test_recommendation_rate_uses_the_exact_append_only_fact_through_supersession(): void
+    {
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('plc-recommendation-metric-person', []);
+        $released = $this->completeReleasedPlacement($person->id, 'plc-recommendation-metric');
+        $now = CarbonImmutable::now('UTC');
+        $period = app(MaintainAcademicStructure::class)->definePeriod(
+            $this->academicOfficer('plc-recommendation-metric-academic'),
+            'Placement recommendation reporting window',
+            $now->subDay(),
+            $now->addDay(),
+            'plc-recommendation-metric-period',
+        );
+
+        $calculator = app(PlacementRecommendationRateCalculator::class);
+        $beforeSupersession = $calculator->compute($period['period_id'], $this->placementBranchId);
+        $this->assertSame('100', $beforeSupersession['value']);
+        $this->assertSame('complete', $beforeSupersession['completeness']);
+        $this->assertSame('append_only_placement_recommendation_exact_profile_projection', $beforeSupersession['meta']['recommendation_fact_basis']);
+
+        // The profile's current lifecycle is not the numerator. Its immutable
+        // recommendation fact remains part of this intake cohort after a
+        // later retake supersedes the profile.
+        app(DecidePlacement::class)->supersede(
+            $this->placementReleaser('plc-recommendation-metric-supersede'),
+            $released,
+            'plc-recommendation-metric-supersede',
+        );
+        $afterSupersession = $calculator->compute($period['period_id'], $this->placementBranchId);
+        $this->assertSame('100', $afterSupersession['value']);
+        $this->assertSame('complete', $afterSupersession['completeness']);
+        $this->assertSame(1, $afterSupersession['meta']['recommended']);
     }
 
     public function test_submitted_responses_and_recommendations_are_immutable(): void
     {
         $this->setUpPlacementCatalog();
         $person = $this->personWithAuthority('plc-person-2', []);
-        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-2'), $person->id, $this->programVersionId, 'plc-open-2')['profile_id']);
+        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-2'), $person->id, $this->programVersionId, 'plc-open-2', null, $this->placementBranchId)['profile_id']);
         $attempt = PlacementAttempt::query()->findOrFail(app(ManagePlacementProfile::class)->startAttempt($this->placementOfficer('plc-attempt-2'), $profile, $this->testVersionId, 'digital', 'plc-start-2')['attempt_id']);
         $answers = [];
         foreach ($this->questions as $questionId => $component) {
@@ -153,7 +279,7 @@ final class PlacementDecisionFeatureTest extends TestCase
     {
         $this->setUpPlacementCatalog();
         $person = $this->personWithAuthority('plc-person-3', []);
-        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-3'), $person->id, $this->programVersionId, 'plc-open-3')['profile_id']);
+        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-3'), $person->id, $this->programVersionId, 'plc-open-3', null, $this->placementBranchId)['profile_id']);
         $attempt = PlacementAttempt::query()->findOrFail(app(ManagePlacementProfile::class)->startAttempt($this->placementOfficer('plc-attempt-3'), $profile, $this->testVersionId, 'digital', 'plc-start-3')['attempt_id']);
         $answers = [];
         foreach ($this->questions as $questionId => $component) {
@@ -184,7 +310,7 @@ final class PlacementDecisionFeatureTest extends TestCase
 
         // A second open profile is blocked while one is live.
         try {
-            app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-3b'), $person->id, $this->programVersionId, 'plc-open-3b');
+            app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-3b'), $person->id, $this->programVersionId, 'plc-open-3b', null, $this->placementBranchId);
             $this->fail('a live profile must block a retake until superseded');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('placement.profile_open_exists', $rejection->errorCode());
@@ -194,7 +320,7 @@ final class PlacementDecisionFeatureTest extends TestCase
         $refreshed = $profile->fresh();
         $this->assertNotNull($refreshed);
         $this->assertSame('superseded', $refreshed->lifecycle_state);
-        $retake = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-3c'), $person->id, $this->programVersionId, 'plc-open-3c')['profile_id']);
+        $retake = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-3c'), $person->id, $this->programVersionId, 'plc-open-3c', null, $this->placementBranchId)['profile_id']);
         $this->assertNotSame($profile->id, $retake->id);
     }
 
@@ -206,7 +332,7 @@ final class PlacementDecisionFeatureTest extends TestCase
         $visitor = app(CaptureVisitor::class)->capture($reception, null, 'Placement Lead', null, 'plc@example.com', 'email', 'online', null, null, null, null, null, 'plc-capture');
         app(LinkVisitorPerson::class)->link($reception, Visitor::query()->findOrFail($visitor['visitor_id']), $person->id, 'plc-link');
 
-        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-4'), $person->id, $this->programVersionId, 'plc-open-4')['profile_id']);
+        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-4'), $person->id, $this->programVersionId, 'plc-open-4', null, $this->placementBranchId)['profile_id']);
         $attempt = PlacementAttempt::query()->findOrFail(app(ManagePlacementProfile::class)->startAttempt($this->placementOfficer('plc-attempt-4'), $profile, $this->testVersionId, 'digital', 'plc-start-4')['attempt_id']);
         $answers = [];
         foreach ($this->questions as $questionId => $component) {
@@ -225,7 +351,7 @@ final class PlacementDecisionFeatureTest extends TestCase
     {
         $this->setUpPlacementCatalog();
         $person = $this->personWithAuthority('plc-person-5', []);
-        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-5'), $person->id, $this->programVersionId, 'plc-open-5')['profile_id']);
+        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-5'), $person->id, $this->programVersionId, 'plc-open-5', null, $this->placementBranchId)['profile_id']);
 
         try {
             app(RecommendPlacement::class)->recommend($this->placementRecommender('plc-rec-5'), $profile, 'plc-rec-5');
@@ -247,6 +373,7 @@ final class PlacementDecisionFeatureTest extends TestCase
             'IELTS Preparation',
             'plc-evidence-reg',
             $profile->id,
+            $this->placementBranchId,
         );
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
         $this->assertSame($profile->id, (string) $applicant->placement_profile_id);
@@ -285,6 +412,7 @@ final class PlacementDecisionFeatureTest extends TestCase
                 'IELTS Preparation',
                 'plc-wrong-reg',
                 $profile->id,
+                $this->placementBranchId,
             );
             $this->fail('a placement for another person must not attach to an applicant');
         } catch (BusinessRejection $rejection) {
@@ -301,7 +429,7 @@ final class PlacementDecisionFeatureTest extends TestCase
         $reviewer = $this->admissionsReviewer('plc-finance-reviewer');
         $approver = $this->admissionsApprover('plc-finance-approver');
 
-        $registered = app(RegisterApplicant::class)->register($clerk, $person->id, 'IELTS Preparation', 'plc-finance-reg', $profile->id);
+        $registered = app(RegisterApplicant::class)->register($clerk, $person->id, 'IELTS Preparation', 'plc-finance-reg', $profile->id, $this->placementBranchId);
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
         $initiated = app(DecideAdmission::class)->initiate($clerk, $applicant, true, 'placement evidence released', 'placement/'.$profile->id, 'plc-finance-initiate');
         $decision = AdmissionDecision::query()->findOrFail($initiated['decision_id']);
@@ -361,12 +489,15 @@ final class PlacementDecisionFeatureTest extends TestCase
             $person->id,
             $this->programVersionId,
             'plc-phys-open',
+            null,
+            $this->placementBranchId,
         )['profile_id']);
         $attempt = PlacementAttempt::query()->findOrFail(app(ManagePlacementProfile::class)->startAttempt(
             $this->placementOfficer('plc-phys-start'),
             $profile,
             $this->physicalVersionId,
             'physical',
+            'plc-phys-start',
             'plc-phys-start',
         )['attempt_id']);
         $answers = [];
@@ -388,6 +519,47 @@ final class PlacementDecisionFeatureTest extends TestCase
         $this->assertSame('submitted', $physical->status);
         $this->assertNotNull($physical->anti_tamper_hmac);
         $this->assertDatabaseHas('placement_responses', ['attempt_id' => $attempt->id]);
-        $this->assertSame(3, PlacementSectionResult::query()->where('attempt_id', $attempt->id)->whereNotNull('raw_score')->count());
+        $this->assertSame(5, PlacementSectionResult::query()->where('attempt_id', $attempt->id)->whereNotNull('raw_score')->count());
+    }
+
+    public function test_evidence_only_physical_submission_creates_a_governed_professional_work_queue(): void
+    {
+        $this->setUpPlacementCatalog();
+        $this->setUpPhysicalProfessionalCatalog();
+        $this->assertCount(5, $this->physicalProfessionalQuestions);
+        $person = $this->personWithAuthority('plc-person-physical-professional', []);
+        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile(
+            $this->placementOfficer('plc-physical-professional-open'),
+            $person->id,
+            $this->programVersionId,
+            'plc-physical-professional-open',
+            null,
+            $this->placementBranchId,
+        )['profile_id']);
+        $starter = $this->placementOfficer('plc-physical-professional-start');
+        $attempt = PlacementAttempt::query()->findOrFail(app(ManagePlacementProfile::class)->startAttempt(
+            $starter,
+            $profile,
+            $this->physicalProfessionalVersionId,
+            'physical',
+            'plc-physical-professional-start',
+            $starter->actorId,
+        )['attempt_id']);
+
+        $submission = app(ManagePlacementProfile::class)->submitPhysical(
+            $this->placementOfficer('plc-physical-professional-submit'),
+            $attempt,
+            'papers/plc-physical-professional/packet-1',
+            'plc-physical-professional-submit',
+        );
+
+        $this->assertFalse($submission['tamper_flagged']);
+        $this->assertSame(PlacementAttempt::STATUS_SUBMITTED, (string) PlacementAttempt::query()->findOrFail($attempt->id)->status);
+        $this->assertSame(0, PlacementResponse::query()->where('attempt_id', $attempt->id)->count());
+        $this->assertSame(5, PlacementSectionResult::query()
+            ->where('attempt_id', $attempt->id)
+            ->where('scoring_method', PlacementSectionResult::SCORING_METHOD_PROFESSIONAL)
+            ->whereNull('raw_score')
+            ->count());
     }
 }

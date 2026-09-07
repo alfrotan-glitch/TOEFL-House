@@ -74,14 +74,34 @@ final class PlacementApiFeatureTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'versions');
 
+        // Legacy direct media references must fail at the transport boundary;
+        // checksummed question media has its own authoritative endpoint.
+        $this->postJson('/api/v1/placement/questions', [
+            'section_id' => $this->sectionIds['grammar'],
+            'code' => 'legacy-media-probe',
+            'stem' => 'This request must not create a question.',
+            'question_type' => 'mcq',
+            'points' => 1,
+            'correct_answer' => 'A',
+            'media_ref' => 'unverified://legacy-media',
+        ], ['Idempotency-Key' => 'placement-api-legacy-media-probe'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('media_ref');
+
         $opened = $this->postJson('/api/v1/placement/profiles', [
             'person_id' => $officer->actorId,
             'program_version_id' => $this->programVersionId,
+            'branch_id' => $this->placementBranchId,
         ], ['Idempotency-Key' => 'placement-api-open-1'])
             ->assertCreated()
             ->assertJsonPath('status', 'opened');
 
         $profileId = (string) $opened->json('profile_id');
+        $this->getJson('/api/v1/placement/profiles/'.$profileId.'/attemptable-versions')
+            ->assertOk()
+            ->assertJsonPath('profile_id', $profileId)
+            ->assertJsonCount(1, 'versions')
+            ->assertJsonPath('versions.0.id', $this->testVersionId);
         $this->getJson('/api/v1/placement/profiles/'.$profileId)
             ->assertOk()
             ->assertJsonPath('profile.id', $profileId);
@@ -105,6 +125,7 @@ final class PlacementApiFeatureTest extends TestCase
         $opened = $this->postJson('/api/v1/placement/profiles', [
             'person_id' => $scorer->actorId,
             'program_version_id' => $this->programVersionId,
+            'branch_id' => $this->placementBranchId,
         ], ['Idempotency-Key' => 'placement-api-open-2'])
             ->assertCreated();
         $profileId = (string) $opened->json('profile_id');
@@ -136,7 +157,6 @@ final class PlacementApiFeatureTest extends TestCase
                 'section_id' => $this->sectionIds[$component],
                 'raw_score' => '60.0',
                 'rubric_id' => $rubric->id,
-                'cefr_ref' => 'B1',
                 'rationale' => 'professional marking',
             ], ['Idempotency-Key' => 'placement-api-score-'.$component])
                 ->assertOk();
@@ -167,8 +187,18 @@ final class PlacementApiFeatureTest extends TestCase
         $this->postJson('/api/v1/placement/profiles/'.$profileId.'/approve', [], ['Idempotency-Key' => 'placement-api-approve-profile-2'])->assertOk();
 
         $this->switchTo($releaser->actorId, 'placement.api.releaser');
-        $this->postJson('/api/v1/placement/profiles/'.$profileId.'/release', [], ['Idempotency-Key' => 'placement-api-release-2'])->assertOk();
+        $releasedResponse = $this->postJson('/api/v1/placement/profiles/'.$profileId.'/release', [], ['Idempotency-Key' => 'placement-api-release-2'])
+            ->assertOk()
+            ->assertJsonPath('status', 'released')
+            ->assertJsonPath('release_time_basis', 'database_transition');
+        $this->assertNotEmpty($releasedResponse->json('released_at'), 'the release response must expose the database-owned event time');
 
+        $this->getJson('/api/v1/placement/profiles/'.$profileId)
+            ->assertOk()
+            ->assertJsonPath('profile.id', $profileId)
+            ->assertJsonPath('profile.release_time_basis', 'database_transition')
+            ->assertJsonPath('profile.decision_fact_version', PlacementProfile::DECISION_FACT_VERSION);
+        $this->assertNotNull(PlacementProfile::query()->findOrFail($profileId)->released_at);
         $this->assertSame('released', PlacementProfile::query()->findOrFail($profileId)->lifecycle_state);
 
         $appealManager = $this->grantedActor('plc-api-appeal-manager', ['academic.appeal_manage']);
@@ -195,6 +225,7 @@ final class PlacementApiFeatureTest extends TestCase
         $opened = $this->postJson('/api/v1/placement/profiles', [
             'person_id' => $officer->actorId,
             'program_version_id' => $this->programVersionId,
+            'branch_id' => $this->placementBranchId,
         ], ['Idempotency-Key' => 'placement-api-open-phys'])
             ->assertCreated();
         $profileId = (string) $opened->json('profile_id');
@@ -203,6 +234,7 @@ final class PlacementApiFeatureTest extends TestCase
             'profile_id' => $profileId,
             'test_version_id' => $this->physicalVersionId,
             'delivery_mode' => 'physical',
+            'proctor_person_id' => $officer->actorId,
         ], ['Idempotency-Key' => 'placement-api-start-phys'])
             ->assertCreated();
         $attemptId = (string) $started->json('attempt_id');
@@ -221,6 +253,6 @@ final class PlacementApiFeatureTest extends TestCase
             ->assertJsonPath('tamper_flagged', false);
 
         $this->assertSame('submitted', PlacementAttempt::query()->findOrFail($attemptId)->status);
-        $this->assertSame(3, PlacementSectionResult::query()->where('attempt_id', $attemptId)->whereNotNull('raw_score')->count());
+        $this->assertSame(5, PlacementSectionResult::query()->where('attempt_id', $attemptId)->whereNotNull('raw_score')->count());
     }
 }

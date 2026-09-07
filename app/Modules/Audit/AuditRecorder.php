@@ -41,8 +41,11 @@ final class AuditRecorder
             'correlation_id' => $correlationId ?? DomainError::newCorrelationId(),
             'before_state' => $beforeState,
             'after_state' => $afterState,
-            'occurred_at' => now(),
+            // PostgreSQL assigns the immutable UTC event clock. Do not pass
+            // application's `now()` across this authority boundary.
         ]);
+        /** @var AuditEvent $auditEvent */
+        $auditEvent = AuditEvent::query()->whereKey($auditEvent->id)->firstOrFail();
 
         if (! str_ends_with($operation, '.denied')) {
             $this->events->record($auditEvent, [

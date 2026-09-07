@@ -22,7 +22,14 @@ final class VisitorListQuery
      */
     public function search(?array $statuses, array $filters, int $limit = 100): array
     {
-        $query = Visitor::query()->with(['source:id,key,name,lifecycle_state', 'campaign:id,key,name,channel,lifecycle_state', 'assignee:id,legal_name', 'originBranch:id,name', 'conversion:id,visitor_id,conversion_type,authority,converted_by,authority_audit_event_id,converted_at', 'conversionHandoffs:id,visitor_id,student_id,authority_audit_event_id,converted_at']);
+        $query = Visitor::query()->with([
+            'source:id,key,name,lifecycle_state',
+            'campaign:id,key,name,channel,lifecycle_state',
+            'assignee:id,legal_name',
+            'originBranch:id,name',
+            'conversion:id,visitor_id,conversion_type,authority,converted_by,authority_audit_event_id,converted_at,conversion_time_basis',
+            'conversionHandoffs:id,visitor_id,student_id,authority_audit_event_id,converted_at,conversion_time_basis',
+        ]);
 
         if ($statuses !== null && $statuses !== []) {
             $query->whereIn('status', $statuses);
@@ -66,6 +73,9 @@ final class VisitorListQuery
 
         /** @var Collection<int, Visitor> $visitors */
         $visitors = $query
+            // New rows use the database capture clock. `created_at` is only a
+            // deterministic secondary ordering for retained legacy records.
+            ->orderByDesc('captured_at')
             ->orderByDesc('created_at')
             ->limit(max(1, min($limit, 500)))
             ->get();
@@ -115,6 +125,15 @@ final class VisitorListQuery
             'preferred_channel' => $visitor->preferred_channel,
             'visitor_type' => $visitor->visitor_type,
             'status' => $visitor->status,
+            // `created_at` remains row metadata. Only captured_at with its
+            // database basis is a capture-event clock for CRM reporting.
+            'captured_at' => $visitor->capture_time_basis === 'database_insert'
+                ? $visitor->captured_at?->toISOString()
+                : null,
+            'capture_time_basis' => $visitor->capture_time_basis,
+            'capture_evidence_status' => $visitor->capture_time_basis === 'database_insert'
+                ? 'database_recorded'
+                : 'historic_unclassified',
             'available_transitions' => VisitorStatus::nextPipelineStatuses($visitor->status),
             'rating' => $visitor->rating,
             'interest' => $visitor->interest,
@@ -132,14 +151,31 @@ final class VisitorListQuery
                 'id' => $visitor->campaign->id, 'key' => $visitor->campaign->key, 'name' => $visitor->campaign->name, 'channel' => $visitor->campaign->channel, 'lifecycle_state' => $visitor->campaign->lifecycle_state,
             ] : null,
             'conversion' => $visitor->relationLoaded('conversion') && $visitor->conversion !== null ? [
-                'id' => $visitor->conversion->id, 'conversion_type' => $visitor->conversion->conversion_type, 'authority' => $visitor->conversion->authority, 'converted_by' => $visitor->conversion->converted_by, 'authority_audit_event_id' => $visitor->conversion->authority_audit_event_id, 'converted_at' => $visitor->conversion->converted_at,
+                'id' => $visitor->conversion->id,
+                'conversion_type' => $visitor->conversion->conversion_type,
+                'authority' => $visitor->conversion->authority,
+                'converted_by' => $visitor->conversion->converted_by,
+                'authority_audit_event_id' => $visitor->conversion->authority_audit_event_id,
+                'converted_at' => $visitor->conversion->conversion_time_basis === 'authority_audit_event'
+                    ? $visitor->conversion->converted_at?->toISOString()
+                    : null,
+                'conversion_time_basis' => $visitor->conversion->conversion_time_basis,
+                'conversion_evidence_status' => $visitor->conversion->conversion_time_basis === 'authority_audit_event'
+                    ? 'authority_event_recorded'
+                    : 'historic_unclassified',
             ] : null,
             'conversion_handoffs' => $visitor->relationLoaded('conversionHandoffs')
                 ? $visitor->conversionHandoffs->map(fn ($handoff): array => [
                     'id' => $handoff->id,
                     'student_id' => $handoff->student_id,
                     'authority_audit_event_id' => $handoff->authority_audit_event_id,
-                    'converted_at' => $handoff->converted_at,
+                    'converted_at' => $handoff->conversion_time_basis === 'authority_audit_event'
+                        ? $handoff->converted_at?->toISOString()
+                        : null,
+                    'conversion_time_basis' => $handoff->conversion_time_basis,
+                    'conversion_evidence_status' => $handoff->conversion_time_basis === 'authority_audit_event'
+                        ? 'authority_event_recorded'
+                        : 'historic_unclassified',
                 ])->values()->all()
                 : [],
             'created_at' => $visitor->created_at?->toISOString(),

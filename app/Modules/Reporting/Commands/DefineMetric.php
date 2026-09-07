@@ -57,10 +57,17 @@ final class DefineMetric
                         'id' => RandomIdentifier::new(),
                         'key' => $metricKey,
                         'name' => $name,
+                        // The owner claim and canonical owner agree for a
+                        // newly defined catalog metric. Historical claims are
+                        // never rewritten; see the lineage migration.
                         'source_owner' => $entry['owner'],
+                        'canonical_source_owner' => $entry['owner'],
                         'period_authority' => $entry['authority'],
                         'current_version' => 1,
                         'defined_by' => $actor->actorId,
+                        'lineage_status' => 'aligned',
+                        'lineage_basis' => 'catalog_2026_09_07',
+                        'lineage_recorded_at' => now(),
                     ]);
                     MetricVersion::query()->create([
                         'id' => RandomIdentifier::new(),
@@ -70,7 +77,14 @@ final class DefineMetric
                         'effective_from' => $effectiveFrom,
                         'created_by' => $actor->actorId,
                     ]);
-                    $event = $this->audit->record($actor->actorId, 'reporting.metric.define', 'metric_definition', $metric->id, null, ['key' => $metricKey]);
+                    $event = $this->audit->record($actor->actorId, 'reporting.metric.define', 'metric_definition', $metric->id, null, [
+                        'key' => $metricKey,
+                        'source_owner_claim' => $metric->source_owner,
+                        'canonical_source_owner' => $metric->canonical_source_owner,
+                        'period_authority' => $metric->period_authority,
+                        'lineage_status' => $metric->lineage_status,
+                        'lineage_basis' => $metric->lineage_basis,
+                    ]);
 
                     return ['metric_id' => $metric->id, 'version_no' => 1, 'correlation_id' => $event->correlation_id];
                 }),
@@ -95,6 +109,7 @@ final class DefineMetric
 
                     /** @var MetricDefinition $locked */
                     $locked = MetricDefinition::query()->whereKey($metric->id)->lockForUpdate()->firstOrFail();
+                    MetricCatalog::assertDefinitionLineage($locked, MetricCatalog::entry((string) $locked->key));
                     $nextVersion = $locked->current_version + 1;
                     MetricVersion::query()->create([
                         'id' => RandomIdentifier::new(),

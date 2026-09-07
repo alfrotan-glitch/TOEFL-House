@@ -21,7 +21,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $rubric_id
  * @property string|null $cefr_ref
  * @property string $lifecycle_state
- * @property string $scored_by
+ * @property string|null $scoring_method
+ * @property string|null $scored_by
  * @property string|null $moderated_by
  * @property string|null $approved_by
  */
@@ -33,14 +34,18 @@ final class PlacementSectionResult extends Model
 
     public const STATE_APPROVED = 'approved';
 
+    public const SCORING_METHOD_AUTOMATIC = 'automatic';
+
+    public const SCORING_METHOD_PROFESSIONAL = 'professional';
+
     public $incrementing = false;
 
     protected $keyType = 'string';
 
     protected $fillable = [
         'id', 'attempt_id', 'section_id', 'component', 'raw_score', 'adjusted_score',
-        'weighted_score', 'rubric_id', 'cefr_ref', 'lifecycle_state', 'scored_by',
-        'moderated_by', 'approved_by', 'rationale',
+        'weighted_score', 'rubric_id', 'cefr_ref', 'lifecycle_state', 'scoring_method',
+        'scored_by', 'moderated_by', 'approved_by', 'rationale',
     ];
 
     /** @return BelongsTo<PlacementAttempt, $this> */

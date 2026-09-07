@@ -10,6 +10,7 @@ use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
 use App\Modules\Finance\Models\FinancialCredit;
 use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Finance\Models\Obligation;
+use App\Support\Errors\BusinessRejection;
 use App\Support\MoneyAmount;
 use Illuminate\Support\Carbon;
 
@@ -36,6 +37,7 @@ final class FinancialGateQuery
         $obligations = Obligation::query()
             ->where('student_id', $studentId)
             ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
 
         $obligationEvidence = [];
@@ -45,6 +47,7 @@ final class FinancialGateQuery
         $uncovered = '0.00';
         foreach ($obligations as $obligation) {
             $remaining = $this->balances->obligationRemaining($obligation);
+            $this->assertNonNegativeObligationRemainder($obligation, $remaining);
             $originalTotal = bcadd($originalTotal, $obligation->original_amount, 2);
             $uncovered = bcadd($uncovered, $remaining, 2);
             $obligationEvidence[] = [
@@ -57,6 +60,8 @@ final class FinancialGateQuery
         $credits = FinancialCredit::query()
             ->where('student_id', $studentId)
             ->where('lifecycle_state', FinancialCredit::STATE_APPROVED)
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
         $installments = EnrollmentInstallmentPlan::query()
             ->where('student_id', $studentId)
@@ -64,6 +69,8 @@ final class FinancialGateQuery
             ->where(function ($query) use ($enrollment): void {
                 $query->whereNull('offering_id')->orWhere('offering_id', $enrollment->offering_id ?? '');
             })
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
         $today = Carbon::today()->toDateString();
         $exceptions = FinancialGateException::query()
@@ -79,6 +86,8 @@ final class FinancialGateQuery
             ->where(function ($query) use ($today): void {
                 $query->whereNull('effective_to')->orWhere('effective_to', '>=', $today);
             })
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
 
         $creditAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($credits->pluck('amount')->all())));
@@ -146,6 +155,7 @@ final class FinancialGateQuery
         $obligations = Obligation::query()
             ->where('student_id', $studentId)
             ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
 
         $obligationEvidence = [];
@@ -155,6 +165,7 @@ final class FinancialGateQuery
         $uncovered = '0.00';
         foreach ($obligations as $obligation) {
             $remaining = $this->balances->obligationRemaining($obligation);
+            $this->assertNonNegativeObligationRemainder($obligation, $remaining);
             $originalTotal = bcadd($originalTotal, $obligation->original_amount, 2);
             $uncovered = bcadd($uncovered, $remaining, 2);
             $obligationEvidence[] = [
@@ -167,10 +178,14 @@ final class FinancialGateQuery
         $credits = FinancialCredit::query()
             ->where('student_id', $studentId)
             ->where('lifecycle_state', FinancialCredit::STATE_APPROVED)
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
         $installments = EnrollmentInstallmentPlan::query()
             ->where('student_id', $studentId)
             ->where('lifecycle_state', EnrollmentInstallmentPlan::STATE_APPROVED)
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
         $today = Carbon::today()->toDateString();
         $exceptions = FinancialGateException::query()
@@ -182,6 +197,8 @@ final class FinancialGateQuery
             ->where(function ($query) use ($today): void {
                 $query->whereNull('effective_to')->orWhere('effective_to', '>=', $today);
             })
+            ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
 
         $creditAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($credits->pluck('amount')->all())));
@@ -231,6 +248,24 @@ final class FinancialGateQuery
             'remaining' => $remaining,
             'assessed_at' => $evidence['assessed_at'],
         ];
+    }
+
+    /**
+     * The enrollment gate must fail closed when historical data violates the
+     * Finance settlement invariant. Treating a negative obligation remainder
+     * as extra coverage would incorrectly activate a seat from corrupted or
+     * pre-hardening source facts.
+     *
+     * @param numeric-string $remaining
+     */
+    private function assertNonNegativeObligationRemainder(Obligation $obligation, string $remaining): void
+    {
+        if (bccomp($remaining, '0.00', 2) === -1) {
+            throw BusinessRejection::forCode(
+                'finance.obligation_over_settled',
+                sprintf('obligation %s has an invalid negative remaining balance %s', $obligation->id, $remaining),
+            );
+        }
     }
 
     /**

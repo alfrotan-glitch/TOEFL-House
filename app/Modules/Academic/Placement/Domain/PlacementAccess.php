@@ -13,8 +13,8 @@ use App\Support\Errors\BusinessRejection;
 
 /**
  * Placement authorization: every protected operation resolves through the
- * single AccessDecision authority, and — when the record carries branch
- * provenance — against that branch's structure scope.
+ * single AccessDecision authority against a concrete, active placement
+ * branch. Placement delivery/evidence is never branchless governance.
  */
 final class PlacementAccess
 {
@@ -29,17 +29,29 @@ final class PlacementAccess
         }
     }
 
-    public function scopeFor(?string $branchId): ?StructureScope
+    public function scopeFor(?string $branchId): StructureScope
     {
-        if ($branchId === null || $branchId === '') {
-            return null;
+        $branchId = trim((string) ($branchId ?? ''));
+        if ($branchId === '') {
+            // Placement is a delivery/evidence workflow. Unlike curriculum
+            // governance, a branchless record has no organization identity
+            // that Access can safely authorize, so null must never become an
+            // organization-wide wildcard.
+            throw BusinessRejection::forCode('placement.branch_provenance_required', 'placement operations require an explicit operational branch provenance');
         }
         /** @var Branch|null $branch */
         $branch = Branch::query()->find($branchId);
         if ($branch === null) {
             throw BusinessRejection::forCode('placement.branch_unknown', 'the referenced branch does not exist');
         }
+        if ($branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('placement.branch_inactive', 'the placement branch is not operationally active');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('placement.branch_provenance_required', 'the placement branch has no active campus and organization provenance');
+        }
 
-        return $branch->structureScope();
+        return $scope;
     }
 }

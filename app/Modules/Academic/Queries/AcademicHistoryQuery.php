@@ -8,14 +8,15 @@ use App\Modules\Academic\Models\LevelPrerequisite;
 use App\Modules\Academic\Models\LevelProgressFact;
 use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
+use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Students\Models\Student;
 
 /**
  * Read-only academic history / level projection (ADR-018).
  *
  * Academic history is immutable `level_progress_facts`; current level is the
- * latest approved fact's target (or the released placement recommendation
- * when no fact exists). This is a projection for Student/Placement/Enrollment/
+ * latest approved fact's target (or the Student's explicitly consumed,
+ * signed placement snapshot when no fact exists). This is a projection for Student/Placement/Enrollment/
  * Reporting/Documents/Finance validation — it never decides status and never
  * becomes financial truth.
  */
@@ -75,18 +76,11 @@ final class AcademicHistoryQuery
             return null;
         }
 
-        $snapshot = AcademicEligibilitySnapshot::query()
-            ->where('person_id', (string) $student->person_id)
-            ->when($programVersionId !== null && $programVersionId !== '', fn ($query) => $query->where('program_version_id', $programVersionId))
-            ->whereNotNull('recommended_level_id')
-            ->orderByDesc('signed_at')
-            ->first();
+        $snapshot = $this->trustedStudentSnapshot($student, $programVersionId);
 
-        if ($snapshot === null) {
-            return null;
-        }
-
-        return ProgramVersionLevel::query()->find($snapshot->recommended_level_id);
+        return $snapshot?->recommended_level_id !== null
+            ? ProgramVersionLevel::query()->find($snapshot->recommended_level_id)
+            : null;
     }
 
     /**
@@ -106,11 +100,10 @@ final class AcademicHistoryQuery
             return array_values($prerequisites->map(fn (LevelPrerequisite $p): array => $this->violation($p, 'unknown_student'))->values()->all());
         }
 
-        $snapshot = AcademicEligibilitySnapshot::query()
-            ->where('person_id', (string) $student->person_id)
-            ->whereNotNull('recommended_level_id')
-            ->orderByDesc('signed_at')
-            ->first();
+        // This is a decision-time prerequisite waiver, not a historical
+        // display. Legacy snapshots remain visible through read models but
+        // cannot create a new Academic entitlement without v2 exact lineage.
+        $snapshot = $this->trustedStudentSnapshot($student, (string) $targetLevel->program_version_id, true);
         $snapshotOverride = $snapshot?->recommended_level_id !== null && $this->snapshotCoversTarget($snapshot->recommended_level_id, $targetLevel);
 
         $violations = [];
@@ -144,6 +137,32 @@ final class AcademicHistoryQuery
             'ordinal' => $required !== null ? $required->ordinal : 0,
             'evidence' => $evidence,
         ];
+    }
+
+    private function trustedStudentSnapshot(Student $student, ?string $programVersionId, bool $forNewDecision = false): ?AcademicEligibilitySnapshot
+    {
+        $snapshotId = trim((string) ($student->academic_eligibility_snapshot_id ?? ''));
+        if ($snapshotId === '') {
+            return null;
+        }
+        /** @var AcademicEligibilitySnapshot|null $snapshot */
+        $snapshot = AcademicEligibilitySnapshot::query()->find($snapshotId);
+        if ($snapshot === null
+            || trim((string) $snapshot->person_id) !== trim((string) $student->person_id)
+            || ($student->placement_profile_id !== null
+                && trim((string) $snapshot->placement_profile_id) !== trim((string) $student->placement_profile_id))
+            || ($programVersionId !== null && $programVersionId !== '' && trim((string) $snapshot->program_version_id) !== trim($programVersionId))) {
+            return null;
+        }
+        if (! (new AcademicEligibilitySnapshotQuery)->verify($snapshot)['valid']) {
+            return null;
+        }
+        if ($forNewDecision
+            && $snapshot->snapshot_schema_version !== \App\Modules\Academic\Placement\Domain\AcademicEligibilitySnapshotBuilder::SCHEMA_VERSION) {
+            return null;
+        }
+
+        return $snapshot;
     }
 
     private function snapshotCoversTarget(string $recommendedLevelId, ProgramVersionLevel $targetLevel): bool

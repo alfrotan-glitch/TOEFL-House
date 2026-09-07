@@ -174,9 +174,21 @@ final class StudentLifecycleQuery
             'audit_events' => DB::table('audit_events')
                 ->where('target_type', 'student')
                 ->where('target_id', $student->id)
+                ->orderByRaw("CASE WHEN occurred_time_basis = 'database_insert' THEN 0 ELSE 1 END")
                 ->orderByDesc('occurred_at')
                 ->limit(50)
-                ->get(['id', 'actor_id', 'operation', 'correlation_id', 'occurred_at']),
+                ->get(['id', 'actor_id', 'operation', 'correlation_id', 'occurred_at', 'occurred_time_basis'])
+                ->map(static fn ($event): array => [
+                    'id' => (string) $event->id,
+                    'actor_id' => (string) $event->actor_id,
+                    'operation' => (string) $event->operation,
+                    'correlation_id' => (string) $event->correlation_id,
+                    'occurred_at' => $event->occurred_time_basis === 'database_insert' ? (string) $event->occurred_at : null,
+                    'occurred_time_basis' => $event->occurred_time_basis,
+                    'time_evidence_status' => $event->occurred_time_basis === 'database_insert'
+                        ? 'database_recorded'
+                        : 'historic_unclassified',
+                ])->all(),
             'workflow' => $this->workflow($student, $currentStatus?->status, $openHold, $includeGuardianReview, $day),
         ];
     }

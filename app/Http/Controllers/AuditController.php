@@ -55,7 +55,12 @@ final class AuditController extends Controller
             });
         };
 
-        $query = AuditEvent::query()->orderByDesc('occurred_at');
+        // Historic audit rows predate the database-owned event clock. Keep
+        // them visible as evidence but never present their caller timestamps
+        // as a definitive chronology ahead of database-recorded events.
+        $query = AuditEvent::query()
+            ->orderByRaw("CASE WHEN occurred_time_basis = 'database_insert' THEN 0 ELSE 1 END")
+            ->orderByDesc('occurred_at');
         $applyScope($query);
         if ($operation !== '') {
             $query->where('operation', $operation);

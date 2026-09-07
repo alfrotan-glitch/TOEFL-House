@@ -36,6 +36,8 @@ use App\Modules\Reporting\Commands\ReconcileMetric;
 use App\Modules\Reporting\Commands\RunReport;
 use App\Modules\Reporting\Models\Dashboard;
 use App\Modules\Reporting\Models\MetricDefinition;
+use App\Modules\Reporting\Models\MetricVersion;
+use App\Modules\Organization\Models\Organization;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use Carbon\CarbonImmutable;
@@ -96,6 +98,32 @@ final class ReportingFeatureTest extends TestCase
         $reconciliation = app(ReconcileMetric::class)->reconcile($analyst, 'student_outstanding_balance', $this->financialPeriodKey, 'student', $this->studentId, 'rep-rec-1');
         $this->assertSame('matched', $reconciliation['status']);
         $this->assertSame('0.0000', $reconciliation['variance']);
+        $this->assertDatabaseHas('metric_reconciliations', [
+            'id' => $reconciliation['reconciliation_id'],
+            'metric_projection_id' => $projection['projection_id'],
+            'organization_id' => $this->bootstrapOrganizationId,
+        ]);
+
+        // Reconciliation is evidence about a particular complete projection,
+        // not a free-form direct-SQL variance record.
+        try {
+            DB::table('metric_reconciliations')->insert([
+                'id' => '00000000-0000-4000-8000-00000000r001',
+                'metric_id' => MetricDefinition::query()->where('key', 'student_outstanding_balance')->value('id'),
+                'period_key' => $this->financialPeriodKey,
+                'scope_type' => 'student',
+                'scope_id' => $this->studentId,
+                'organization_id' => $this->bootstrapOrganizationId,
+                'reported_value' => '3500.00',
+                'authoritative_value' => '3500.00',
+                'variance' => '0.0000',
+                'status' => 'matched',
+                'reconciled_by' => $analyst->actorId,
+            ]);
+            $this->fail('a reconciliation without its compared projection must be rejected');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('metric reconciliation requires the compared current projection', $exception->getMessage());
+        }
 
         // reconcile against a tampered projection -> divergence detected, source untouched
         DB::table('metric_projections')->where('id', $projection['projection_id'])->update(['value' => 9999]);
@@ -105,6 +133,8 @@ final class ReportingFeatureTest extends TestCase
 
         $run = app(RunReport::class)->run($analyst, 'student_outstanding_balance', $this->financialPeriodKey, 'student', $this->studentId, ['min_amount' => '1'], 'rep-run-1');
         $this->assertSame('3500.00', $run['result']);
+        $this->assertSame('complete', $run['completeness']);
+        $this->assertDatabaseHas('report_runs', ['id' => $run['run_id'], 'completeness' => 'complete']);
         $this->assertSame(64, strlen($run['reproducibility_hash']));
 
         $this->expectException(QueryException::class);
@@ -152,13 +182,22 @@ final class ReportingFeatureTest extends TestCase
             $this->assertSame('reporting.pin_exists', $rejection->errorCode());
         }
 
+        // A dashboard belongs to an organization. It must not reinterpret a
+        // platform-global slice as tenant-local even if a caller bypasses the
+        // form and calls the command directly.
+        try {
+            app(MaintainDashboard::class)->pin($analyst, Dashboard::query()->findOrFail($dashboard['dashboard_id']), 'student_outstanding_balance', $this->financialPeriodKey, 'global', null, 'rep-pin-global-forbidden');
+            $this->fail('organization-owned dashboards must reject global projections');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('reporting.pin_global_scope_forbidden', $rejection->errorCode());
+        }
+
         app(DefineMetric::class)->revise($analyst, MetricDefinition::query()->where('key', 'student_outstanding_balance')->firstOrFail(), 'spec v2', '2026-12-01', 'rep-def-6');
         try {
-            app(MaintainDashboard::class)->pin($analyst, Dashboard::query()->findOrFail($dashboard['dashboard_id']), 'student_outstanding_balance', $this->financialPeriodKey, 'global', null, 'rep-pin-4');
+            app(MaintainDashboard::class)->pin($analyst, Dashboard::query()->findOrFail($dashboard['dashboard_id']), 'student_outstanding_balance', $this->financialPeriodKey, 'student', $this->studentId, 'rep-pin-4');
             $this->fail('pinning after revision without recomputation must be withheld');
         } catch (BusinessRejection $rejection) {
-            $code = $rejection->errorCode();
-            $this->assertTrue(in_array($code, ['reporting.pin_no_projection', 'reporting.pin_stale'], true), 'expected withholding, got '.$code);
+            $this->assertSame('reporting.pin_no_projection', $rejection->errorCode());
         }
         $this->assertDatabaseHas('metric_projections', ['id' => $projection['projection_id'], 'completeness' => 'stale']);
     }
@@ -189,7 +228,7 @@ final class ReportingFeatureTest extends TestCase
         $this->assertSame('0.5000', app(ComputeProjection::class)->compute($analyst, 'attendance_rate', $this->academicPeriodId, 'class', $this->classId, 'rep-pr-9')['value']);
 
         // funding: 2500 of 10000 committed = 0.25 as-of the financial period end (obligation remainder is 3500)
-        $fund = app(AllocateFunds::class)->establish($this->grantedActor('rep-fund-mgr', ['finance.fund']), 'Rep Fund', 'agreement/rep-1', '10000.00', 'tuition', 'restricted to tuition', 'rep-fund-1');
+        $fund = app(AllocateFunds::class)->establish($this->grantedActor('rep-fund-mgr', ['finance.fund']), $this->bootstrapOrganizationId, 'Rep Fund', 'agreement/rep-1', '10000.00', 'tuition', 'restricted to tuition', 'rep-fund-1');
         $fundAllocator = $this->grantedActor('rep-fund-alloc', ['finance.fund_allocate']);
         app(AllocateFunds::class)->allocate($fundAllocator, FundingSource::query()->findOrFail($fund['fund_id']), ObligationLine::query()->findOrFail($this->tuitionLineId), '2500.00', 'sponsor coverage', 'rep-fund-2');
         app(DefineMetric::class)->define($analyst, 'fund_utilization', 'Fund utilization', 'allocated over committed as-of period end', '2026-01-01', 'rep-def-10');
@@ -224,6 +263,157 @@ final class ReportingFeatureTest extends TestCase
 
         $this->assertDatabaseHas('audit_events', ['operation' => 'reporting.projection.compute.denied', 'actor_id' => 'rep-nobody']);
         $this->assertDatabaseMissing('metric_projections', ['period_key' => $this->financialPeriodKey]);
+    }
+
+    public function test_fund_reporting_and_dashboard_boundaries_follow_the_finance_source_organization(): void
+    {
+        $this->seedFinancialChain();
+        $localAnalyst = $this->grantedActor('rep-local-analyst', [
+            'reporting.catalog', 'reporting.compute', 'reporting.run', 'reporting.reconcile', 'reporting.dashboard',
+        ]);
+        app(DefineMetric::class)->define(
+            $localAnalyst,
+            'fund_utilization',
+            'Finance fund utilization',
+            'Finance allocations over committed amount',
+            '2026-01-01',
+            'rep-fund-scope-definition',
+        );
+        /** @var MetricDefinition $metric */
+        $metric = MetricDefinition::query()->where('key', 'fund_utilization')->firstOrFail();
+        /** @var MetricVersion $version */
+        $version = MetricVersion::query()->where('metric_id', $metric->id)->where('version_no', 1)->firstOrFail();
+
+        /** @var Organization $otherOrganization */
+        $otherOrganization = Organization::query()->create([
+            'id' => '00000000-0000-4000-8000-00000000f167',
+            'name' => 'Foreign Reporting Fund Organization',
+            'lifecycle_state' => 'active',
+        ]);
+        $fundManager = $this->grantedActor('rep-foreign-fund-manager', ['finance.fund']);
+        $this->grantScopeAuthority($fundManager->actorId, ['finance.fund'], 'organization', $otherOrganization->id);
+        $fund = app(AllocateFunds::class)->establish(
+            $fundManager,
+            $otherOrganization->id,
+            'Foreign reporting fund',
+            'agreement/foreign-reporting',
+            '1000.00',
+            null,
+            null,
+            'rep-fund-scope-establish',
+        );
+
+        // An analyst who can report in the bootstrap organization cannot turn
+        // a foreign fund identifier into a cross-organization projection,
+        // report, or reconciliation oracle.
+        foreach ([
+            fn () => app(ComputeProjection::class)->compute($localAnalyst, 'fund_utilization', $this->financialPeriodKey, 'fund', $fund['fund_id'], 'rep-fund-scope-local-compute'),
+            fn () => app(RunReport::class)->run($localAnalyst, 'fund_utilization', $this->financialPeriodKey, 'fund', $fund['fund_id'], [], 'rep-fund-scope-local-run'),
+            fn () => app(ReconcileMetric::class)->reconcile($localAnalyst, 'fund_utilization', $this->financialPeriodKey, 'fund', $fund['fund_id'], 'rep-fund-scope-local-reconcile'),
+        ] as $attempt) {
+            try {
+                $attempt();
+                $this->fail('fund reporting must be authorized against the source organization, not any organization');
+            } catch (AuthorizationDenied $denial) {
+                $this->assertSame('reporting.scope_denied', $denial->errorCode());
+            }
+        }
+
+        // Bypass attempts carry real definition/version/source references and
+        // only forge the organization snapshot. Their exact schema guards
+        // prove that neither reporting table accepts cross-tenant fund facts.
+        try {
+            DB::table('metric_projections')->insert([
+                'id' => '00000000-0000-4000-8000-00000000f168',
+                'metric_version_id' => $version->id,
+                'period_key' => $this->financialPeriodKey,
+                'scope_type' => 'fund',
+                'scope_id' => $fund['fund_id'],
+                'organization_id' => $this->bootstrapOrganizationId,
+                'value' => '0.0000',
+                'completeness' => 'complete',
+                'meta' => json_encode([]),
+                'computed_at' => now(),
+                'computed_by' => 'direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $this->fail('raw SQL must not assign organization-A provenance to an organization-B fund projection');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('fund metric projection organization must match its funding source', $exception->getMessage());
+        }
+        try {
+            DB::table('report_runs')->insert([
+                'id' => '00000000-0000-4000-8000-00000000f169',
+                'metric_version_id' => $version->id,
+                'period_key' => $this->financialPeriodKey,
+                'scope_type' => 'fund',
+                'scope_id' => $fund['fund_id'],
+                'organization_id' => $this->bootstrapOrganizationId,
+                'filters' => json_encode([]),
+                'result' => '0.0000',
+                'completeness' => 'complete',
+                'meta' => json_encode([]),
+                'reproducibility_hash' => hash('sha256', 'forged foreign fund run'),
+                'executed_by' => 'direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $this->fail('raw SQL must not assign organization-A provenance to an organization-B fund run');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('fund report run organization must match its funding source', $exception->getMessage());
+        }
+
+        $foreignAnalyst = $this->grantedActor('rep-foreign-analyst', ['reporting.compute', 'reporting.run', 'reporting.reconcile']);
+        $this->grantScopeAuthority($foreignAnalyst->actorId, ['reporting.compute', 'reporting.run', 'reporting.reconcile'], 'organization', $otherOrganization->id);
+        $projection = app(ComputeProjection::class)->compute($foreignAnalyst, 'fund_utilization', $this->financialPeriodKey, 'fund', $fund['fund_id'], 'rep-fund-scope-foreign-compute');
+        $run = app(RunReport::class)->run($foreignAnalyst, 'fund_utilization', $this->financialPeriodKey, 'fund', $fund['fund_id'], [], 'rep-fund-scope-foreign-run');
+        $reconciliation = app(ReconcileMetric::class)->reconcile($foreignAnalyst, 'fund_utilization', $this->financialPeriodKey, 'fund', $fund['fund_id'], 'rep-fund-scope-foreign-reconcile');
+        $this->assertSame('matched', $reconciliation['status']);
+        $this->assertDatabaseHas('metric_projections', ['id' => $projection['projection_id'], 'organization_id' => $otherOrganization->id]);
+        $this->assertDatabaseHas('report_runs', ['id' => $run['run_id'], 'organization_id' => $otherOrganization->id]);
+
+        // A dashboard is an organization-owned projection surface. Even a
+        // complete source-B projection cannot be pinned into dashboard A.
+        $dashboard = app(MaintainDashboard::class)->create($localAnalyst, 'Local dashboard', 'rep-fund-scope-dashboard');
+        try {
+            DB::table('dashboard_pins')->insert([
+                'id' => '00000000-0000-4000-8000-00000000f16a',
+                'dashboard_id' => $dashboard['dashboard_id'],
+                'metric_id' => $metric->id,
+                'period_key' => $this->financialPeriodKey,
+                'scope_type' => 'global',
+                'scope_id' => null,
+                'pinned_by' => 'direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $this->fail('raw SQL must not pin a platform-global projection into an organization dashboard');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('organization-owned dashboards cannot pin global projections', $exception->getMessage());
+        }
+        try {
+            app(MaintainDashboard::class)->pin($localAnalyst, Dashboard::query()->findOrFail($dashboard['dashboard_id']), 'fund_utilization', $this->financialPeriodKey, 'fund', $fund['fund_id'], 'rep-fund-scope-pin-command');
+            $this->fail('an organization-A dashboard must not pin an organization-B fund projection');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('reporting.pin_scope_conflict', $rejection->errorCode());
+        }
+        try {
+            DB::table('dashboard_pins')->insert([
+                'id' => '00000000-0000-4000-8000-00000000f170',
+                'dashboard_id' => $dashboard['dashboard_id'],
+                'metric_id' => $metric->id,
+                'period_key' => $this->financialPeriodKey,
+                'scope_type' => 'fund',
+                'scope_id' => $fund['fund_id'],
+                'pinned_by' => 'direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $this->fail('raw SQL must not pin a foreign organization projection');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('dashboard pins require a complete projection matching the dashboard organization', $exception->getMessage());
+        }
     }
 
     private function seedFinancialChain(): void

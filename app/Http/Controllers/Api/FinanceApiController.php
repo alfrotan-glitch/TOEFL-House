@@ -209,7 +209,7 @@ final class FinanceApiController extends Controller
     public function postJournal(Request $request): JsonResponse
     {
         $input = $request->validate([
-            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_result,other'],
+            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_liability,other'],
             'source_id' => ['nullable', 'string'], 'reason' => ['required', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1'], 'lines.*.account_id' => ['required', 'string'],
             'lines.*.direction' => ['required', 'in:debit,credit'], 'lines.*.amount' => ['required', 'numeric', 'money', 'gt:0'],
@@ -371,12 +371,13 @@ final class FinanceApiController extends Controller
     public function establishFund(Request $request): JsonResponse
     {
         $input = $request->validate([
+            'organization_id' => ['required', 'string'],
             'name' => ['required', 'string', 'max:120'], 'agreement_ref' => ['required', 'string', 'max:120'],
             'committed_amount' => ['required', 'numeric', 'money', 'gt:0'], 'restricted_category' => ['nullable', 'string', 'max:120'],
             'restriction_note' => ['nullable', 'string', 'max:1000'],
         ]);
         $result = app(AllocateFunds::class)->establish(
-            $this->actor(), $input['name'], $input['agreement_ref'], $input['committed_amount'],
+            $this->actor(), $input['organization_id'], $input['name'], $input['agreement_ref'], $input['committed_amount'],
             $input['restricted_category'] ?? null, $input['restriction_note'] ?? null,
             $this->idempotencyKey('finance.fund.establish'),
         );

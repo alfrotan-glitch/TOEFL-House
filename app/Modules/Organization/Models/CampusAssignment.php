@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Effective-dated campus attribution of a branch. Exactly one open
- * assignment per branch is enforced by a partial unique index; transfers
+ * Effective-dated campus attribution of a branch. Exactly one assignment is
+ * effective at any instant (including closed historical intervals); transfers
  * close the prior assignment and never rewrite history.
  *
  * @property string $id

@@ -42,7 +42,8 @@ final class TransactionalEventRecorder
             'payload' => $payload,
             'context' => DomainEventContext::from($auditEvent, $payload),
             'payload_digest' => $payloadDigest,
-            'occurred_at' => $auditEvent->occurred_at,
+            // The database copies the immutable audit-event clock. A domain
+            // event is an outbox projection, not a second clock authority.
         ]);
     }
 }

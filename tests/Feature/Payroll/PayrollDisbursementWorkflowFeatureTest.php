@@ -6,7 +6,9 @@ namespace Tests\Feature\Payroll;
 
 use App\Modules\Finance\Commands\MaintainChartOfAccounts;
 use App\Modules\Finance\Commands\MaintainFinancialPeriod;
+use App\Modules\Finance\Commands\RecognizePayrollLiability;
 use App\Modules\Finance\Models\FinancialPeriod;
+use App\Modules\Finance\Models\PayrollLiabilityFact;
 use App\Modules\Hr\Commands\MaintainEmployment;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Identity\Models\UserAccount;
@@ -30,8 +32,9 @@ use Tests\TestCase;
  *    because the label the domain requires was hard-coded to null;
  *  - the JSON payroll "calculate" endpoint was mis-wired (the route has no
  *    period path segment, so the controller received no period);
- *  - an approved payroll result could be disbursed more than once — a double
- *    pay — because nothing tied a balanced disbursement journal to its result.
+ *  - a balanced journal could be sourced directly from Payroll evidence,
+ *    bypassing Finance liability recognition; the Finance fact now becomes the
+ *    sole payroll disbursement source and can be paid exactly once.
  */
 final class PayrollDisbursementWorkflowFeatureTest extends TestCase
 {
@@ -64,7 +67,7 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
         $this->makeLogin('pdw-contract-appr', ['hr.contract.approve'], 'contractapprover');
         $this->makeLogin('pdw-calc', ['payroll.calculate'], 'calculator');
         $this->makeLogin('pdw-appr', ['payroll.approve'], 'approver');
-        $this->makeLogin('pdw-cash', ['finance.chart', 'finance.journal', 'finance.period'], 'cashier');
+        $this->makeLogin('pdw-cash', ['finance.chart', 'finance.journal', 'finance.period', 'finance.payroll_liability'], 'cashier');
         $this->makeLogin('pdw-nobody', [], 'nobody');
 
         $opener = $this->grantedActor('pdw-period-1', ['payroll.period']);
@@ -164,18 +167,33 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function disbursementJournal(string $resultId, string $amount): array
+    private function disbursementJournal(string $liabilityId, string $amount): array
     {
         return [
             'period_id' => $this->financialPeriodId,
-            'source_type' => 'payroll_result',
-            'source_id' => $resultId,
+            'source_type' => 'payroll_liability',
+            'source_id' => $liabilityId,
             'reason' => 'salary disbursement',
             'lines' => [
                 ['account_id' => $this->expenseAccountId, 'direction' => 'debit', 'amount' => $amount],
                 ['account_id' => $this->cashAccountId, 'direction' => 'credit', 'amount' => $amount],
             ],
         ];
+    }
+
+    private function recognizeLiability(string $resultId): string
+    {
+        $this->post('/finance/payroll-liabilities/recognize', [
+            'source_type' => 'payroll_result',
+            'source_id' => $resultId,
+            'amount' => '1100.00',
+            'evidence_ref' => 'payroll/result/'.$resultId,
+        ])->assertRedirect('/finance');
+
+        return (string) PayrollLiabilityFact::query()
+            ->where('source_type', 'payroll_result')
+            ->where('source_id', $resultId)
+            ->value('id');
     }
 
     public function test_contract_version_prepare_without_scale_and_allowance_rule_over_console(): void
@@ -204,43 +222,47 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
         ]);
     }
 
-    public function test_approved_payroll_is_disbursed_exactly_once_via_a_balanced_journal(): void
+    public function test_approved_payroll_is_recognized_by_finance_then_disbursed_exactly_once_via_a_balanced_journal(): void
     {
         $this->prepareInForceSalaryContract();
         ['result_id' => $resultId] = $this->calculateAndApprove();
 
         $this->signIn('cashier');
-        // First disbursement: balanced journal referencing the approved result.
-        $this->post('/finance/journals', $this->disbursementJournal($resultId, '1100.00'))->assertRedirect('/finance');
+        $liabilityId = $this->recognizeLiability($resultId);
+        $this->assertDatabaseHas('payroll_liability_facts', [
+            'id' => $liabilityId,
+            'source_type' => 'payroll_result',
+            'source_id' => $resultId,
+            'amount' => '1100.00',
+        ]);
 
-        $this->assertSame(1, DB::table('journals')->where('source_type', 'payroll_result')->where('source_id', $resultId)->count());
-
-        // A second disbursement of the SAME result is rejected — a payroll is
-        // paid exactly once (command guard + partial unique index backstop). The
-        // web console surfaces the rejection as a redirect (no second row is the
-        // authoritative invariant).
-        $this->post('/finance/journals', $this->disbursementJournal($resultId, '1100.00'));
-        $this->assertSame(1, DB::table('journals')->where('source_type', 'payroll_result')->where('source_id', $resultId)->count());
-
-        // Replaying the identical request with the same idempotency key and
-        // reusing that key with a different amount both stay at one journal:
-        // the same-key replay returns the cached outcome, and any further
-        // attempt (idempotency conflict or the already-paid guard) returns 409.
+        // Payroll supplies calculation evidence only. The ledger disburses the
+        // Finance-recognized liability, with an exact immutable source amount.
         $key = 'pdw.journal.idem.001';
-        $this->post('/finance/journals', $this->disbursementJournal($resultId, '1100.00'), ['Idempotency-Key' => $key])->assertRedirect();
-        $this->assertSame(1, DB::table('journals')->where('source_type', 'payroll_result')->where('source_id', $resultId)->count());
-        $this->postJson('/finance/journals', $this->disbursementJournal($resultId, '5000.00'), ['Idempotency-Key' => $key])
-            ->assertStatus(409);
-        $this->assertSame(1, DB::table('journals')->where('source_type', 'payroll_result')->where('source_id', $resultId)->count());
+        $this->post('/finance/journals', $this->disbursementJournal($liabilityId, '1100.00'), ['Idempotency-Key' => $key])
+            ->assertRedirect('/finance');
+        $this->assertSame(1, DB::table('journals')->where('source_type', 'payroll_liability')->where('source_id', $liabilityId)->count());
 
-        // The journal balances and equals the net payable.
-        $debit = DB::table('journal_lines')->whereIn('journal_id', fn ($q) => $q->select('id')->from('journals')->where('source_id', $resultId))->where('direction', 'debit')->sum('amount');
-        $credit = DB::table('journal_lines')->whereIn('journal_id', fn ($q) => $q->select('id')->from('journals')->where('source_id', $resultId))->where('direction', 'credit')->sum('amount');
+        // Same-key replay returns the original outcome without a second
+        // disbursement; a changed same-key request is a conflict.
+        $this->post('/finance/journals', $this->disbursementJournal($liabilityId, '1100.00'), ['Idempotency-Key' => $key])
+            ->assertRedirect('/finance');
+        $this->postJson('/finance/journals', $this->disbursementJournal($liabilityId, '5000.00'), ['Idempotency-Key' => $key])
+            ->assertStatus(409);
+        $this->assertSame(1, DB::table('journals')->where('source_type', 'payroll_liability')->where('source_id', $liabilityId)->count());
+
+        // A fresh request cannot pay that same Finance fact twice either.
+        $this->postJson('/finance/journals', $this->disbursementJournal($liabilityId, '1100.00'))
+            ->assertStatus(409);
+        $this->assertSame(1, DB::table('journals')->where('source_type', 'payroll_liability')->where('source_id', $liabilityId)->count());
+
+        $debit = DB::table('journal_lines')->whereIn('journal_id', fn ($q) => $q->select('id')->from('journals')->where('source_type', 'payroll_liability')->where('source_id', $liabilityId))->where('direction', 'debit')->sum('amount');
+        $credit = DB::table('journal_lines')->whereIn('journal_id', fn ($q) => $q->select('id')->from('journals')->where('source_type', 'payroll_liability')->where('source_id', $liabilityId))->where('direction', 'credit')->sum('amount');
         $this->assertSame('1100.00', (string) $debit);
         $this->assertSame('1100.00', (string) $credit);
     }
 
-    public function test_duplicate_disbursement_is_rejected_at_the_database_boundary(): void
+    public function test_direct_sql_cannot_bypass_finance_payroll_liability_recognition(): void
     {
         $this->prepareInForceSalaryContract();
         ['result_id' => $resultId] = $this->calculateAndApprove();
@@ -248,31 +270,54 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
         $period = FinancialPeriod::query()->findOrFail($this->financialPeriodId);
         $cashier = $this->grantedActor('pdw-direct-cashier', ['finance.journal']);
 
-        $journalId = RandomIdentifier::new();
-        DB::table('journals')->insert([
-            'id' => $journalId,
-            'period_id' => $period->id,
-            'source_type' => 'payroll_result',
-            'source_id' => $resultId,
-            'reason' => 'direct insert disbursement',
-            'posted_by' => $cashier->actorId,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        // A second direct payroll-sourced journal for the same result must be
-        // rejected by the partial unique index (no double pay via raw SQL).
+        // Historic payroll-result journals remain readable, but a new raw SQL
+        // header cannot bypass Finance's independent liability recognition.
         $this->expectException(QueryException::class);
         DB::table('journals')->insert([
             'id' => RandomIdentifier::new(),
             'period_id' => $period->id,
             'source_type' => 'payroll_result',
             'source_id' => $resultId,
-            'reason' => 'duplicate direct insert disbursement',
+            'reason' => 'forged direct Payroll-result disbursement',
             'posted_by' => $cashier->actorId,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    public function test_direct_sql_cannot_post_a_wrong_amount_against_a_finance_payroll_liability(): void
+    {
+        $this->prepareInForceSalaryContract();
+        ['result_id' => $resultId] = $this->calculateAndApprove();
+        $recognizer = $this->grantedActor('pdw-direct-finance-recognizer', ['finance.payroll_liability']);
+        $recognized = app(RecognizePayrollLiability::class)->recognize(
+            $recognizer,
+            'payroll_result',
+            $resultId,
+            '1100.00',
+            'payroll/result/'.$resultId,
+            'pdw-direct-liability-recognize',
+        );
+
+        $this->expectException(QueryException::class);
+        DB::transaction(function () use ($recognized): void {
+            $journalId = RandomIdentifier::new();
+            DB::table('journals')->insert([
+                'id' => $journalId,
+                'period_id' => $this->financialPeriodId,
+                'source_type' => 'payroll_liability',
+                'source_id' => $recognized['liability_id'],
+                'reason' => 'forged short payroll disbursement',
+                'posted_by' => 'pdw-direct-sql-attacker',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            DB::table('journal_lines')->insert([
+                ['id' => RandomIdentifier::new(), 'journal_id' => $journalId, 'account_id' => $this->expenseAccountId, 'direction' => 'debit', 'amount' => '1099.99', 'created_at' => now(), 'updated_at' => now()],
+                ['id' => RandomIdentifier::new(), 'journal_id' => $journalId, 'account_id' => $this->cashAccountId, 'direction' => 'credit', 'amount' => '1099.99', 'created_at' => now(), 'updated_at' => now()],
+            ]);
+            DB::statement('SET CONSTRAINTS journals_completion_and_source_amount_guard_trigger IMMEDIATE');
+        });
     }
 
     public function test_unprivileged_user_cannot_calculate_approve_or_disburse(): void
@@ -287,9 +332,19 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
         ])->assertForbidden();
         $this->assertSame(0, DB::table('payroll_calculations')->count());
 
-        // Cannot post a disbursement journal (default deny; no ledger mutation).
+        // Cannot post even an organization-wide balancing journal (default
+        // deny; no ledger mutation). Payroll-liability source resolution is
+        // deliberately not used here: this specifically proves authorization.
         $journalCount = DB::table('journals')->count();
-        $this->post('/finance/journals', $this->disbursementJournal('00000000-0000-0000-0000-000000000000', '1100.00'));
+        $this->post('/finance/journals', [
+            'period_id' => $this->financialPeriodId,
+            'source_type' => 'other',
+            'reason' => 'unauthorized journal attempt',
+            'lines' => [
+                ['account_id' => $this->expenseAccountId, 'direction' => 'debit', 'amount' => '1100.00'],
+                ['account_id' => $this->cashAccountId, 'direction' => 'credit', 'amount' => '1100.00'],
+            ],
+        ]);
         $this->assertSame($journalCount, DB::table('journals')->count());
         $this->assertDatabaseHas('audit_events', ['operation' => 'finance.journal.post.denied']);
     }

@@ -8,6 +8,7 @@ use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Placement\Domain\PlacementAccess;
 use App\Modules\Academic\Placement\Domain\PlacementAntiTamper;
 use App\Modules\Academic\Placement\Domain\PlacementDelivery;
+use App\Modules\Academic\Placement\Domain\PlacementEvidenceVerifier;
 use App\Modules\Academic\Placement\Domain\PlacementProfileLifecycle;
 use App\Modules\Academic\Placement\Domain\PlacementScoring;
 use App\Modules\Academic\Placement\Models\PlacementAttempt;
@@ -51,6 +52,7 @@ final class ManagePlacementProfile
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly CrmInteractionTraceRecorder $crmTrace,
+        private readonly PlacementEvidenceVerifier $evidenceVerifier,
     ) {}
 
     /** @return array{profile_id: string, correlation_id: string} */
@@ -63,12 +65,12 @@ final class ManagePlacementProfile
         try {
             return $this->idempotency->execute('placement.profile.open', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $personId, $programVersionId, $visitorId, $branchId): array {
+                    $visitorId = $visitorId === null ? null : trim($visitorId);
+                    $branchId = $branchId === null ? null : trim($branchId);
                     $this->access->require($actor, self::CAPABILITY, $branchId);
                     if (Person::query()->whereKey($personId)->doesntExist()) {
                         throw BusinessRejection::forCode('placement.person_unknown', 'a placement profile requires a known person');
                     }
-                    $visitorId = $visitorId === null ? null : trim($visitorId);
-                    $branchId = $branchId === null ? null : trim($branchId);
                     if ($visitorId !== null && $visitorId !== '') {
                         /** @var Visitor|null $visitor */
                         $visitor = Visitor::query()->whereKey($visitorId)->first();
@@ -94,6 +96,7 @@ final class ManagePlacementProfile
                         'person_id' => $personId,
                         'visitor_id' => $visitorId,
                         'program_version_id' => $programVersionId,
+                        'lineage_version' => PlacementProfile::LINEAGE_VERSION,
                         'lifecycle_state' => PlacementProfile::STATE_DRAFT,
                         'originating_branch_id' => $branchId,
                         'current_home_branch_id' => $branchId,
@@ -122,17 +125,48 @@ final class ManagePlacementProfile
         try {
             return $this->idempotency->execute('placement.attempt.start', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $profile, $testVersionId, $deliveryMode, $proctorPersonId): array {
-                    $this->requireProfileBranch($actor, $profile);
+                    /** @var PlacementProfile $lockedProfile */
+                    $lockedProfile = PlacementProfile::query()->whereKey($profile->id)->lockForUpdate()->firstOrFail();
+                    $this->requireProfileBranch($actor, $lockedProfile);
                     PlacementDelivery::require($deliveryMode);
-                    if (! in_array($profile->lifecycle_state, [PlacementProfile::STATE_DRAFT, PlacementProfile::STATE_SCORED], true)) {
-                        throw BusinessRejection::forCode('placement.profile_not_open_for_attempt', 'attempts may be opened only on a draft or scored placement profile');
+                    if ($lockedProfile->lifecycle_state !== PlacementProfile::STATE_DRAFT) {
+                        throw BusinessRejection::forCode('placement.profile_not_open_for_attempt', 'a retake must supersede the released profile and open a new draft placement profile');
+                    }
+                    if ($lockedProfile->lineage_version !== PlacementProfile::LINEAGE_VERSION) {
+                        throw BusinessRejection::forCode('placement.profile_lineage_remediation_required', 'a pre-lineage placement profile cannot accept a new attempt without governed remediation');
+                    }
+                    if (PlacementAttempt::query()
+                        ->where('profile_id', $lockedProfile->id)
+                        ->whereIn('status', [
+                            PlacementAttempt::STATUS_SCHEDULED,
+                            PlacementAttempt::STATUS_IN_PROGRESS,
+                            PlacementAttempt::STATUS_SUBMITTED,
+                            PlacementAttempt::STATUS_TIMED_OUT,
+                        ])
+                        ->exists()) {
+                        throw BusinessRejection::forCode('placement.profile_attempt_exists', 'a profile may have only one live or submitted decision attempt; cancel before retrying or open a governed retake');
                     }
                     /** @var PlacementTestVersion $version */
-                    $version = PlacementTestVersion::query()->lockForUpdate()->findOrFail($testVersionId);
+                    $version = PlacementTestVersion::query()->whereKey($testVersionId)->lockForUpdate()->firstOrFail();
                     $this->requireVersionPublished($version);
 
                     /** @var PlacementTest $test */
-                    $test = PlacementTest::query()->whereKey($version->placement_test_id)->firstOrFail();
+                    $test = PlacementTest::query()->whereKey($version->placement_test_id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $test->originating_branch_id) !== trim((string) $lockedProfile->originating_branch_id)
+                        || trim((string) $test->current_home_branch_id) !== trim((string) $lockedProfile->current_home_branch_id)) {
+                        throw BusinessRejection::forCode('placement.profile_test_branch_mismatch', 'a placement test must belong to the profile operational branch');
+                    }
+                    // A generic test may serve a profile-selected program and
+                    // an untargeted profile may inherit a test program, but
+                    // two explicit program authorities must never disagree.
+                    if ($lockedProfile->program_version_id !== null
+                        && $test->program_version_id !== null
+                        && trim((string) $lockedProfile->program_version_id) !== trim((string) $test->program_version_id)) {
+                        throw BusinessRejection::forCode('placement.profile_test_program_mismatch', 'a program-targeted placement test must match the profile target program version');
+                    }
+                    if ($deliveryMode === PlacementDelivery::PHYSICAL && ($proctorPersonId === null || trim($proctorPersonId) === '')) {
+                        throw BusinessRejection::forCode('placement.physical_proctor_required', 'a physically delivered placement attempt requires the accountable proctor person');
+                    }
                     if ($proctorPersonId !== null && Person::query()->whereKey($proctorPersonId)->doesntExist()) {
                         throw BusinessRejection::forCode('placement.proctor_unknown', 'referenced proctor does not exist');
                     }
@@ -146,14 +180,15 @@ final class ManagePlacementProfile
                         }
                     }
 
-                    $attemptNo = (int) PlacementAttempt::query()->where('profile_id', $profile->id)->max('attempt_no') + 1;
+                    $attemptNo = (int) PlacementAttempt::query()->where('profile_id', $lockedProfile->id)->max('attempt_no') + 1;
                     $attempt = PlacementAttempt::query()->create([
                         'id' => RandomIdentifier::new(),
-                        'profile_id' => $profile->id,
+                        'profile_id' => $lockedProfile->id,
                         'test_version_id' => $version->id,
                         'delivery_mode' => $deliveryMode,
                         'attempt_no' => $attemptNo,
                         'status' => PlacementAttempt::STATUS_IN_PROGRESS,
+                        'lineage_version' => PlacementAttempt::LINEAGE_VERSION,
                         'started_at' => now(),
                         'proctor_person_id' => $proctorPersonId,
                         'originating_branch_id' => $test->originating_branch_id,
@@ -225,18 +260,12 @@ final class ManagePlacementProfile
                                 'raw_score' => $scored['earned'],
                                 'weighted_score' => $scored['percentage'],
                                 'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
-                                'scored_by' => $actor->actorId,
+                                'scoring_method' => PlacementSectionResult::SCORING_METHOD_AUTOMATIC,
+                                // A server calculation has no human scorer; the
+                                // submitting proctor/candidate is preserved in
+                                // the audit event, not misrepresented here.
+                                'scored_by' => null,
                                 'rationale' => sprintf('server auto-score for section %s', $section->code),
-                            ]);
-                        } else {
-                            PlacementSectionResult::query()->create([
-                                'id' => RandomIdentifier::new(),
-                                'attempt_id' => $locked->id,
-                                'section_id' => $section->id,
-                                'component' => $section->component,
-                                'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
-                                'scored_by' => $actor->actorId,
-                                'rationale' => 'awaiting professional marking',
                             ]);
                         }
                     }
@@ -250,6 +279,11 @@ final class ManagePlacementProfile
                         'tamper_flagged' => $tamper,
                         'tamper_reason' => $tamper ? 'duration exceeded the allowed test window' : null,
                     ])->save();
+                    // The v2 result guard permits automatic facts only while
+                    // an attempt is in progress, but deliberately permits an
+                    // unscored professional stub only after its immutable
+                    // submission envelope exists. Preserve both authorities.
+                    $this->createProfessionalResultStubs($locked, $version);
 
                     $this->markScoredIfComplete($actor, $locked->profile_id);
                     $event = $this->audit->record($actor->actorId, 'placement.attempt.submit', 'placement_attempt', $locked->id, null, [
@@ -266,9 +300,10 @@ final class ManagePlacementProfile
         }
     }
 
-    /** @return array{attempt_id: string, correlation_id: string} */
+    /** @return array{attempt_id: string, tamper_flagged: bool, correlation_id: string} */
     public function submitPhysical(Actor $actor, PlacementAttempt $attempt, string $evidenceRef, string $idempotencyKey): array
     {
+        $evidenceRef = trim($evidenceRef);
         $payload = hash('sha256', implode('|', ['placement.attempt.submit.physical', $attempt->id, $evidenceRef, $actor->actorId]));
 
         try {
@@ -286,21 +321,40 @@ final class ManagePlacementProfile
                     $endedAt = CarbonImmutable::now();
                     $startedAt = $locked->started_at !== null ? CarbonImmutable::parse($locked->started_at) : $endedAt;
                     $duration = max(0, (int) $startedAt->diffInSeconds($endedAt));
+                    /** @var PlacementTestVersion $version */
+                    $version = PlacementTestVersion::query()->findOrFail($locked->test_version_id);
+                    if (PlacementSection::query()
+                        ->where('test_version_id', $version->id)
+                        ->where('lifecycle_state', 'published')
+                        ->where('can_auto_score', true)
+                        ->exists()) {
+                        throw BusinessRejection::forCode('placement.physical_answers_required', 'physical delivery of an auto-scored section requires normalized answer-sheet ingestion; evidence-only submission cannot fabricate a score');
+                    }
+                    $test = PlacementTest::query()->whereKey($version->placement_test_id)->firstOrFail();
+                    $tamper = $duration > ($test->total_time_minutes * 60);
 
                     $locked->forceFill([
                         'status' => PlacementAttempt::STATUS_SUBMITTED,
                         'ended_at' => $endedAt,
                         'duration_seconds' => $duration,
                         'evidence_ref' => $evidenceRef,
-                        'anti_tamper_hmac' => hash('sha256', 'physical:'.$evidenceRef),
+                        // Physical evidence is server-HMACed by the exact same
+                        // secret-backed canonical scheme as digital answers.
+                        'anti_tamper_hmac' => PlacementAntiTamper::hmac($locked, [], $evidenceRef, $duration),
+                        'tamper_flagged' => $tamper,
+                        'tamper_reason' => $tamper ? 'duration exceeded the allowed test window' : null,
                     ])->save();
+                    // Evidence-only physical delivery has no automatic
+                    // sections (validated above), so create the professional
+                    // work queue only after the submitted HMAC exists.
+                    $this->createProfessionalResultStubs($locked, $version);
                     $event = $this->audit->record($actor->actorId, 'placement.attempt.submit', 'placement_attempt', $locked->id, null, [
-                        'delivery' => 'physical', 'duration' => $duration,
+                        'delivery' => 'physical', 'duration' => $duration, 'tamper' => $tamper,
                         ...$this->branchProvenance($locked->originating_branch_id),
                     ]);
                     $this->traceVisitor($actor, $locked->id, $locked->profile_id, $event->id);
 
-                    return ['attempt_id' => $locked->id, 'correlation_id' => $event->correlation_id];
+                    return ['attempt_id' => $locked->id, 'tamper_flagged' => $tamper, 'correlation_id' => $event->correlation_id];
                 }),
             );
         } catch (AuthorizationDenied $denial) {
@@ -318,6 +372,7 @@ final class ManagePlacementProfile
      */
     public function ingestPhysicalAnswers(Actor $actor, PlacementAttempt $attempt, array $answers, string $evidenceRef, string $idempotencyKey): array
     {
+        $evidenceRef = trim($evidenceRef);
         $payload = hash('sha256', implode('|', [
             'placement.attempt.submit.physical.answers', $attempt->id, json_encode($answers), $evidenceRef, $actor->actorId,
         ]));
@@ -366,18 +421,9 @@ final class ManagePlacementProfile
                                 'raw_score' => $scored['earned'],
                                 'weighted_score' => $scored['percentage'],
                                 'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
-                                'scored_by' => $actor->actorId,
+                                'scoring_method' => PlacementSectionResult::SCORING_METHOD_AUTOMATIC,
+                                'scored_by' => null,
                                 'rationale' => sprintf('offline answer-sheet auto-score for section %s', $section->code),
-                            ]);
-                        } else {
-                            PlacementSectionResult::query()->create([
-                                'id' => RandomIdentifier::new(),
-                                'attempt_id' => $locked->id,
-                                'section_id' => $section->id,
-                                'component' => $section->component,
-                                'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
-                                'scored_by' => $actor->actorId,
-                                'rationale' => 'awaiting professional marking',
                             ]);
                         }
                     }
@@ -392,6 +438,7 @@ final class ManagePlacementProfile
                         'tamper_flagged' => $tamper,
                         'tamper_reason' => $tamper ? 'duration exceeded the allowed test window' : null,
                     ])->save();
+                    $this->createProfessionalResultStubs($locked, $version);
 
                     $this->markScoredIfComplete($actor, $locked->profile_id);
                     $event = $this->audit->record($actor->actorId, 'placement.attempt.submit.physical.answers', 'placement_attempt', $locked->id, null, [
@@ -453,6 +500,9 @@ final class ManagePlacementProfile
                     /** @var PlacementProfile $locked */
                     $locked = PlacementProfile::query()->whereKey($profile->id)->lockForUpdate()->firstOrFail();
                     $this->requireProfileBranch($actor, $locked);
+                    if ($locked->lineage_version !== PlacementProfile::LINEAGE_VERSION) {
+                        throw BusinessRejection::forCode('placement.profile_lineage_remediation_required', 'a pre-lineage placement profile requires governed remediation before a new decision transition');
+                    }
                     PlacementProfileLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if ($toState === PlacementProfile::STATE_SCORED && ! $this->hasCompleteScoring($locked->id)) {
                         throw BusinessRejection::forCode('placement.profile_scoring_incomplete', 'every section must carry a score before the profile can be scored');
@@ -472,6 +522,42 @@ final class ManagePlacementProfile
         }
     }
 
+    /**
+     * Materialize the human-marking work queue only after submission. A
+     * professional result starts as an immutable-attempt-bound blank stub;
+     * ScorePlacement fills it exactly once with the accountable scorer and
+     * published rubric. Automatic results are intentionally created earlier
+     * while the attempt is in progress.
+     */
+    private function createProfessionalResultStubs(PlacementAttempt $attempt, PlacementTestVersion $version): void
+    {
+        if ($attempt->status !== PlacementAttempt::STATUS_SUBMITTED) {
+            throw new \LogicException('professional placement result stubs require a submitted attempt');
+        }
+        foreach (PlacementSection::query()
+            ->where('test_version_id', $version->id)
+            ->where('lifecycle_state', 'published')
+            ->where('can_auto_score', false)
+            ->get() as $section) {
+            if (PlacementSectionResult::query()
+                ->where('attempt_id', $attempt->id)
+                ->where('section_id', $section->id)
+                ->exists()) {
+                throw BusinessRejection::forCode('placement.section_result_exists', 'a submitted placement section already has an authoritative result record');
+            }
+            PlacementSectionResult::query()->create([
+                'id' => RandomIdentifier::new(),
+                'attempt_id' => $attempt->id,
+                'section_id' => $section->id,
+                'component' => $section->component,
+                'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
+                'scoring_method' => PlacementSectionResult::SCORING_METHOD_PROFESSIONAL,
+                'scored_by' => null,
+                'rationale' => 'awaiting professional marking',
+            ]);
+        }
+    }
+
     private function markScoredIfComplete(Actor $actor, string $profileId): void
     {
         /** @var PlacementProfile $profile */
@@ -488,17 +574,26 @@ final class ManagePlacementProfile
 
     private function hasCompleteScoring(string $profileId): bool
     {
-        $attempt = PlacementAttempt::query()->where('profile_id', $profileId)->whereIn('status', [PlacementAttempt::STATUS_SUBMITTED])->latest('id')->first();
-        if ($attempt === null) {
-            return false;
-        }
-        $sectionIds = PlacementSection::query()->where('test_version_id', $attempt->test_version_id)->where('lifecycle_state', 'published')->pluck('id')->all();
-        $resultIds = PlacementSectionResult::query()->where('attempt_id', $attempt->id)->pluck('section_id')->all();
-        if (count(array_unique(array_intersect($sectionIds, $resultIds))) !== count($sectionIds)) {
+        $attempts = PlacementAttempt::query()
+            ->where('profile_id', $profileId)
+            ->where('lineage_version', PlacementAttempt::LINEAGE_VERSION)
+            ->where('status', PlacementAttempt::STATUS_SUBMITTED)
+            ->orderByDesc('attempt_no')
+            ->get();
+        if ($attempts->count() !== 1) {
             return false;
         }
 
-        return PlacementSectionResult::query()->where('attempt_id', $attempt->id)->whereNull('raw_score')->doesntExist();
+        /** @var PlacementAttempt $attempt */
+        $attempt = $attempts->first();
+
+        // A complete score set is not enough to advance the profile: it must
+        // be bound to the exact persisted evidence/HMAC before the scored
+        // lifecycle fact is recorded. Recommendation and review make the
+        // same check, but delaying it would leave a misleading scored state.
+        $this->evidenceVerifier->requireDecisionEligible($attempt);
+
+        return $this->evidenceVerifier->scoringIsComplete($attempt);
     }
 
     /** @return Collection<int, PlacementQuestion> */
@@ -527,12 +622,12 @@ final class ManagePlacementProfile
         }
     }
 
-    /** @return array{branch_id: ?string, campus_id: ?string, organization_id: ?string} */
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
     private function branchProvenance(?string $branchId): array
     {
         $id = trim((string) ($branchId ?? ''));
         if ($id === '') {
-            return ['branch_id' => null, 'campus_id' => null, 'organization_id' => null];
+            throw BusinessRejection::forCode('placement.profile_provenance_required', 'a placement event requires an operational branch provenance');
         }
         $branch = Branch::query()->whereKey($id)->first();
         if ($branch === null || $branch->lifecycle_state !== 'active') {

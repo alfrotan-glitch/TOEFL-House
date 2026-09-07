@@ -39,7 +39,7 @@ final class CaptureVisitor
         private readonly AttemptedOperation $attemptedOperation,
     ) {}
 
-    /** @return array{visitor_id: string, visitor_code: string, status: string, correlation_id: string} */
+    /** @return array{visitor_id: string, visitor_code: string, status: string, captured_at: string|null, capture_time_basis: string|null, correlation_id: string} */
     public function capture(
         Actor $actor,
         ?string $personId,
@@ -135,15 +135,28 @@ final class CaptureVisitor
                         'created_by' => $actor->actorId,
                     ]);
 
+                    // A database trigger owns the event clock so callers
+                    // cannot select a reporting cohort through created_at.
+                    /** @var Visitor $visitor */
+                    $visitor = Visitor::query()->whereKey($visitor->id)->firstOrFail();
                     $provenance = $this->visitorProvenance($visitor->origin_branch_id);
                     $event = $this->audit->record($actor->actorId, 'crm.visitor.capture', 'visitor', $visitor->id, null, [
                         'visitor_code' => $visitor->visitor_code, 'person_id' => $visitor->person_id, 'source_id' => $visitor->source_id,
                         'campaign_id' => $visitor->campaign_id, 'full_name' => $visitor->full_name, 'status' => Visitor::STATUS_NEW,
                         'origin_branch_id' => $visitor->origin_branch_id, 'contact_key' => $visitor->contact_key,
+                        'captured_at' => $visitor->captured_at?->toDateTimeString(),
+                        'capture_time_basis' => $visitor->capture_time_basis,
                         ...$provenance,
                     ]);
 
-                    return ['visitor_id' => $visitor->id, 'visitor_code' => $visitor->visitor_code, 'status' => Visitor::STATUS_NEW, 'correlation_id' => $event->correlation_id];
+                    return [
+                        'visitor_id' => $visitor->id,
+                        'visitor_code' => $visitor->visitor_code,
+                        'status' => Visitor::STATUS_NEW,
+                        'captured_at' => $visitor->captured_at?->toDateTimeString(),
+                        'capture_time_basis' => $visitor->capture_time_basis,
+                        'correlation_id' => $event->correlation_id,
+                    ];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

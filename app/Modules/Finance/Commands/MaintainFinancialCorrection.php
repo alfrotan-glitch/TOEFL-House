@@ -16,7 +16,9 @@ use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\PaymentAllocation;
+use App\Modules\Finance\Queries\FinancialBalanceQuery;
 use App\Modules\Organization\Models\Branch;
+use App\Modules\Organization\Models\Organization;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
@@ -41,6 +43,7 @@ final class MaintainFinancialCorrection
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly FinancialBalanceQuery $balances,
     ) {}
 
     /** @return array{correction_id: string, correlation_id: string} */
@@ -93,6 +96,7 @@ final class MaintainFinancialCorrection
                     $this->assertPeriodOpen($locked->period_id);
                     $this->lockSource($locked);
                     $this->assertCorrectionAvailable($locked);
+                    $this->assertObligationDecreaseDoesNotOverSettle($locked);
                     $branch = $this->sourceBranch($locked);
                     if ($branch === null) {
                         throw BusinessRejection::forCode('finance.correction_provenance_required', 'a financial correction requires known source branch provenance');
@@ -217,6 +221,7 @@ final class MaintainFinancialCorrection
         if ($allocation === null) {
             throw BusinessRejection::forCode('finance.correction_source_unknown', 'the fund allocation source is unknown');
         }
+        $this->assertFundAllocationOrganization($allocation);
         $period = Obligation::query()
             ->join('obligation_lines', 'obligation_lines.obligation_id', '=', 'obligations.id')
             ->where('obligation_lines.id', $allocation->obligation_line_id)
@@ -244,6 +249,37 @@ final class MaintainFinancialCorrection
             $allocation = FundAllocation::query()->whereKey($correction->fund_allocation_id)->lockForUpdate()->firstOrFail();
             $line = ObligationLine::query()->whereKey($allocation->obligation_line_id)->lockForUpdate()->firstOrFail();
             Obligation::query()->whereKey($line->obligation_id)->lockForUpdate()->firstOrFail();
+            $this->assertFundAllocationOrganization($allocation);
+        }
+    }
+
+    /**
+     * A reversal is a new Finance fact. It must not extend the effect of an
+     * old allocation whose source has no organization provenance or whose
+     * source and obligation now describe different organizations.
+     */
+    private function assertFundAllocationOrganization(FundAllocation $allocation): void
+    {
+        /** @var FundingSource|null $fund */
+        $fund = FundingSource::query()->whereKey($allocation->fund_id)->first();
+        $fundOrganizationId = trim((string) ($fund?->organization_id ?? ''));
+        if ($fund === null || $fundOrganizationId === '' || ! Organization::query()
+            ->whereKey($fundOrganizationId)
+            ->where('lifecycle_state', 'active')
+            ->exists()) {
+            throw BusinessRejection::forCode('finance.fund_organization_unknown', 'a fund allocation correction requires active funding-source organization provenance');
+        }
+
+        $branch = $this->sourceBranchIds(null, null, $allocation->id);
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('finance.correction_provenance_required', 'a fund allocation correction requires active obligation branch provenance');
+        }
+        $obligationOrganizationId = trim((string) $branch->structureScope()->organizationId);
+        if ($obligationOrganizationId === '') {
+            throw BusinessRejection::forCode('finance.correction_provenance_required', 'a fund allocation correction requires active obligation organization provenance');
+        }
+        if ($fundOrganizationId !== $obligationOrganizationId) {
+            throw BusinessRejection::forCode('finance.fund_organization_mismatch', 'a fund allocation correction must remain inside its funding source organization');
         }
     }
 
@@ -274,6 +310,31 @@ final class MaintainFinancialCorrection
         }
         if (bccomp(bcadd($prior, MoneyAmount::decimal($correction->amount), 2), $sourceAmount, 2) === 1) {
             throw BusinessRejection::forCode('finance.correction_exceeds_source', 'the recorded corrections exceed their immutable source amount');
+        }
+    }
+
+    /**
+     * A decrease changes the effective obligation amount, so it must not
+     * create a negative Finance remainder after immutable settlement facts
+     * have already been recorded. A correction that needs to undo payment or
+     * funding first uses the corresponding append-only allocation reversal;
+     * neither the source obligation nor its settlement history is rewritten.
+     */
+    private function assertObligationDecreaseDoesNotOverSettle(FinancialCorrection $correction): void
+    {
+        if ($correction->correction_type !== FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT
+            || $correction->direction !== FinancialCorrection::DIRECTION_DECREASE) {
+            return;
+        }
+
+        /** @var Obligation $obligation */
+        $obligation = Obligation::query()->whereKey($correction->obligation_id)->lockForUpdate()->firstOrFail();
+        $remaining = $this->balances->obligationRemaining($obligation);
+        if (bccomp(MoneyAmount::decimal($correction->amount), $remaining, 2) === 1) {
+            throw BusinessRejection::forCode(
+                'finance.correction_decrease_over_settled',
+                sprintf('the decrease exceeds the current unallocated obligation remainder %s; reverse recorded settlement first', $remaining),
+            );
         }
     }
 
@@ -320,7 +381,10 @@ final class MaintainFinancialCorrection
         if ($obligation === null) {
             return null;
         }
-        $branchId = trim((string) ($obligation->current_home_branch_id ?? $obligation->originating_branch_id ?? ''));
+        $branchId = trim((string) $obligation->current_home_branch_id);
+        if ($branchId === '') {
+            $branchId = trim((string) $obligation->originating_branch_id);
+        }
 
         return $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
     }
