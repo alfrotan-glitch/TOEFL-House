@@ -6,9 +6,7 @@ namespace App\Modules\Finance\Queries;
 
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Finance\Domain\FinancialGateEvidence;
-use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
-use App\Modules\Finance\Models\FinancialCredit;
-use App\Modules\Finance\Models\FinancialGateException;
+use App\Modules\Finance\Models\FinancialCoverageCommitment;
 use App\Modules\Finance\Models\Obligation;
 use App\Support\Errors\BusinessRejection;
 use App\Support\MoneyAmount;
@@ -17,98 +15,155 @@ use Illuminate\Support\Carbon;
 /**
  * Finance-authoritative enrollment gate assessment.
  *
- * Academic calls this read/assess query before activating an enrollment. The
- * query derives the uncovered amount from immutable Finance facts (obligation
- * remainder already nets payments, discounts/waivers, and restricted
- * fund/sponsorship allocations) and applies approved credit, installment, and
- * approved-exception facts. It returns a deterministic, signed evidence
- * payload; Academic freezes that evidence, it never re-derives a balance.
+ * FinancialBalanceQuery derives actual monetary obligation remainder from
+ * immutable monetary facts. Approved credits, installments, and exceptions
+ * are a separate, attributed coverage layer: each must have immutable
+ * obligation commitments whose total equals its approved source amount. This
+ * prevents one student-level remainder from being approved repeatedly while
+ * retaining the balance query as the sole monetary-balance authority.
  */
 final class FinancialGateQuery
 {
     public function __construct(
         private readonly FinancialBalanceQuery $balances,
+        private readonly FinancialCoverageCommitmentQuery $coverageCommitments,
     ) {}
 
     /** @return array<string, mixed> */
     public function assess(Enrollment $enrollment): array
     {
-        $studentId = $enrollment->student_id;
+        return $this->assessment(
+            (string) $enrollment->student_id,
+            $this->nullableId($enrollment->offering_id),
+            $this->nullableId($enrollment->class_id),
+            false,
+        );
+    }
+
+    /**
+     * Student-level clearance for graduation and certification visibility.
+     *
+     * This is intentionally stricter than an enrollment-target assessment:
+     * an offering/class-scoped settlement is not proof of general student
+     * clearance. Only student-wide credits, plans, and exceptions are allowed
+     * to supplement actual Finance settlement in this context.
+     *
+     * @return array<string, mixed>
+     */
+    public function assessStudent(string $studentId): array
+    {
+        return $this->assessment($studentId, null, null, true);
+    }
+
+    /** @return array<string, mixed> */
+    private function assessment(string $studentId, ?string $offeringId, ?string $classId, bool $studentClearance): array
+    {
+        /** @var list<Obligation> $obligations */
         $obligations = Obligation::query()
             ->where('student_id', $studentId)
             ->orderBy('created_at')
             ->orderBy('id')
-            ->get();
+            ->get()
+            ->all();
+        $obligationIds = array_map(static fn (Obligation $obligation): string => (string) $obligation->id, $obligations);
+        $today = Carbon::today()->toDateString();
+        $commitments = $studentClearance
+            ? $this->coverageCommitments->activeForStudentClearance($obligationIds, $today)
+            : $this->coverageCommitments->activeForEnrollment($obligationIds, $offeringId, $classId, $today);
+
+        /** @var array<string, list<FinancialCoverageCommitment>> $commitmentsByObligation */
+        $commitmentsByObligation = [];
+        foreach ($commitments as $commitment) {
+            $commitmentsByObligation[(string) $commitment->obligation_id][] = $commitment;
+        }
 
         $obligationEvidence = [];
-        /** @var numeric-string $originalTotal */
-        $originalTotal = '0.00';
+        $commitmentEvidence = [];
         /** @var numeric-string $uncovered */
         $uncovered = '0.00';
+        /** @var numeric-string $coveredByExisting */
+        $coveredByExisting = '0.00';
+        /** @var numeric-string $coveredByCredit */
+        $coveredByCredit = '0.00';
+        /** @var numeric-string $coveredByInstallment */
+        $coveredByInstallment = '0.00';
+        /** @var numeric-string $coveredByException */
+        $coveredByException = '0.00';
+        $creditIds = [];
+        $installmentIds = [];
+        $exceptionIds = [];
+
         foreach ($obligations as $obligation) {
-            $remaining = $this->balances->obligationRemaining($obligation);
+            $breakdown = $this->balances->obligationBreakdown($obligation);
+            $remaining = $breakdown['remaining'];
             $this->assertNonNegativeObligationRemainder($obligation, $remaining);
-            $originalTotal = bcadd($originalTotal, $obligation->original_amount, 2);
             $uncovered = bcadd($uncovered, $remaining, 2);
+            $coveredByExisting = bcadd($coveredByExisting, $this->actualSettlementReduction($breakdown), 2);
+
+            /** @var numeric-string $committedAgainstObligation */
+            $committedAgainstObligation = '0.00';
+            $obligationCommitmentEvidence = [];
+            foreach ($commitmentsByObligation[$obligation->id] ?? [] as $commitment) {
+                $amount = MoneyAmount::decimal($commitment->amount);
+                if (! MoneyAmount::positive($amount)) {
+                    throw BusinessRejection::forCode('finance.coverage_commitment_invalid', 'a gate coverage commitment must have a positive amount');
+                }
+                $committedAgainstObligation = bcadd($committedAgainstObligation, $amount, 2);
+                $sourceType = (string) $commitment->coverage_source_type;
+                $sourceId = (string) $commitment->coverage_source_id;
+                if ($sourceType === FinancialCoverageCommitment::SOURCE_FINANCIAL_CREDIT) {
+                    $coveredByCredit = bcadd($coveredByCredit, $amount, 2);
+                    $creditIds[] = $sourceId;
+                } elseif ($sourceType === FinancialCoverageCommitment::SOURCE_INSTALLMENT_PLAN) {
+                    $coveredByInstallment = bcadd($coveredByInstallment, $amount, 2);
+                    $installmentIds[] = $sourceId;
+                } elseif ($sourceType === FinancialCoverageCommitment::SOURCE_GATE_EXCEPTION) {
+                    $coveredByException = bcadd($coveredByException, $amount, 2);
+                    $exceptionIds[] = $sourceId;
+                } else {
+                    throw BusinessRejection::forCode('finance.coverage_commitment_invalid', 'an unknown gate coverage commitment source cannot authorize enrollment');
+                }
+                $entry = [
+                    'commitment_id' => (string) $commitment->id,
+                    'source_type' => $sourceType,
+                    'source_id' => $sourceId,
+                    'obligation_id' => (string) $obligation->id,
+                    'amount' => $amount,
+                ];
+                $obligationCommitmentEvidence[] = $entry;
+                $commitmentEvidence[] = $entry;
+            }
+            if (bccomp($committedAgainstObligation, $remaining, 2) === 1) {
+                throw BusinessRejection::forCode(
+                    'finance.coverage_commitment_overallocated',
+                    sprintf('obligation %s has gate coverage commitments beyond its Finance remainder', $obligation->id),
+                );
+            }
+
             $obligationEvidence[] = [
                 'obligation_id' => $obligation->id,
                 'obligation_amount' => $obligation->original_amount,
                 'obligation_remaining' => $remaining,
+                'coverage_commitments' => $obligationCommitmentEvidence,
             ];
         }
 
-        $credits = FinancialCredit::query()
-            ->where('student_id', $studentId)
-            ->where('lifecycle_state', FinancialCredit::STATE_APPROVED)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
-        $installments = EnrollmentInstallmentPlan::query()
-            ->where('student_id', $studentId)
-            ->where('lifecycle_state', EnrollmentInstallmentPlan::STATE_APPROVED)
-            ->where(function ($query) use ($enrollment): void {
-                $query->whereNull('offering_id')->orWhere('offering_id', $enrollment->offering_id ?? '');
-            })
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
-        $today = Carbon::today()->toDateString();
-        $exceptions = FinancialGateException::query()
-            ->where('student_id', $studentId)
-            ->where('lifecycle_state', FinancialGateException::STATE_APPROVED)
-            ->where(function ($query) use ($enrollment): void {
-                $query->whereNull('offering_id')->orWhere('offering_id', $enrollment->offering_id ?? '');
-            })
-            ->where(function ($query) use ($enrollment): void {
-                $query->whereNull('class_id')->orWhere('class_id', $enrollment->class_id);
-            })
-            ->where('effective_from', '<=', $today)
-            ->where(function ($query) use ($today): void {
-                $query->whereNull('effective_to')->orWhere('effective_to', '>=', $today);
-            })
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
-
-        $creditAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($credits->pluck('amount')->all())));
-        $installmentAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($installments->pluck('amount')->all())));
-        $exceptionAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($exceptions->pluck('amount')->all())));
-
-        $coveredByExisting = bcsub($originalTotal, $uncovered, 2);
-        $coveredByCredit = $this->minOf($creditAmount, $uncovered);
-        $afterCredit = bcsub($uncovered, $coveredByCredit, 2);
-        $coveredByInstallment = $this->minOf($installmentAmount, $afterCredit);
-        $afterInstallment = bcsub($afterCredit, $coveredByInstallment, 2);
-        $coveredByException = $this->minOf($exceptionAmount, $afterInstallment);
-        $remaining = bcsub($afterInstallment, $coveredByException, 2);
-        $satisfied = bccomp($remaining, '0.00', 2) !== 1;
+        // `uncovered` is already net of cash settlement, discounts, funds,
+        // and recorded obligation corrections. Only explicit gate commitments
+        // reduce it further. There is deliberately no min()/clamping here:
+        // an overcommitment is invalid Finance history, never free coverage.
+        $remaining = bcsub($uncovered, $coveredByCredit, 2);
+        $remaining = bcsub($remaining, $coveredByInstallment, 2);
+        $remaining = bcsub($remaining, $coveredByException, 2);
+        if (bccomp($remaining, '0.00', 2) === -1) {
+            throw BusinessRejection::forCode('finance.coverage_commitment_overallocated', 'gate coverage commitments exceed the authoritative Finance uncovered amount');
+        }
+        $satisfied = bccomp($remaining, '0.00', 2) === 0;
 
         $evidence = [
             'schema_version' => FinancialGateEvidence::SCHEMA_VERSION,
             'assessed_at' => now()->toIso8601String(),
             'student_id' => $studentId,
-            'offering_id' => $enrollment->offering_id,
-            'class_id' => $enrollment->class_id,
             'obligations' => $obligationEvidence,
             'uncovered' => $uncovered,
             'coverage' => [
@@ -117,12 +172,19 @@ final class FinancialGateQuery
                 'installment' => $coveredByInstallment,
                 'exception' => $coveredByException,
             ],
-            'credits' => $credits->pluck('id')->all(),
-            'installment_plans' => $installments->pluck('id')->all(),
-            'exceptions' => $exceptions->pluck('id')->all(),
+            'coverage_commitments' => $commitmentEvidence,
+            'credits' => $this->uniqueIds($creditIds),
+            'installment_plans' => $this->uniqueIds($installmentIds),
+            'exceptions' => $this->uniqueIds($exceptionIds),
             'remaining' => $remaining,
             'satisfied' => $satisfied,
         ];
+        if ($studentClearance) {
+            $evidence['scope'] = 'student';
+        } else {
+            $evidence['offering_id'] = $offeringId;
+            $evidence['class_id'] = $classId;
+        }
 
         $signed = FinancialGateEvidence::sign($evidence);
 
@@ -141,113 +203,32 @@ final class FinancialGateQuery
     }
 
     /**
-     * Student-level clearance assessment for graduation and certification
-     * visibility. Same derivation as the enrollment gate, but without a seat
-     * context: seat-scoped exceptions cannot be evaluated and are excluded,
-     * so only global (unscoped) approved exceptions apply. Read-only Finance
-     * truth for a human decision-maker — it never authorizes a refusal on
-     * its own; no ratified rule refuses graduation on debt.
-     *
-     * @return array<string, mixed>
+     * @param array{allocated: string, reversed: string, funded: string, discounted: string, decreased: string, increased: string, original: string, remaining: string} $breakdown
+     * @return numeric-string
      */
-    public function assessStudent(string $studentId): array
+    private function actualSettlementReduction(array $breakdown): string
     {
-        $obligations = Obligation::query()
-            ->where('student_id', $studentId)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
+        $allocated = bcsub($breakdown['allocated'], $breakdown['reversed'], 2);
+        $funded = $breakdown['funded'];
+        $discounted = $breakdown['discounted'];
+        $decreased = $breakdown['decreased'];
 
-        $obligationEvidence = [];
-        /** @var numeric-string $originalTotal */
-        $originalTotal = '0.00';
-        /** @var numeric-string $uncovered */
-        $uncovered = '0.00';
-        foreach ($obligations as $obligation) {
-            $remaining = $this->balances->obligationRemaining($obligation);
-            $this->assertNonNegativeObligationRemainder($obligation, $remaining);
-            $originalTotal = bcadd($originalTotal, $obligation->original_amount, 2);
-            $uncovered = bcadd($uncovered, $remaining, 2);
-            $obligationEvidence[] = [
-                'obligation_id' => $obligation->id,
-                'obligation_amount' => $obligation->original_amount,
-                'obligation_remaining' => $remaining,
-            ];
-        }
+        return bcadd(bcadd($allocated, $funded, 2), bcadd($discounted, $decreased, 2), 2);
+    }
 
-        $credits = FinancialCredit::query()
-            ->where('student_id', $studentId)
-            ->where('lifecycle_state', FinancialCredit::STATE_APPROVED)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
-        $installments = EnrollmentInstallmentPlan::query()
-            ->where('student_id', $studentId)
-            ->where('lifecycle_state', EnrollmentInstallmentPlan::STATE_APPROVED)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
-        $today = Carbon::today()->toDateString();
-        $exceptions = FinancialGateException::query()
-            ->where('student_id', $studentId)
-            ->where('lifecycle_state', FinancialGateException::STATE_APPROVED)
-            ->whereNull('offering_id')
-            ->whereNull('class_id')
-            ->where('effective_from', '<=', $today)
-            ->where(function ($query) use ($today): void {
-                $query->whereNull('effective_to')->orWhere('effective_to', '>=', $today);
-            })
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
+    /** @param list<string> $ids
+     * @return list<string>
+     */
+    private function uniqueIds(array $ids): array
+    {
+        return array_values(array_unique($ids, SORT_STRING));
+    }
 
-        $creditAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($credits->pluck('amount')->all())));
-        $installmentAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($installments->pluck('amount')->all())));
-        $exceptionAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($exceptions->pluck('amount')->all())));
+    private function nullableId(?string $id): ?string
+    {
+        $id = trim((string) $id);
 
-        $coveredByExisting = bcsub($originalTotal, $uncovered, 2);
-        $coveredByCredit = $this->minOf($creditAmount, $uncovered);
-        $afterCredit = bcsub($uncovered, $coveredByCredit, 2);
-        $coveredByInstallment = $this->minOf($installmentAmount, $afterCredit);
-        $afterInstallment = bcsub($afterCredit, $coveredByInstallment, 2);
-        $coveredByException = $this->minOf($exceptionAmount, $afterInstallment);
-        $remaining = bcsub($afterInstallment, $coveredByException, 2);
-        $satisfied = bccomp($remaining, '0.00', 2) !== 1;
-
-        $evidence = [
-            'schema_version' => FinancialGateEvidence::SCHEMA_VERSION,
-            'scope' => 'student',
-            'assessed_at' => now()->toIso8601String(),
-            'student_id' => $studentId,
-            'obligations' => $obligationEvidence,
-            'uncovered' => $uncovered,
-            'coverage' => [
-                'payment_discount_funding' => $coveredByExisting,
-                'credit' => $coveredByCredit,
-                'installment' => $coveredByInstallment,
-                'exception' => $coveredByException,
-            ],
-            'credits' => $credits->pluck('id')->all(),
-            'installment_plans' => $installments->pluck('id')->all(),
-            'exceptions' => $exceptions->pluck('id')->all(),
-            'remaining' => $remaining,
-            'satisfied' => $satisfied,
-        ];
-
-        $signed = FinancialGateEvidence::sign($evidence);
-
-        return [
-            'evidence' => $evidence,
-            'canonical' => $signed['canonical'],
-            'digest' => $signed['digest'],
-            'signature' => $signed['signature'],
-            'algorithm' => $signed['algorithm'],
-            'key_version' => $signed['key_version'],
-            'satisfied' => $satisfied,
-            'uncovered' => $uncovered,
-            'remaining' => $remaining,
-            'assessed_at' => $evidence['assessed_at'],
-        ];
+        return $id === '' ? null : $id;
     }
 
     /**
@@ -266,31 +247,5 @@ final class FinancialGateQuery
                 sprintf('obligation %s has an invalid negative remaining balance %s', $obligation->id, $remaining),
             );
         }
-    }
-
-    /**
-     * @param list<numeric-string> $amounts
-     *
-     * @return numeric-string
-     */
-    private function sum(array $amounts): string
-    {
-        $total = '0.00';
-        foreach ($amounts as $amount) {
-            $total = bcadd($total, $amount, 2);
-        }
-
-        return $total;
-    }
-
-    /**
-     * @param numeric-string $potential
-     * @param numeric-string $limit
-     *
-     * @return numeric-string
-     */
-    private function minOf(string $potential, string $limit): string
-    {
-        return bccomp($potential, $limit, 2) === 1 ? $limit : $potential;
     }
 }

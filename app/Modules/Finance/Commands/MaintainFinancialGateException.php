@@ -10,6 +10,7 @@ use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinancialCoverageCommitmentAllocator;
 use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Students\Models\Student;
@@ -20,6 +21,7 @@ use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
 use App\Support\MoneyAmount;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -38,7 +40,7 @@ final class MaintainFinancialGateException
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
-        private readonly AllocatePayment $allocations,
+        private readonly FinancialCoverageCommitmentAllocator $coverageCommitments,
     ) {}
 
     /** @return array{exception_id: string, correlation_id: string} */
@@ -104,17 +106,20 @@ final class MaintainFinancialGateException
                     if (trim((string) $locked->requested_by) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('finance.gate_exception_not_independent', 'the approver must differ from the proposer');
                     }
-                    $uncovered = $this->allocations->studentUncovered($locked->student_id);
-                    if (bccomp($locked->amount, $uncovered, 2) === 1) {
-                        throw BusinessRejection::forCode('finance.gate_exception_exceeds_uncovered', sprintf('the gate exception exceeds the current uncovered obligation remainder %s', $uncovered));
-                    }
+                    $this->assertEffectiveToday($locked);
 
+                    // A scoped exception is an attributable commitment to
+                    // eligible obligation remainder, not a second unscoped
+                    // student-balance allowance.
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => FinancialGateException::STATE_APPROVED, 'approved_by' => $approver->actorId, 'approved_at' => now()]);
                     $locked->save();
+                    $commitments = $this->coverageCommitments->commitGateException($locked);
                     $event = $this->audit->record($approver->actorId, 'finance.gate_exception.approve', 'financial_gate_exception', $locked->id, $before, [
                         'lifecycle_state' => FinancialGateException::STATE_APPROVED,
-                        'branch_id' => $provenance['branch_id'], 'organization_id' => $provenance['organization_id'],
+                        'branch_id' => $provenance['branch_id'],
+                        'organization_id' => $provenance['organization_id'],
+                        'coverage_commitments' => $commitments,
                     ]);
 
                     return ['exception_id' => $locked->id, 'lifecycle_state' => FinancialGateException::STATE_APPROVED, 'correlation_id' => $event->correlation_id];
@@ -147,6 +152,22 @@ final class MaintainFinancialGateException
         }
         if ($classId !== null && $classId !== '' && ($offeringId === null || $offeringId === '')) {
             throw BusinessRejection::forCode('finance.gate_exception_scope', 'a class-scoped gate exception must identify its offering');
+        }
+        if ($classId !== null && $classId !== '') {
+            $classOfferingId = trim((string) ClassModel::query()->whereKey($classId)->value('offering_id'));
+            if ($classOfferingId === '' || $classOfferingId !== trim((string) $offeringId)) {
+                throw BusinessRejection::forCode('finance.gate_exception_scope', 'a class-scoped gate exception must identify the class\'s exact offering');
+            }
+        }
+    }
+
+    private function assertEffectiveToday(FinancialGateException $exception): void
+    {
+        $today = CarbonImmutable::today()->toDateString();
+        $effectiveFrom = (string) $exception->effective_from;
+        $effectiveTo = $exception->effective_to !== null ? (string) $exception->effective_to : null;
+        if ($effectiveFrom > $today || ($effectiveTo !== null && $effectiveTo < $today)) {
+            throw BusinessRejection::forCode('finance.gate_exception_not_effective', 'a gate exception can be approved only while its declared effective window is active');
         }
     }
 

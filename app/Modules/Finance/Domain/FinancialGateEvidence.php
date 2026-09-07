@@ -81,7 +81,10 @@ final class FinancialGateEvidence
 
         $satisfied = $evidence['satisfied'] ?? null;
         $assessedAt = $evidence['assessed_at'] ?? null;
-        if (! is_bool($satisfied) || ! is_string($assessedAt) || trim($assessedAt) === '') {
+        if (($evidence['schema_version'] ?? null) !== self::SCHEMA_VERSION
+            || ! is_bool($satisfied)
+            || ! is_string($assessedAt)
+            || trim($assessedAt) === '') {
             return null;
         }
 
@@ -91,7 +94,8 @@ final class FinancialGateEvidence
         } catch (\InvalidArgumentException) {
             return null;
         }
-        if (! MoneyAmount::nonNegative($uncovered) || ! MoneyAmount::nonNegative($remaining)) {
+        if (! MoneyAmount::nonNegative($uncovered) || ! MoneyAmount::nonNegative($remaining)
+            || ! self::coverageCommitmentsAreWellFormed($evidence)) {
             return null;
         }
 
@@ -104,6 +108,73 @@ final class FinancialGateEvidence
             'remaining' => $remaining,
             'assessed_at' => $assessedAt,
         ];
+    }
+
+    /**
+     * Newer gate assessments include attributed coverage commitments. Treat
+     * the field as an optional extension so verified historical v1 evidence
+     * remains readable, but require every new entry to reconcile exactly to
+     * the signed source-category totals. A signed malformed extension is not
+     * acceptable enrollment evidence.
+     *
+     * @param array<string, mixed> $evidence
+     */
+    private static function coverageCommitmentsAreWellFormed(array $evidence): bool
+    {
+        if (! array_key_exists('coverage_commitments', $evidence)) {
+            return true;
+        }
+        $coverage = $evidence['coverage'] ?? null;
+        $commitments = $evidence['coverage_commitments'];
+        if (! is_array($coverage) || ! is_array($commitments)) {
+            return false;
+        }
+
+        $categoryBySource = [
+            'financial_credit' => 'credit',
+            'enrollment_installment_plan' => 'installment',
+            'financial_gate_exception' => 'exception',
+        ];
+        /** @var array<string, numeric-string> $totals */
+        $totals = ['credit' => '0.00', 'installment' => '0.00', 'exception' => '0.00'];
+        foreach ($commitments as $commitment) {
+            if (! is_array($commitment)) {
+                return false;
+            }
+            $sourceType = $commitment['source_type'] ?? null;
+            $sourceId = $commitment['source_id'] ?? null;
+            $obligationId = $commitment['obligation_id'] ?? null;
+            $commitmentId = $commitment['commitment_id'] ?? null;
+            if (! is_string($sourceType) || ! array_key_exists($sourceType, $categoryBySource)
+                || ! is_string($sourceId) || trim($sourceId) === ''
+                || ! is_string($obligationId) || trim($obligationId) === ''
+                || ! is_string($commitmentId) || trim($commitmentId) === '') {
+                return false;
+            }
+            try {
+                $amount = MoneyAmount::decimal($commitment['amount'] ?? null);
+            } catch (\InvalidArgumentException) {
+                return false;
+            }
+            if (! MoneyAmount::positive($amount)) {
+                return false;
+            }
+            $category = $categoryBySource[$sourceType];
+            $totals[$category] = bcadd($totals[$category], $amount, 2);
+        }
+
+        foreach ($totals as $category => $total) {
+            try {
+                $signedTotal = MoneyAmount::decimal($coverage[$category] ?? null);
+            } catch (\InvalidArgumentException) {
+                return false;
+            }
+            if (! MoneyAmount::nonNegative($signedTotal) || bccomp($signedTotal, $total, 2) !== 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static function secret(): string

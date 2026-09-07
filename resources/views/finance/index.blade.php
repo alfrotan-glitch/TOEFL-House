@@ -522,6 +522,249 @@
 </div>
 
 <div class="card">
+    <h2>Enrollment-gate coverage</h2>
+    <p class="sub">Credits, installment plans, and exceptions are approval-controlled Finance commitments, not editable balances. Approval allocates the exact source amount across eligible obligation remainder; a scoped source cannot consume another offering or class.</p>
+    <div class="row">
+        <div style="flex:1 1 300px">
+            <h3>Propose credit / advance</h3>
+            <form method="POST" action="{{ route('finance.credit.propose') }}">
+                @csrf
+                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                <label>Student</label>
+                <select name="student_id" required>
+                    <option value="">Select a student…</option>
+                    @foreach ($students as $student)
+                        <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                    @endforeach
+                </select>
+                <label>Amount</label>
+                <input name="amount" type="text" inputmode="decimal" required>
+                <label>Evidence / source reference</label>
+                <input name="source_ref" type="text" required>
+                <label>Reason</label>
+                <input name="reason" type="text" required>
+                <div class="actions"><button type="submit" class="btn small">Propose credit</button></div>
+            </form>
+        </div>
+        <div style="flex:1 1 300px">
+            <h3>Propose installment plan</h3>
+            <form method="POST" action="{{ route('finance.installment.propose') }}">
+                @csrf
+                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                <label>Student</label>
+                <select name="student_id" required>
+                    <option value="">Select a student…</option>
+                    @foreach ($students as $student)
+                        <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                    @endforeach
+                </select>
+                <label>Offering ID (optional; restricts coverage)</label>
+                <input name="offering_id" type="text">
+                <label>Amount</label>
+                <input name="amount" type="text" inputmode="decimal" required>
+                <label>Installment count</label>
+                <input name="installments_count" type="number" min="1" required>
+                <label>First due on</label>
+                <input name="first_due_on" type="date" required>
+                <label>Schedule reference</label>
+                <input name="schedule_ref" type="text" required>
+                <div class="actions"><button type="submit" class="btn small">Propose plan</button></div>
+            </form>
+        </div>
+        <div style="flex:1 1 300px">
+            <h3>Propose gate exception</h3>
+            <form method="POST" action="{{ route('finance.gate_exception.propose') }}">
+                @csrf
+                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                <label>Student</label>
+                <select name="student_id" required>
+                    <option value="">Select a student…</option>
+                    @foreach ($students as $student)
+                        <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                    @endforeach
+                </select>
+                <label>Offering ID (optional)</label>
+                <input name="offering_id" type="text">
+                <label>Class ID (optional; must match offering)</label>
+                <input name="class_id" type="text">
+                <label>Amount</label>
+                <input name="amount" type="text" inputmode="decimal" required>
+                <label>Effective from</label>
+                <input name="effective_from" type="date" required>
+                <label>Effective to (optional)</label>
+                <input name="effective_to" type="date">
+                <label>Reason</label>
+                <input name="reason" type="text" required>
+                <div class="actions"><button type="submit" class="btn small">Propose exception</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div class="row" style="margin-top:16px">
+        <div style="flex:1 1 320px">
+            <h3>Credits</h3>
+            @if ($credits->isEmpty())
+                <p class="empty">No credit proposals.</p>
+            @else
+                <table class="grid">
+                    <tr><th>Student</th><th>Amount</th><th>Evidence</th><th>State</th><th></th></tr>
+                    @foreach ($credits as $credit)
+                        <tr>
+                            <td>{{ \Illuminate\Support\Str::limit($credit->student_id, 14) }}</td>
+                            <td>{{ $credit->amount }}</td>
+                            <td class="muted">{{ \Illuminate\Support\Str::limit($credit->source_ref, 18) }}</td>
+                            <td>{{ $credit->lifecycle_state }}</td>
+                            <td>
+                                @if ($credit->lifecycle_state === 'proposed')
+                                    <form method="POST" action="{{ route('finance.credit.approve', $credit->id) }}">
+                                        @csrf
+                                        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                        <button type="submit" class="btn small">Approve</button>
+                                    </form>
+                                @elseif ($credit->lifecycle_state === 'approved')
+                                    <details>
+                                        <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Revoke</summary>
+                                        <form method="POST" action="{{ route('finance.coverage-revocation.propose') }}" style="margin-top:8px">
+                                            @csrf
+                                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                            <input type="hidden" name="coverage_source_type" value="financial_credit">
+                                            <input type="hidden" name="coverage_source_id" value="{{ $credit->id }}">
+                                            <input name="reason" type="text" placeholder="Documented correction reason" required>
+                                            <button type="submit" class="btn small">Propose revocation</button>
+                                        </form>
+                                    </details>
+                                @endif
+                            </td>
+                        </tr>
+                    @endforeach
+                </table>
+            @endif
+        </div>
+        <div style="flex:1 1 320px">
+            <h3>Installment plans</h3>
+            @if ($installmentPlans->isEmpty())
+                <p class="empty">No installment proposals.</p>
+            @else
+                <table class="grid">
+                    <tr><th>Student</th><th>Scope</th><th>Amount</th><th>State</th><th></th></tr>
+                    @foreach ($installmentPlans as $plan)
+                        <tr>
+                            <td>{{ \Illuminate\Support\Str::limit($plan->student_id, 14) }}</td>
+                            <td class="muted">{{ \Illuminate\Support\Str::limit($plan->offering_id ?? 'student-wide', 16) }}</td>
+                            <td>{{ $plan->amount }}</td>
+                            <td>{{ $plan->lifecycle_state }}</td>
+                            <td>
+                                @if ($plan->lifecycle_state === 'proposed')
+                                    <form method="POST" action="{{ route('finance.installment.approve', $plan->id) }}">
+                                        @csrf
+                                        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                        <button type="submit" class="btn small">Approve</button>
+                                    </form>
+                                @elseif ($plan->lifecycle_state === 'approved')
+                                    <details>
+                                        <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Revoke</summary>
+                                        <form method="POST" action="{{ route('finance.coverage-revocation.propose') }}" style="margin-top:8px">
+                                            @csrf
+                                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                            <input type="hidden" name="coverage_source_type" value="enrollment_installment_plan">
+                                            <input type="hidden" name="coverage_source_id" value="{{ $plan->id }}">
+                                            <input name="reason" type="text" placeholder="Documented correction reason" required>
+                                            <button type="submit" class="btn small">Propose revocation</button>
+                                        </form>
+                                    </details>
+                                @endif
+                            </td>
+                        </tr>
+                    @endforeach
+                </table>
+            @endif
+        </div>
+        <div style="flex:1 1 320px">
+            <h3>Gate exceptions</h3>
+            @if ($gateExceptions->isEmpty())
+                <p class="empty">No gate exception proposals.</p>
+            @else
+                <table class="grid">
+                    <tr><th>Student</th><th>Scope</th><th>Amount</th><th>Window</th><th>State</th><th></th></tr>
+                    @foreach ($gateExceptions as $exception)
+                        <tr>
+                            <td>{{ \Illuminate\Support\Str::limit($exception->student_id, 14) }}</td>
+                            <td class="muted">{{ \Illuminate\Support\Str::limit($exception->class_id ?? $exception->offering_id ?? 'student-wide', 14) }}</td>
+                            <td>{{ $exception->amount }}</td>
+                            <td>{{ $exception->effective_from }} → {{ $exception->effective_to ?? '—' }}</td>
+                            <td>{{ $exception->lifecycle_state }}</td>
+                            <td>
+                                @if ($exception->lifecycle_state === 'proposed')
+                                    <form method="POST" action="{{ route('finance.gate_exception.approve', $exception->id) }}">
+                                        @csrf
+                                        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                        <button type="submit" class="btn small">Approve</button>
+                                    </form>
+                                @elseif ($exception->lifecycle_state === 'approved')
+                                    <details>
+                                        <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Revoke</summary>
+                                        <form method="POST" action="{{ route('finance.coverage-revocation.propose') }}" style="margin-top:8px">
+                                            @csrf
+                                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                            <input type="hidden" name="coverage_source_type" value="financial_gate_exception">
+                                            <input type="hidden" name="coverage_source_id" value="{{ $exception->id }}">
+                                            <input name="reason" type="text" placeholder="Documented correction reason" required>
+                                            <button type="submit" class="btn small">Propose revocation</button>
+                                        </form>
+                                    </details>
+                                @endif
+                            </td>
+                        </tr>
+                    @endforeach
+                </table>
+            @endif
+        </div>
+    </div>
+
+    <h3 style="margin-top:16px">Attributed coverage commitments</h3>
+    @if ($coverageCommitments->isEmpty())
+        <p class="empty">No approved gate source has committed obligation coverage yet.</p>
+    @else
+        <table class="grid">
+            <tr><th>Source</th><th>Obligation</th><th>Committed amount</th></tr>
+            @foreach ($coverageCommitments as $commitment)
+                <tr>
+                    <td>{{ $commitment->coverage_source_type }} / {{ \Illuminate\Support\Str::limit($commitment->coverage_source_id, 14) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($commitment->obligation_id, 16) }}</td>
+                    <td>{{ $commitment->amount }}</td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+
+    <h3 style="margin-top:16px">Coverage-source revocations</h3>
+    <p class="sub">A revocation removes a source only from future gate assessments. The original approved source and its signed historical enrollment evidence are preserved; issue a new evidenced source if replacement coverage is appropriate.</p>
+    @if ($coverageRevocations->isEmpty())
+        <p class="empty">No coverage-source revocations.</p>
+    @else
+        <table class="grid">
+            <tr><th>Source</th><th>Reason</th><th>State</th><th></th></tr>
+            @foreach ($coverageRevocations as $revocation)
+                <tr>
+                    <td>{{ $revocation->coverage_source_type }} / {{ \Illuminate\Support\Str::limit($revocation->coverage_source_id, 14) }}</td>
+                    <td class="muted">{{ \Illuminate\Support\Str::limit($revocation->reason, 36) }}</td>
+                    <td>{{ $revocation->lifecycle_state }}</td>
+                    <td>
+                        @if ($revocation->lifecycle_state === 'proposed')
+                            <form method="POST" action="{{ route('finance.coverage-revocation.approve', $revocation->id) }}">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Record revocation</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
     <h2>Reconciliations</h2>
     <p class="sub">One observation per period and subject: expected vs observed, with a variance that requires its explanation. Approved by a distinct employee — reconciliation owns the comparison evidence, never an alternate cash truth.</p>
     <form method="POST" action="{{ route('finance.reconciliation.observe') }}">

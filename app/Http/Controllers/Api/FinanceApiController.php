@@ -21,11 +21,13 @@ use App\Modules\Finance\Commands\RecognizePayrollLiability;
 use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Commands\RecordReconciliation;
 use App\Modules\Finance\Commands\RefundPayment;
+use App\Modules\Finance\Commands\RevokeFinancialCoverage;
 use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
 use App\Modules\Finance\Models\FinancialCredit;
+use App\Modules\Finance\Models\FinancialCoverageRevocation;
 use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\FundAllocation;
@@ -474,6 +476,35 @@ final class FinanceApiController extends Controller
         );
 
         return response()->json(['status' => 'approved', ...$result]);
+    }
+
+    public function proposeCoverageRevocation(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'coverage_source_type' => ['required', 'in:financial_credit,enrollment_installment_plan,financial_gate_exception'],
+            'coverage_source_id' => ['required', 'string', 'max:36'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+        $result = app(RevokeFinancialCoverage::class)->propose(
+            $this->actor(),
+            $input['coverage_source_type'],
+            $input['coverage_source_id'],
+            $input['reason'],
+            $this->idempotencyKey('finance.coverage-revocation.propose'),
+        );
+
+        return response()->json(['status' => 'proposed', ...$result], 201);
+    }
+
+    public function approveCoverageRevocation(string $revocationId): JsonResponse
+    {
+        $result = app(RevokeFinancialCoverage::class)->approve(
+            $this->actor(),
+            FinancialCoverageRevocation::query()->findOrFail($revocationId),
+            $this->idempotencyKey('finance.coverage-revocation.approve'),
+        );
+
+        return response()->json(['status' => 'recorded', ...$result]);
     }
 
     public function approveRefund(Request $request, string $refundId): JsonResponse

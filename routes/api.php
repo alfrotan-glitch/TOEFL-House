@@ -179,6 +179,8 @@ Route::prefix('v1')->middleware('employee')->group(function (): void {
         Route::post('/installment-plans/{planId}/approve', [FinanceApiController::class, 'approveInstallment'])->name('installment.approve');
         Route::post('/gate-exceptions', [FinanceApiController::class, 'proposeGateException'])->name('gate-exception.propose');
         Route::post('/gate-exceptions/{exceptionId}/approve', [FinanceApiController::class, 'approveGateException'])->name('gate-exception.approve');
+        Route::post('/coverage-revocations', [FinanceApiController::class, 'proposeCoverageRevocation'])->name('coverage-revocation.propose');
+        Route::post('/coverage-revocations/{revocationId}/approve', [FinanceApiController::class, 'approveCoverageRevocation'])->name('coverage-revocation.approve');
         Route::post('/payments', [FinanceApiController::class, 'record'])->name('record');
         Route::post('/payroll-liabilities', [FinanceApiController::class, 'recognizePayrollLiability'])->name('payroll-liability.recognize');
         Route::post('/payments/{paymentId}/refund', [FinanceApiController::class, 'proposeRefund'])->name('refund.propose');

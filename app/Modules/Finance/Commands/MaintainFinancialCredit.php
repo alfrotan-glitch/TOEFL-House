@@ -8,6 +8,7 @@ use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Organization\Models\Branch;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinancialCoverageCommitmentAllocator;
 use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\FinancialCredit;
 use App\Modules\Students\Models\Student;
@@ -36,7 +37,7 @@ final class MaintainFinancialCredit
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
-        private readonly AllocatePayment $allocations,
+        private readonly FinancialCoverageCommitmentAllocator $coverageCommitments,
     ) {}
 
     /** @return array{credit_id: string, correlation_id: string} */
@@ -101,15 +102,19 @@ final class MaintainFinancialCredit
                     if (trim((string) $locked->requested_by) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('finance.credit_not_independent', 'the approver must differ from the proposer');
                     }
-                    $uncovered = $this->allocations->studentUncovered($locked->student_id);
-                    if (bccomp($locked->amount, $uncovered, 2) === 1) {
-                        throw BusinessRejection::forCode('finance.credit_exceeds_uncovered', sprintf('the credit exceeds the current uncovered obligation remainder %s', $uncovered));
-                    }
-
+                    // The approval must consume specific, still-uncommitted
+                    // obligation remainder. A second approved gate source may
+                    // not silently re-use the same student-wide balance.
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => FinancialCredit::STATE_APPROVED, 'approved_by' => $approver->actorId, 'approved_at' => now()]);
                     $locked->save();
-                    $event = $this->audit->record($approver->actorId, 'finance.credit.approve', 'financial_credit', $locked->id, $before, ['lifecycle_state' => FinancialCredit::STATE_APPROVED, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId]);
+                    $commitments = $this->coverageCommitments->commitCredit($locked);
+                    $event = $this->audit->record($approver->actorId, 'finance.credit.approve', 'financial_credit', $locked->id, $before, [
+                        'lifecycle_state' => FinancialCredit::STATE_APPROVED,
+                        'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
+                        'coverage_commitments' => $commitments,
+                    ]);
 
                     return ['credit_id' => $locked->id, 'lifecycle_state' => FinancialCredit::STATE_APPROVED, 'correlation_id' => $event->correlation_id];
                 }),

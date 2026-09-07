@@ -289,6 +289,8 @@ Route::middleware('employee')->group(function (): void {
         Route::post('installments/{planId}/approve', [FinanceController::class, 'approveInstallment'])->name('installment.approve');
         Route::post('gate-exceptions', [FinanceController::class, 'proposeGateException'])->name('gate_exception.propose');
         Route::post('gate-exceptions/{exceptionId}/approve', [FinanceController::class, 'approveGateException'])->name('gate_exception.approve');
+        Route::post('coverage-revocations', [FinanceController::class, 'proposeCoverageRevocation'])->name('coverage-revocation.propose');
+        Route::post('coverage-revocations/{revocationId}/approve', [FinanceController::class, 'approveCoverageRevocation'])->name('coverage-revocation.approve');
     });
 
     // Communication

@@ -329,6 +329,11 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         $this->assertNotNull($refreshedCredit);
         $this->assertSame('1000.00', trim((string) $refreshedCredit->amount));
 
+        // Each approved gate source now holds an exact, non-overlapping
+        // obligation commitment. Create independent source remainder for the
+        // plan and exception so this immutability test does not rely on the
+        // old aggregate-balance overcommit loophole.
+        $this->postTuitionObligation('immutable-installment', $period, $setup['student_id']);
         $installment = app(MaintainInstallmentPlan::class)->propose($proposer, $setup['student_id'], null, '1000.00', 2, '2026-09-15', 'gate-immutable-installment', 'gate-immutable-installment-propose');
         app(MaintainInstallmentPlan::class)->approve($approver, EnrollmentInstallmentPlan::query()->findOrFail($installment['plan_id']), 'gate-immutable-installment-approve');
         $planModel = EnrollmentInstallmentPlan::query()->findOrFail($installment['plan_id']);
@@ -341,6 +346,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         $this->assertNotNull($refreshedPlan);
         $this->assertSame(2, (int) $refreshedPlan->installments_count);
 
+        $this->postTuitionObligation('immutable-exception', $period, $setup['student_id']);
         $exception = app(MaintainFinancialGateException::class)->propose($proposer, $setup['student_id'], null, null, '1000.00', 'exception', '2026-09-01', null, 'gate-immutable-exception-propose');
         app(MaintainFinancialGateException::class)->approve($approver, FinancialGateException::query()->findOrFail($exception['exception_id']), 'gate-immutable-exception-approve');
         $exceptionModel = FinancialGateException::query()->findOrFail($exception['exception_id']);

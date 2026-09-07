@@ -9,6 +9,7 @@ use App\Modules\Organization\Models\Branch;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinancialCoverageCommitmentAllocator;
 use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
 use App\Modules\Students\Models\Student;
@@ -38,7 +39,7 @@ final class MaintainInstallmentPlan
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
-        private readonly AllocatePayment $allocations,
+        private readonly FinancialCoverageCommitmentAllocator $coverageCommitments,
     ) {}
 
     /** @return array{plan_id: string, correlation_id: string} */
@@ -106,17 +107,18 @@ final class MaintainInstallmentPlan
                     if (trim((string) $locked->requested_by) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('finance.installment_not_independent', 'the approver must differ from the proposer');
                     }
-                    $uncovered = $this->allocations->studentUncovered($locked->student_id);
-                    if (bccomp($locked->amount, $uncovered, 2) === 1) {
-                        throw BusinessRejection::forCode('finance.installment_exceeds_uncovered', sprintf('the installment plan exceeds the current uncovered obligation remainder %s', $uncovered));
-                    }
-
+                    // Materialize this alternative settlement against only
+                    // obligations within its declared offering scope. This
+                    // prevents a scoped plan from consuming unrelated debt.
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => EnrollmentInstallmentPlan::STATE_APPROVED, 'approved_by' => $approver->actorId, 'approved_at' => now()]);
                     $locked->save();
+                    $commitments = $this->coverageCommitments->commitInstallment($locked);
                     $event = $this->audit->record($approver->actorId, 'finance.installment.approve', 'enrollment_installment_plan', $locked->id, $before, [
                         'lifecycle_state' => EnrollmentInstallmentPlan::STATE_APPROVED,
-                        'branch_id' => $provenance['branch_id'], 'organization_id' => $provenance['organization_id'],
+                        'branch_id' => $provenance['branch_id'],
+                        'organization_id' => $provenance['organization_id'],
+                        'coverage_commitments' => $commitments,
                     ]);
 
                     return ['plan_id' => $locked->id, 'lifecycle_state' => EnrollmentInstallmentPlan::STATE_APPROVED, 'correlation_id' => $event->correlation_id];

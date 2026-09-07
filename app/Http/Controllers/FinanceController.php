@@ -20,10 +20,13 @@ use App\Modules\Finance\Commands\RecognizePayrollLiability;
 use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Commands\RecordReconciliation;
 use App\Modules\Finance\Commands\RefundPayment;
+use App\Modules\Finance\Commands\RevokeFinancialCoverage;
 use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
 use App\Modules\Finance\Models\FinancialCorrection;
+use App\Modules\Finance\Models\FinancialCoverageCommitment;
+use App\Modules\Finance\Models\FinancialCoverageRevocation;
 use App\Modules\Finance\Models\FinancialCredit;
 use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Finance\Models\FinancialPeriod;
@@ -60,7 +63,12 @@ final class FinanceController extends Controller
     public function index(): View
     {
         $visible = [];
-        foreach (['finance.obligation', 'finance.payment', 'finance.refund', 'finance.discount', 'finance.credit', 'finance.period', 'finance.chart'] as $capability) {
+        foreach ([
+            'finance.obligation', 'finance.payment', 'finance.refund', 'finance.refund_approve',
+            'finance.discount', 'finance.discount_approve', 'finance.credit', 'finance.credit_approve',
+            'finance.installment', 'finance.installment_approve', 'finance.gate_exception', 'finance.gate_exception_approve',
+            'finance.coverage_revoke', 'finance.coverage_revoke_approve', 'finance.correct', 'finance.correct_approve', 'finance.period', 'finance.chart',
+        ] as $capability) {
             $visible = array_merge($visible, $this->authorizedBranches($capability));
         }
         $visible = array_values(array_unique($visible, SORT_STRING));
@@ -174,6 +182,16 @@ final class FinanceController extends Controller
                 ->limit(200)
                 ->get(),
             'financialCorrections' => FinancialCorrection::query()->whereIn('id', $financialCorrectionIds)->orderByDesc('id')->limit(200)->get(),
+            'coverageCommitments' => FinancialCoverageCommitment::query()
+                ->whereIn('obligation_id', $obligationIds)
+                ->orderByDesc('id')
+                ->limit(300)
+                ->get(),
+            'coverageRevocations' => FinancialCoverageRevocation::query()
+                ->whereIn('student_id', $studentIds)
+                ->orderByDesc('id')
+                ->limit(200)
+                ->get(),
             'periods' => $globalPeriods,
             'students' => Student::query()->whereIn('id', $studentIds)->orderBy('student_code')->limit(300)->get(),
             'accounts' => $globalAccounts,
@@ -714,5 +732,34 @@ final class FinanceController extends Controller
         );
 
         return redirect()->route('finance.index')->with('success', 'Gate exception approved and locked.');
+    }
+
+    public function proposeCoverageRevocation(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'coverage_source_type' => ['required', 'in:financial_credit,enrollment_installment_plan,financial_gate_exception'],
+            'coverage_source_id' => ['required', 'string', 'max:36'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+        app(RevokeFinancialCoverage::class)->propose(
+            $this->actor(),
+            $input['coverage_source_type'],
+            $input['coverage_source_id'],
+            $input['reason'],
+            $this->idempotencyKey('finance.coverage-revocation.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Coverage-source revocation proposed; a different Finance approver must record it.');
+    }
+
+    public function approveCoverageRevocation(Request $request, string $revocationId): RedirectResponse
+    {
+        app(RevokeFinancialCoverage::class)->approve(
+            $this->actor(),
+            FinancialCoverageRevocation::query()->findOrFail($revocationId),
+            $this->idempotencyKey('finance.coverage-revocation.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Coverage source revoked for future Finance gate assessments; its historical evidence remains preserved.');
     }
 }
