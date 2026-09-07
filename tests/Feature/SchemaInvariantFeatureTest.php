@@ -916,7 +916,7 @@ final class SchemaInvariantFeatureTest extends TestCase
         $refundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'refunds')->pluck('tgname')->all();
         // Recorded refunds are immutable; the lifecycle guard enforces that
         // plus the proposal -> approval path (a refund is born proposed).
-        $this->assertContains('refunds_lifecycle_guard_trigger', $refundTriggers, 'recorded refunds must be immutable at the schema level');
+        $this->assertContains('finance_refunds_lifecycle_guard_trigger', $refundTriggers, 'recorded refunds must be immutable at the schema level');
 
         $discountTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'discounts')->pluck('tgname')->all();
         $this->assertContains('discounts_approved_immutable_trigger', $discountTriggers, 'approved discounts must be immutable at the schema level');
@@ -953,12 +953,12 @@ final class SchemaInvariantFeatureTest extends TestCase
         // to settle a payment/obligation for more than it owes: the balance
         // guards enforce BR-FIN-001/002 at the authoritative database boundary.
         $allocationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payment_allocations')->pluck('tgname')->all();
-        $this->assertContains('payment_allocations_balance_guard_trigger', $allocationTriggers, 'payment allocations must be balance-capped at the schema level');
+        $this->assertContains('finance_payment_allocations_balance_guard_trigger', $allocationTriggers, 'payment allocations must be balance-capped at the schema level');
 
         $refundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'refunds')->pluck('tgname')->all();
         // The same guard caps proposed and approved refunds at the amount
         // received, checking the remainder under the payment row lock.
-        $this->assertContains('refunds_lifecycle_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
+        $this->assertContains('finance_refunds_lifecycle_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
     }
 
     public function test_student_invariants_exist_at_schema_level(): void
@@ -1035,7 +1035,7 @@ final class SchemaInvariantFeatureTest extends TestCase
         // Fund allocations are capped (pool, line, obligation, restriction);
         // journals must balance; obligation lines must total the amount.
         $fundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'fund_allocations')->pluck('tgname')->all();
-        $this->assertContains('fund_allocations_balance_guard_trigger', $fundTriggers, 'fund allocations must be capped at the schema level');
+        $this->assertContains('finance_fund_allocations_balance_guard_trigger', $fundTriggers, 'fund allocations must be capped at the schema level');
 
         $journalConstraint = DB::table('pg_constraint')->where('conname', 'journal_lines_balance_guard')->first();
         $this->assertNotNull($journalConstraint, 'journals must balance exactly at the schema level');

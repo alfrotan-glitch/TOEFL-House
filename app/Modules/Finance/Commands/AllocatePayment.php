@@ -72,22 +72,41 @@ final class AllocatePayment
 
                     $paymentBranchId = trim((string) ($lockedPayment->current_home_branch_id ?? $lockedPayment->originating_branch_id ?? ''));
                     $obligationBranchId = trim((string) ($lockedObligation->current_home_branch_id ?? $lockedObligation->originating_branch_id ?? ''));
+
+                    /** @var array<string, \App\Support\Authorization\StructureScope> $scopes */
+                    $scopes = [];
                     foreach (array_values(array_unique([$paymentBranchId, $obligationBranchId])) as $branchId) {
                         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
-                        if ($branch === null) {
-                            throw BusinessRejection::forCode('finance.allocation_provenance_required', 'payment allocation requires known source branch provenance');
+                        if ($branch === null || $branch->lifecycle_state !== 'active') {
+                            throw BusinessRejection::forCode('finance.allocation_provenance_required', 'payment allocation requires known active source branch provenance');
                         }
-                        $this->require($actor, $branch->structureScope());
+                        $scopes[$branchId] = $branch->structureScope();
+                        $this->require($actor, $scopes[$branchId]);
                     }
-                    $allocationProvenance = ['branch_id' => null, 'organization_id' => null];
-                    if ($paymentBranchId !== '' && $paymentBranchId === $obligationBranchId) {
-                        $allocationBranch = Branch::query()->whereKey($paymentBranchId)->first();
-                        if ($allocationBranch === null || $allocationBranch->lifecycle_state !== 'active' || $allocationBranch->structureScope()->organizationId === '') {
-                            throw BusinessRejection::forCode('finance.allocation_provenance_required', 'a same-branch allocation requires active organization provenance');
+
+                    // A payment must settle an obligation inside the same active
+                    // organization. Money received in one organization can never
+                    // satisfy debt in another, even for an actor who happens to
+                    // govern both — matching the funding-source isolation rule.
+                    $organizationIds = [];
+                    foreach ($scopes as $scope) {
+                        $organizationId = trim((string) $scope->organizationId);
+                        if ($organizationId === '') {
+                            throw BusinessRejection::forCode('finance.allocation_provenance_required', 'payment allocation requires active organization provenance');
                         }
+                        $organizationIds[] = $organizationId;
+                    }
+                    $organizationIds = array_values(array_unique($organizationIds));
+                    if (count($organizationIds) > 1) {
+                        throw BusinessRejection::forCode('finance.allocation_organization_mismatch', 'a payment must satisfy an obligation inside the same active organization');
+                    }
+                    $allocationOrganizationId = $organizationIds[0] ?? '';
+
+                    $allocationProvenance = ['branch_id' => null, 'organization_id' => $allocationOrganizationId];
+                    if (count($scopes) === 1) {
                         $allocationProvenance = [
-                            'branch_id' => $allocationBranch->id,
-                            'organization_id' => $allocationBranch->structureScope()->organizationId,
+                            'branch_id' => $paymentBranchId !== '' ? $paymentBranchId : $obligationBranchId,
+                            'organization_id' => $allocationOrganizationId,
                         ];
                     }
 
