@@ -218,7 +218,7 @@ final class FinanceApiController extends Controller
     public function postJournal(Request $request): JsonResponse
     {
         $input = $request->validate([
-            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_liability,expense,payment,discount,refund,fund_allocation,other'],
+            'period_id' => ['required', 'string'], 'source_type' => ['required', 'in:obligation,payroll_liability,expense,payment,discount,refund,fund_allocation,employment_settlement,other'],
             'source_id' => ['nullable', 'string'], 'reason' => ['required', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1'], 'lines.*.account_id' => ['required', 'string'],
             'lines.*.direction' => ['required', 'in:debit,credit'], 'lines.*.amount' => ['required', 'numeric', 'money', 'gt:0'],

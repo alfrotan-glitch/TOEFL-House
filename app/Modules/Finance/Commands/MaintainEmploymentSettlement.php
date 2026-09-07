@@ -6,7 +6,9 @@ namespace App\Modules\Finance\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinanceLifecycle;
 use App\Modules\Finance\Models\EmploymentSettlement;
+use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Hr\Domain\EmploymentLifecycle;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Payroll\Domain\SettlementProposalApproval;
@@ -19,6 +21,7 @@ use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
 use App\Support\MoneyAmount;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -36,9 +39,10 @@ final class MaintainEmploymentSettlement
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly SettlementProposalApproval $proposalApproval,
+        private readonly LedgerPoster $ledger,
     ) {}
 
-    /** @return array{settlement_id: string, correlation_id: string} */
+    /** @return array{settlement_id: string, correlation_id: string, journal_id: string, debit_account_id: string, credit_account_id: string} */
     public function record(Actor $approver, Employment $employment, string $proposalId, string $amount, string $basis, string $preparedBy, string $idempotencyKey): array
     {
         $payload = hash('sha256', implode('|', ['finance.employment_settlement.record', $employment->id, $proposalId, $amount, $basis, $preparedBy, $approver->actorId]));
@@ -46,8 +50,8 @@ final class MaintainEmploymentSettlement
         try {
             return $this->idempotency->execute('finance.employment_settlement.record', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $employment, $proposalId, $amount, $basis, $preparedBy): array {
-                    if ($basis === '' || ! MoneyAmount::nonNegative($amount)) {
-                        throw BusinessRejection::forCode('finance.employment_settlement_terms', 'a settlement requires a non-negative amount and evidence basis');
+                    if ($basis === '' || ! MoneyAmount::positive($amount)) {
+                        throw BusinessRejection::forCode('finance.employment_settlement_terms', 'a settlement requires a positive amount and evidence basis');
                     }
                     if (trim($preparedBy) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('finance.employment_settlement_not_independent', 'settlement preparation and Finance approval require distinct actors');
@@ -84,6 +88,11 @@ final class MaintainEmploymentSettlement
                         throw AuthorizationDenied::forCode('finance.employment_settlement_beneficiary', 'the beneficiary may not approve their own settlement');
                     }
 
+                    // The settlement is a Finance money fact and must be
+                    // journalized in the open financial period that contains
+                    // the record date so its GL entry exists when that period
+                    // is closed.
+                    $period = $this->openPeriodFor(now());
                     $settlement = EmploymentSettlement::query()->create([
                         'id' => RandomIdentifier::new(),
                         'employment_id' => $locked->id,
@@ -92,6 +101,8 @@ final class MaintainEmploymentSettlement
                         'basis' => $basis,
                         'prepared_by' => $preparedBy,
                         'approved_by' => $approver->actorId,
+                        'period_id' => $period->id,
+                        'organization_id' => $scope->organizationId,
                     ]);
                     // Payroll owns proposal lifecycle state. Finance records its
                     // fact first, then asks Payroll to close the matching evidence
@@ -105,13 +116,32 @@ final class MaintainEmploymentSettlement
                         'proposal_id' => $proposalId,
                         'amount' => $amount,
                         'prepared_by' => $preparedBy,
+                        'period_id' => $period->id,
                     ]);
+                    $ledger = $this->ledger->post($approver, 'employment_settlement', $settlement->id);
 
-                    return ['settlement_id' => $settlement->id, 'correlation_id' => $event->correlation_id];
+                    return ['settlement_id' => $settlement->id, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'debit_account_id' => $ledger['debit_account_id'], 'credit_account_id' => $ledger['credit_account_id']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $approver, 'finance.employment_settlement.record', 'employment_settlement', $employment->id);
         }
+    }
+
+    /** @return \App\Modules\Finance\Models\FinancialPeriod */
+    private function openPeriodFor(Carbon $date): FinancialPeriod
+    {
+        $periods = FinancialPeriod::query()
+            ->where('lifecycle_state', FinanceLifecycle::PERIOD_OPEN)
+            ->where('date_from', '<=', $date->toDateString())
+            ->where('date_to', '>=', $date->toDateString())
+            ->lockForUpdate()
+            ->get()
+            ->all();
+        if (count($periods) !== 1) {
+            throw BusinessRejection::forCode('finance.period_not_open', 'an employment settlement requires exactly one open financial period containing the record date');
+        }
+
+        return $periods[0];
     }
 }

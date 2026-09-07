@@ -19,5 +19,6 @@ final class EmploymentSettlement extends Model
 
     protected $fillable = [
         'id', 'employment_id', 'proposal_id', 'amount', 'basis', 'prepared_by', 'approved_by',
+        'period_id', 'organization_id',
     ];
 }

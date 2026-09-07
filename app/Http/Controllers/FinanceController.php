@@ -398,7 +398,7 @@ final class FinanceController extends Controller
         // the command sees the lines. A partially filled slot is invalid.
         $input = $request->validate([
             'period_id' => ['required', 'string'],
-            'source_type' => ['required', 'in:obligation,payroll_liability,other'],
+            'source_type' => ['required', 'in:obligation,payroll_liability,expense,payment,discount,refund,fund_allocation,employment_settlement,other'],
             'source_id' => ['nullable', 'string'],
             'reason' => ['required', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1', 'max:4'],

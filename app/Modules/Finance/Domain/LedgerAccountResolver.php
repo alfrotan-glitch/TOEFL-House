@@ -6,6 +6,7 @@ namespace App\Modules\Finance\Domain;
 
 use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\Discount;
+use App\Modules\Finance\Models\EmploymentSettlement;
 use App\Modules\Finance\Models\Expense;
 use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FundAllocation;
@@ -61,6 +62,7 @@ final class LedgerAccountResolver
             'payroll_liability' => $this->resolvePayrollLiability($sourceId),
             'expense' => $this->resolveExpense($sourceId),
             'correction' => $this->resolveCorrection($sourceId),
+            'employment_settlement' => $this->resolveEmploymentSettlement($sourceId),
             default => throw BusinessRejection::forCode('finance.ledger_source_unsupported', sprintf('there is no ledger mapping for journal source %s', $sourceType)),
         };
     }
@@ -263,6 +265,30 @@ final class LedgerAccountResolver
         }
 
         throw BusinessRejection::forCode('finance.ledger_correction_no_posting', 'an allocation reversal is a receivable reclassification and carries no general-ledger entry');
+    }
+
+    /**
+     * Termination settlement. The employer owes the terminated employee a
+     * benefit, so the expense is recognized against accrued payroll entirely
+     * in the period the settlement is recorded.
+     *
+     * @return array{debit_account_id: string, credit_account_id: string, amount: numeric-string, period_id: string, organization_id: string}
+     */
+    private function resolveEmploymentSettlement(string $sourceId): array
+    {
+        /** @var EmploymentSettlement|null $settlement */
+        $settlement = EmploymentSettlement::query()->whereKey($sourceId)->first();
+        if ($settlement === null) {
+            throw BusinessRejection::forCode('finance.ledger_source_unknown', 'the ledger employment settlement source is unknown');
+        }
+
+        return [
+            'debit_account_id' => $this->accountId(self::ACCOUNT_SALARY_EXPENSE),
+            'credit_account_id' => $this->accountId(self::ACCOUNT_PAYROLL_PAYABLE),
+            'amount' => (string) $settlement->amount,
+            'period_id' => (string) $settlement->period_id,
+            'organization_id' => (string) $settlement->organization_id,
+        ];
     }
 
     private function accountId(string $code): string

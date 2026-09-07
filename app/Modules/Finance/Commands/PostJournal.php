@@ -110,7 +110,7 @@ final class PostJournal
                     // The remaining cash/AR facts are auto-journalized on
                     // record; a manual second posting is rejected cleanly by
                     // the schema guard.
-                    if (in_array($sourceType, ['payment', 'discount', 'refund', 'fund_allocation'], true)
+                    if (in_array($sourceType, ['payment', 'discount', 'refund', 'fund_allocation', 'employment_settlement'], true)
                         && Journal::query()->where('source_type', $sourceType)->where('source_id', $sourceId)->exists()) {
                         throw BusinessRejection::forCode('finance.source_already_journalized', sprintf('this %s source fact is already journalized; correct it with a reversal', str_replace('_', ' ', $sourceType)));
                     }
@@ -188,7 +188,7 @@ final class PostJournal
         if ($sourceType === 'payroll_result') {
             throw BusinessRejection::forCode('finance.journal_payroll_source_retired', 'a payroll disbursement must reference its Finance-recognized payroll liability, not a Payroll result directly');
         }
-        if (! in_array($sourceType, ['obligation', 'payroll_liability', 'expense', 'payment', 'discount', 'refund', 'fund_allocation', 'journal', 'other'], true)) {
+        if (! in_array($sourceType, ['obligation', 'payroll_liability', 'expense', 'payment', 'discount', 'refund', 'fund_allocation', 'employment_settlement', 'journal', 'other'], true)) {
             throw BusinessRejection::forCode('finance.journal_source_unknown', sprintf('unknown journal source %s', $sourceType));
         }
         if ($reason === '') {
@@ -197,7 +197,7 @@ final class PostJournal
         if ($lines === []) {
             throw BusinessRejection::forCode('finance.journal_lines_required', 'a journal requires at least one complete line');
         }
-        if (in_array($sourceType, ['obligation', 'payroll_liability', 'expense', 'payment', 'discount', 'refund', 'fund_allocation'], true) && trim((string) $sourceId) === '') {
+        if (in_array($sourceType, ['obligation', 'payroll_liability', 'expense', 'payment', 'discount', 'refund', 'fund_allocation', 'employment_settlement'], true) && trim((string) $sourceId) === '') {
             throw BusinessRejection::forCode('finance.journal_source_required', sprintf('a %s journal requires its source id', str_replace('_', ' ', $sourceType)));
         }
         if ($sourceType === 'journal' && ($sourceId === null || $sourceId === '' || $reversalOfId === null)) {

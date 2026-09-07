@@ -6,6 +6,7 @@ namespace App\Modules\Finance\Queries;
 
 use App\Modules\Finance\Models\Journal;
 use App\Modules\Finance\Models\Discount;
+use App\Modules\Finance\Models\EmploymentSettlement;
 use App\Modules\Finance\Models\Expense;
 use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FinancialPeriod;
@@ -15,6 +16,7 @@ use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\PayrollLiabilityFact;
 use App\Modules\Finance\Models\Refund;
 use App\Support\MoneyAmount;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -172,41 +174,56 @@ final class GeneralLedgerQuery
      * fact to its source period, so a point-in-time balance sheet accumulates
      * every journal in any period through the target period's end (all periods
      * when no period is given). Assets carry a debit natural balance;
-     * liabilities and equity carry a credit natural balance; retained earnings
-     * close through equity, so assets are reported alongside the sum of
-     * liabilities and equity from the same balanced entry set.
+     * liabilities and equity carry a credit natural balance. Because the chart
+     * carries no closing entry account, current-period net earnings are shown
+     * as part of equity so the identity assets = liabilities + equity holds
+     * from the same set of balanced entries.
      *
-     * @return array{bottom_line: array{assets: string, liabilities: string, equity: string, balanced: bool}, accounts: array<int, array{account_id: string, code: string, name: string, type: string, balance: string}>}
+     * @return array{bottom_line: array{assets: string, liabilities: string, equity: string, net_income: string, balanced: bool}, accounts: array<int, array{account_id: string, code: string, name: string, type: string, balance: string}>}
      */
     public function balanceSheet(?string $periodId = null, ?string $organizationId = null): array
     {
-        $builder = DB::table('journal_lines as jl')
-            ->join('journals as j', 'j.id', '=', 'jl.journal_id')
-            ->join('accounts as a', 'a.id', '=', 'jl.account_id')
-            ->selectRaw('a.id AS account_id, a.code AS code, a.name AS name, a.type AS type')
-            ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'debit\'), 0) AS debit')
-            ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'credit\'), 0) AS credit')
-            ->groupBy('a.id', 'a.code', 'a.name', 'a.type')
-            ->orderBy('a.code');
-
+        $scopePeriodIds = null;
         if ($periodId !== null && $periodId !== '') {
             $end = FinancialPeriod::query()->whereKey($periodId)->value('date_to');
             if ($end !== null) {
-                $periodIds = FinancialPeriod::query()->where('date_to', '<=', $end)->pluck('id')->all();
-                $builder->whereIn('j.period_id', $periodIds);
+                $scopePeriodIds = FinancialPeriod::query()->where('date_to', '<=', $end)->pluck('id')->all();
             }
         }
-        if ($organizationId !== null && $organizationId !== '') {
-            $builder->where('j.organization_id', $organizationId);
-        }
+        $entryScope = fn (QueryBuilder $query): QueryBuilder => tap($query)->when($scopePeriodIds !== null, fn ($query) => $query->whereIn('j.period_id', $scopePeriodIds))->when($organizationId !== null && $organizationId !== '', fn ($query) => $query->where('j.organization_id', $organizationId));
 
         $assets = '0.00';
         $liabilities = '0.00';
         $equity = '0.00';
+        $revenue = '0.00';
+        $expense = '0.00';
         $accounts = [];
-        foreach ($builder->get() as $row) {
+
+        // Sum by natural balance, keeping revenue and expense out of the
+        // reported account list but separating them so current earnings can
+        // close into equity.
+        $balanceRows = $entryScope(
+            DB::table('journal_lines as jl')
+                ->join('journals as j', 'j.id', '=', 'jl.journal_id')
+                ->join('accounts as a', 'a.id', '=', 'jl.account_id')
+                ->selectRaw('a.id AS account_id, a.code AS code, a.name AS name, a.type AS type')
+                ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'debit\'), 0) AS debit')
+                ->selectRaw('COALESCE(SUM(jl.amount) FILTER (WHERE jl.direction = \'credit\'), 0) AS credit')
+                ->groupBy('a.id', 'a.code', 'a.name', 'a.type')
+                ->orderBy('a.code'),
+        )->get();
+
+        foreach ($balanceRows as $row) {
             $debit = (string) $row->debit;
             $credit = (string) $row->credit;
+            if ($row->type === 'revenue') {
+                $revenue = bcadd($revenue, bcsub($credit, $debit, 2), 2);
+                continue;
+            }
+            if ($row->type === 'expense') {
+                $expense = bcadd($expense, bcsub($debit, $credit, 2), 2);
+                continue;
+            }
             $balance = $row->type === 'asset' ? bcsub($debit, $credit, 2) : bcsub($credit, $debit, 2);
             if ($row->type === 'asset') {
                 $assets = bcadd($assets, $balance, 2);
@@ -223,13 +240,16 @@ final class GeneralLedgerQuery
                 'balance' => $balance,
             ];
         }
-        $liabilitiesPlusEquity = bcadd($liabilities, $equity, 2);
+        $netIncome = bcsub($revenue, $expense, 2);
+        $effectiveEquity = bcadd($equity, $netIncome, 2);
+        $liabilitiesPlusEquity = bcadd($liabilities, $effectiveEquity, 2);
 
         return [
             'bottom_line' => [
                 'assets' => $assets,
                 'liabilities' => $liabilities,
                 'equity' => $equity,
+                'net_income' => $netIncome,
                 'balanced' => bccomp($assets, $liabilitiesPlusEquity, 2) === 0,
             ],
             'accounts' => $accounts,
@@ -263,6 +283,7 @@ final class GeneralLedgerQuery
                     FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL,
                 ]),
             )->pluck('id'),
+            'employment_settlement' => fn (): \Illuminate\Support\Collection => $scoped(EmploymentSettlement::query())->pluck('id'),
         ];
 
         // Key journalized facts by (source_type, source_id) so a ledger entry is
@@ -317,6 +338,7 @@ final class GeneralLedgerQuery
             'payroll_liability' => $this->absolute((string) (PayrollLiabilityFact::query()->whereKey($sourceId)->value('amount') ?? '0.00')),
             'expense' => (string) (Expense::query()->whereKey($sourceId)->value('amount') ?? '0.00'),
             'correction' => (string) (FinancialCorrection::query()->whereKey($sourceId)->value('amount') ?? '0.00'),
+            'employment_settlement' => (string) (EmploymentSettlement::query()->whereKey($sourceId)->value('amount') ?? '0.00'),
             default => '0.00',
         };
     }
@@ -332,6 +354,7 @@ final class GeneralLedgerQuery
             'payroll_liability' => (string) (PayrollLiabilityFact::query()->whereKey($sourceId)->value('period_id') ?? ''),
             'expense' => (string) (Expense::query()->whereKey($sourceId)->value('period_id') ?? ''),
             'correction' => (string) (FinancialCorrection::query()->whereKey($sourceId)->value('period_id') ?? ''),
+            'employment_settlement' => (string) (EmploymentSettlement::query()->whereKey($sourceId)->value('period_id') ?? ''),
             default => '',
         };
     }
