@@ -1,0 +1,24 @@
+name: TOEFL House Production Post-Deploy Acceptance
+
+on:
+  push:
+    branches:
+      - website-source-control-20261117
+    paths:
+      - "cloudflare/pages-edge/production-acceptance.mjs"
+      - ".github/workflows/pages-production-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node cloudflare/pages-edge/production-acceptance.mjs

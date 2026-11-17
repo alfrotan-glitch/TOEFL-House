@@ -1,0 +1,34 @@
+name: Cloudflare Analytics Verification
+
+on:
+  push:
+    branches:
+      - website-source-control-20261117
+    paths:
+      - "cloudflare/analytics/**"
+      - ".github/workflows/cloudflare-analytics-tests.yml"
+  pull_request:
+    paths:
+      - "cloudflare/analytics/**"
+      - ".github/workflows/cloudflare-analytics-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-conversion-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Worker syntax
+        run: node --check cloudflare/analytics/worker.mjs
+      - name: Test tracking redirects and event validation
+        run: node --test cloudflare/analytics/tests/*.test.mjs
+      - name: Check Wrangler JSONC structure
+        run: |
+          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("cloudflare/analytics/wrangler.jsonc","utf8")); if(x.name!=="toefl-house-conversions"||x.d1_databases[0].binding!=="EVENTS") process.exit(1)'

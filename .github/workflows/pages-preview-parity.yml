@@ -1,0 +1,25 @@
+name: TOEFL House Cloudflare preview parity
+
+on:
+  push:
+    branches:
+      - website-source-control-20261117
+    paths:
+      - "cloudflare/pages-edge/preview-parity.mjs"
+      - ".github/workflows/pages-preview-parity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Compare preview against current site with read-only requests
+        run: node cloudflare/pages-edge/preview-parity.mjs

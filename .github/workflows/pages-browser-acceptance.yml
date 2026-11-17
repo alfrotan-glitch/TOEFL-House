@@ -1,0 +1,39 @@
+name: TOEFL House Browser Conversion Acceptance
+
+on:
+  push:
+    branches:
+      - website-source-control-20261117
+    paths:
+      - "cloudflare/pages-edge/browser-acceptance.cjs"
+      - ".github/workflows/pages-browser-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated browser test runtime
+        run: |
+          mkdir -p /tmp/toefl-browser
+          npm install --prefix /tmp/toefl-browser --no-save playwright-core@1.56.0 --silent
+      - name: Find Chrome
+        run: |
+          which google-chrome || which chromium || which chromium-browser
+      - name: Test 3 languages, CTA event dispatch and privacy (without writing real leads)
+        run: node cloudflare/pages-edge/browser-acceptance.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: toefl-house-mobile-visual-acceptance
+          path: cloudflare-pages-browser-evidence/
+          retention-days: 7
+          if-no-files-found: ignore
