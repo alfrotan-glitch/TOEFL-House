@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "toefl-house-conversions",
+  "main": "./worker.mjs",
+  "compatibility_date": "2026-11-17",
+  "workers_dev": true,
+  "account_id": "d2c9805fd011afa20e8224ccb929d704",
+  "d1_databases": [
+    {
+      "binding": "EVENTS",
+      "database_name": "toefl-house-conversions",
+      "database_id": "b0645f30-887a-4088-97f8-c6d0f99cf4d0"
+    }
+  ]
+}
