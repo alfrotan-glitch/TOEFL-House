@@ -21,7 +21,13 @@ for (const route of routes) {
   const h1s = [...html.matchAll(/<h1\b[^>]*>/gi)].length;
   const language = html.match(/<html\b[^>]*\blang=["']([^"']+)/i)?.[1] ?? "";
   const dir = html.match(/<html\b[^>]*\bdir=["']([^"']+)/i)?.[1] ?? "";
-  results.push({route,status:response.status,title,language,dir,h1s});
+  const expectedCopy = {
+    "/": "Admissions open · Free placement assessment",
+    "/fa/": "پذیرش جریان دارد · تعیین سطح رایگان",
+    "/ps/": "نوم‌لیکنه روانه ده • د سویې معلومول وړیا دي"
+  }[route];
+  const serverCopySeen = expectedCopy ? html.includes(expectedCopy) : null;
+  results.push({route,status:response.status,title,language,dir,h1s,serverCopySeen});
   assert.equal(response.status,200, "Non-200 route: " + route);
   assert.match(response.headers.get("content-type") || "", /text\/html/i);
   assert.ok(title.length > 0, "Missing title on " + route);
