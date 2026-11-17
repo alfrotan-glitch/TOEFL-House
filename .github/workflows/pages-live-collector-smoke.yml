@@ -1,0 +1,25 @@
+name: TOEFL House Live Conversion Collector End-to-End
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/pages-edge/live-collector-smoke.cjs"
+      - ".github/workflows/pages-live-collector-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated browser driver
+        run: npm install --prefix /tmp/toefl-live-browser --no-save playwright-core@1.56.0 --silent
+      - name: Submit one anonymous test click and verify real Cloudflare collection
+        run: node cloudflare/pages-edge/live-collector-smoke.cjs
