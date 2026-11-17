@@ -71,3 +71,49 @@ test("V2 home does not reveal user data from CMS",async()=>{
  assert.ok(!html.includes("session_token"));
  assert.ok(!html.includes("admin_secret"));
 });
+
+
+for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
+ test("Course details preserve four-month TOEFL and semantic SEO in "+prefix,async()=>{
+  const req=new Request("https://the-toefl-house.pages.dev"+prefix+"courses/toefl-preparation/");
+  const r=await worker.fetch(req,env());
+  assert.equal(r.status,200);
+  assert.equal(r.headers.get("Content-Language"),lang);
+  assert.equal(r.headers.get("X-Robots-Tag"),null);
+  const html=await r.text();
+  assert.equal((html.match(/<h1>/g)||[]).length,1);
+  assert.match(html,/TOEFL/);
+  assert.match(html,/4 months|۴ ماه|څلور میاشتې/);
+  assert.match(html,/<link rel="canonical"/);
+  assert.match(html,/application\/ld\+json/);
+  assert.match(html,/"@type":"Course"/);
+  assert.match(html,/v2\/site\.css/);
+  assert.match(html,new RegExp('href="'+prefix+'admissions/'));
+ });
+ test("Admissions page offers no-email WhatsApp only funnel in "+prefix,async()=>{
+  const req=new Request("https://the-toefl-house.pages.dev"+prefix+"admissions/");
+  const r=await worker.fetch(req,env());
+  assert.equal(r.status,200);
+  const html=await r.text();
+  assert.equal((html.match(/<h1>/g)||[]).length,1);
+  assert.match(html,/id="v2-enquiry-form"/);
+  assert.match(html,/name="program"/);
+  assert.match(html,/name="format"/);
+  assert.match(html,/name="when"/);
+  assert.match(html,/wa\.me\/93794357509/);
+  assert.doesNotMatch(html,/<input[^>]+type="email"/);
+  assert.doesNotMatch(html,/<input[^>]+type="password"/);
+  assert.match(html,/<link rel="canonical"/);
+ });
+ test("Legacy tools route remains read-only and is noindexed in "+prefix,async()=>{
+  const prior=globalThis.fetch;
+  globalThis.fetch=async request=>new Response('Prior React app is preserved',{headers:{"Content-Type":"text/plain"}});
+  try{
+   const route=prefix+"tools/";
+   const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+route),env());
+   assert.equal(r.status,200);
+   assert.match(await r.text(),/Prior React app/);
+   assert.match(r.headers.get("X-Robots-Tag")||"",/noindex/);
+  }finally{globalThis.fetch=prior;}
+ });
+}
