@@ -114,7 +114,12 @@ function v2Programs(c,content,locale){
  const cards=V2_COURSE_IDS.map((id,i)=>{
   const program=src.find(x=>x.id===id)||{};
   let duration=program.duration;
-  if(id==="toefl-preparation")duration=locale==="en"?"4 months":locale==="fa"?"۴ ماه":"څلور میاشتې";
+  const shortDurations={
+    en:["Pre-Starter: 1 mo · Other levels: 2 mo","2 months per level","4 months","2 months","2 months","2 months"],
+    fa:["Pre-Starter: ۱ ماه · سایر سطوح: ۲ ماه","۲ ماه برای هر سطح","۴ ماه","۲ ماه","۲ ماه","۲ ماه"],
+    ps:["Pre-Starter: ۱ میاشت · نورې کچې: ۲ میاشتې","د هرې کچې لپاره ۲ میاشتې","څلور میاشتې","۲ میاشتې","۲ میاشتې","۲ میاشتې"]
+  };
+  duration=shortDurations[locale][i]||duration;
   let desc=program.summary||program.subtitle||"";
   return '<article class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+String(i+1).padStart(2,"0")+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(program.title||c.courseNames[i])+'</h3><p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
  }).join("");
