@@ -117,3 +117,23 @@ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
   }finally{globalThis.fetch=prior;}
  });
 }
+
+test("Course language switcher retains current program, and all subpage menu links target existing home anchors",async()=>{
+ const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/courses/toefl-preparation/"),env());
+ const html=await r.text();
+ assert.match(html,/href="\/courses\/toefl-preparation\/"/);
+ assert.match(html,/href="\/fa\/courses\/toefl-preparation\/"/);
+ assert.match(html,/href="\/ps\/courses\/toefl-preparation\/"/);
+ assert.match(html,/href="\/fa\/#programs"/);
+ assert.match(html,/href="\/fa\/#why-us"/);
+ assert.match(html,/href="\/fa\/#online"/);
+ assert.match(html,/href="\/fa\/#faq"/);
+});
+test("Admissions language switcher retains admissions context",async()=>{
+ const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/admissions/"),env());
+ const html=await r.text();
+ assert.match(html,/href="\/admissions\/"/);
+ assert.match(html,/href="\/fa\/admissions\/"/);
+ assert.match(html,/href="\/ps\/admissions\/"/);
+ assert.match(html,/href="\/ps\/#programs"/);
+});
