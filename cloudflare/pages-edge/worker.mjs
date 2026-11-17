@@ -82,6 +82,14 @@ export default {
     if(noindex(url.hostname)&&!["GET","HEAD","OPTIONS"].includes(request.method)){
       return new Response("Preview is read-only",{status:403,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex"}});
     }
+    // Serve unchanged hashed static files locally; never proxy binary/font assets unnecessarily.
+    if(["GET","HEAD"].includes(request.method)&&env&&env.ASSETS&&(
+      url.pathname.startsWith("/assets/")||url.pathname==="/default-content.json"||
+      /^\/(?:fa\/|ps\/)?(?:index|404)\.html$/.test(url.pathname)
+    )){
+      const asset=await env.ASSETS.fetch(request);
+      if(asset.ok)return asset;
+    }
     try{return await passThrough(request);}
     catch(error){
       console.error("Original site unavailable",String(error));
