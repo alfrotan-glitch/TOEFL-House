@@ -1,0 +1,29 @@
+name: TOEFL House V2 Program and Admissions Visual QA
+on:
+  push:
+    branches: [website-v2-redesign-20261118]
+    paths:
+      - 'cloudflare/site-v2/detail-browser.cjs'
+      - '.github/workflows/toefl-v2-detail-browser.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-v2-detail-browser --no-save playwright-core@1.56.0 --silent
+      - name: Check 21 course and 3 admissions routes on mobile
+        run: node cloudflare/site-v2/detail-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: toefl-house-v2-programs-and-admissions
+          path: toefl-v2-detail-evidence/
+          retention-days: 7
+          if-no-files-found: ignore
