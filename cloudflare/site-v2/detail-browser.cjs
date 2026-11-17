@@ -54,6 +54,10 @@ try{
  const raw=await legacy.text();
  if(legacy.status!==200||!raw.includes("index-Ch3KjNPK"))failures.push("Original interactive form and curriculum unavailable");
  if(errors.length)failures.push(...errors);
+ const preselected=await page.goto(base+"/fa/admissions/?program=toefl-preparation",{waitUntil:"networkidle",timeout:25000});
+ const selectedValue=await page.locator("#v2-program").inputValue();
+ if(preselected.status()!==200||selectedValue!=="toefl-preparation")failures.push("Admissions did not preselect TOEFL from program CTA");
+ summary.push({route:"/fa/admissions/?program=toefl-preparation",selectedValue,status:preselected.status()});
  console.log(JSON.stringify({checked:summary.length,failures,summary},null,2));
  assert.deepEqual(failures,[]);
  await ctx.close();
