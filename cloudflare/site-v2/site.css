@@ -233,3 +233,13 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
  .stat-item strong{font-size:24px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.001ms!important;transition-duration:.001ms!important}}
+
+/* Compact proof points as three tidy rows on narrow phones; never crush Dari labels. */
+@media(max-width:460px){
+ .stat-grid{grid-template-columns:1fr;gap:0}
+ .stat-item{flex-direction:row;justify-content:space-between;align-items:center;gap:24px;min-height:66px;padding:11px 0;border-inline-start:0;border-bottom:1px solid #eef0eb}
+ .stat-item:last-child{border-bottom:0}
+ .stat-item strong{font-size:26px;flex:none}
+ .stat-item span{font-size:11px;line-height:1.6;text-align:end;margin:0;max-width:65%}
+ .stat-head{margin-bottom:9px}
+}
