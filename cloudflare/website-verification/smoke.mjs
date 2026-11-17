@@ -33,4 +33,17 @@ for (const route of routes) {
   assert.ok(title.length > 0, "Missing title on " + route);
   if (h1s !== 1) console.warn("Review heading structure",route,"h1_count",h1s);
 }
-console.log(JSON.stringify({verified_at:new Date().toISOString(),host,results},null,2));
+const apiResponse = await fetch(host + "/api/content", {
+  signal: AbortSignal.timeout(20000)
+});
+assert.equal(apiResponse.status,200,"The published public CMS API must respond");
+const apiText = await apiResponse.text();
+const cmsCopy = {
+  english:apiText.includes("Admissions open · Free placement assessment"),
+  dari:apiText.includes("پذیرش جریان دارد · تعیین سطح رایگان"),
+  pashto:apiText.includes("نوم‌لیکنه روانه ده • د سویې معلومول وړیا دي")
+};
+console.log(JSON.stringify({verified_at:new Date().toISOString(),host,results,publicCms:{status:apiResponse.status,copyPresent:cmsCopy}},null,2));
+for (const [locale,exists] of Object.entries(cmsCopy)) {
+  assert.ok(exists, "Published CMS has not returned the updated " + locale + " announcement");
+}
