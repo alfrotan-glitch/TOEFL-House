@@ -1,0 +1,32 @@
+name: TOEFL House public Pages snapshot (read-only)
+
+on:
+  push:
+    branches:
+      - website-source-control-20261117
+    paths:
+      - "cloudflare/website-verification/pages-static-manifest.json"
+      - "cloudflare/website-verification/snapshot.mjs"
+      - ".github/workflows/toefl-site-public-snapshot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture-public-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Copy published static assets into a temporary backup directory
+        run: node cloudflare/website-verification/snapshot.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toefl-house-pages-public-snapshot
+          path: cloudflare-pages-public-snapshot/
+          retention-days: 30
+          if-no-files-found: error
