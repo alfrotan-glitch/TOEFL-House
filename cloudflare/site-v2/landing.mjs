@@ -81,13 +81,14 @@ async function v2Cms(env){
  return {main:parsed,pashto,revision:main.revision,psRevision:ps.revision};
 }
 function v2Prefix(locale){return locale==="en"?"/":"/"+locale+"/";}
-function v2Languages(locale){
- return [["en","EN","/"],["fa","دری","/fa/"],["ps","پښتو","/ps/"]].map(([id,title,path])=>'<a lang="'+(id==="fa"?"fa-AF":id==="ps"?"ps-AF":"en")+'" hreflang="'+(id==="en"?"en":id==="fa"?"fa-AF":"ps-AF")+'" href="'+path+'"'+(id===locale?' aria-current="page" class="is-active"':'')+'>'+title+'</a>').join("");
+function v2Languages(locale,suffix=""){
+ return [["en","EN","/"],["fa","دری","/fa/"],["ps","پښتو","/ps/"]].map(([id,title,path])=>'<a lang="'+(id==="fa"?"fa-AF":id==="ps"?"ps-AF":"en")+'" hreflang="'+(id==="en"?"en":id==="fa"?"fa-AF":"ps-AF")+'" href="'+path+suffix+'"'+(id===locale?' aria-current="page" class="is-active"':'')+'>'+title+'</a>').join("");
 }
-function v2Header(c,locale){
+function v2Header(c,locale,suffix=""){
  const prefix=v2Prefix(locale);
- const l=v2Languages(locale);
- const nav=[["#programs",c.navPrograms],["#why-us",c.navWhy],["#online",c.navOnline],["#faq",c.navFaq],["#contact",c.navContact]];
+ const l=v2Languages(locale,suffix);
+ const anchorBase=suffix?v2Prefix(locale):"";
+ const nav=[[anchorBase+"#programs",c.navPrograms],[anchorBase+"#why-us",c.navWhy],[anchorBase+"#online",c.navOnline],[anchorBase+"#faq",c.navFaq],[anchorBase+"#contact",c.navContact]];
  const links=nav.map(([href,label])=>'<a href="'+href+'">'+v2T(label)+'</a>').join("");
  return '<a class="skip" href="#main">'+(locale==="en"?"Skip to content":locale==="fa"?"رفتن به محتوا":"منځپانګې ته لاړ شئ")+'</a>'
   +'<div class="topline"><div class="shell topline-inner"><span class="top-dots"></span><span>'+v2T(c.badge)+'</span><a class="toplink" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+' <span aria-hidden="true">↗</span></a></div></div>'
