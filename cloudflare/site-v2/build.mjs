@@ -4,6 +4,7 @@ import {dirname,join} from "node:path";
 const here=dirname(fileURLToPath(import.meta.url));
 let main=await readFile(join(here,"../pages-edge/worker.mjs"),"utf8");
 const landing=await readFile(join(here,"landing.mjs"),"utf8");
+const detail=await readFile(join(here,"detail.mjs"),"utf8");
 const css=await readFile(join(here,"site.css"),"utf8");
 const js=await readFile(join(here,"site.js"),"utf8");
 const entry="export default {\n  async fetch(request,env,ctx){";
@@ -13,6 +14,16 @@ const render=[
 '    const homeLocale=url.pathname==="/"?"en":url.pathname==="/fa/"?"fa":url.pathname==="/ps/"?"ps":null;',
 '    if(homeLocale){',
 '      const page=await v2Home(request,env,homeLocale);',
+'      if(page)return page;',
+'    }',
+'    const parts=url.pathname.split("/").filter(Boolean);',
+'    const routeLocale=["fa","ps"].includes(parts[0])?parts.shift():"en";',
+'    if(parts[0]==="courses"&&parts.length===2&&(V2_COURSE_IDS.includes(parts[1])||parts[1]==="online-individual-zoom")){',
+'      const page=await v2Detail(request,env,routeLocale,"course",parts[1]);',
+'      if(page)return page;',
+'    }',
+'    if(parts[0]==="admissions"&&parts.length===1){',
+'      const page=await v2Detail(request,env,routeLocale,"admissions",null);',
 '      if(page)return page;',
 '    }',
 '    if(url.pathname==="/__th/v2/site.css") return staticResponse(request,V2_CSS,"text/css; charset=utf-8");',
@@ -27,7 +38,7 @@ const rewrittenTarget=[
 '  const target=new URL(upstreamPath+incoming.search,UPSTREAM);'
 ].join("\n");
 main=main.replace(target,rewrittenTarget);
-main=main.replace(entry,landing+"\nconst V2_CSS="+JSON.stringify(css)+";\nconst V2_JS="+JSON.stringify(js)+";\n"+entry);
+main=main.replace(entry,landing+"\n"+detail+"\nconst V2_CSS="+JSON.stringify(css)+";\nconst V2_JS="+JSON.stringify(js)+";\n"+entry);
 const at=main.lastIndexOf(matching);
 if(at<0)throw Error("fetch entry missing");
 main=main.slice(0,at+matching.length)+"\n"+render+main.slice(at+matching.length);
