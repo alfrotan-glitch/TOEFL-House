@@ -17,6 +17,9 @@ if(menu){
 }
 var enquiry=document.getElementById("v2-enquiry-form");
 if(enquiry){
+ var selectedProgram=new URLSearchParams(location.search).get("program");
+ var courseChoice=enquiry.querySelector("#v2-program");
+ if(selectedProgram && courseChoice && [...courseChoice.options].some(function(x){return x.value===selectedProgram;}))courseChoice.value=selectedProgram;
  enquiry.addEventListener("submit",function(event){
   event.preventDefault();
   if(!enquiry.checkValidity()){enquiry.reportValidity();return;}
