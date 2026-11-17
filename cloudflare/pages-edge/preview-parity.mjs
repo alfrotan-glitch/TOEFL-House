@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-const preview="https://d0b10017.the-toefl-house.pages.dev";
+const preview="https://ea3b7ad7.the-toefl-house.pages.dev";
 const current="https://the-toefl-house.pages.dev";
 const pages=[
  "/","/fa/","/ps/",
