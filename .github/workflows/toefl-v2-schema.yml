@@ -1,0 +1,18 @@
+name: TOEFL House V2 Content Schema Read-Only
+on:
+  push:
+    branches: [website-v2-redesign-20261118]
+    paths: ['cloudflare/site-v2/inspect.mjs']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node cloudflare/site-v2/inspect.mjs

@@ -1,0 +1,22 @@
+name: TOEFL House V2 Live Browser Final Acceptance
+on:
+  push:
+    branches: [website-v2-redesign-20261118]
+    paths:
+      - 'cloudflare/site-v2/live-browser.cjs'
+      - '.github/workflows/toefl-v2-live-browser.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-v2-live --no-save playwright-core@1.56.0 --silent
+      - name: Test live mobile, all locales, no old React on landing pages, CMS authorization
+        run: node cloudflare/site-v2/live-browser.cjs

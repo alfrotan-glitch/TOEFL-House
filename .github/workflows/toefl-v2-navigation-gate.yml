@@ -1,0 +1,19 @@
+name: TOEFL House V2 Navigation Preview Gate
+on:
+  push:
+    branches: [website-v2-redesign-20261118]
+    paths: ['cloudflare/site-v2/navigation-preview-check.mjs','.github/workflows/toefl-v2-navigation-gate.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify preview language and subpage anchors
+        run: node cloudflare/site-v2/navigation-preview-check.mjs

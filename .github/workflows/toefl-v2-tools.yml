@@ -1,0 +1,22 @@
+name: TOEFL House V2 Legacy Tools Browser Acceptance
+on:
+  push:
+    branches: [website-v2-redesign-20261118]
+    paths:
+      - 'cloudflare/site-v2/legacy-tools-browser.cjs'
+      - '.github/workflows/toefl-v2-tools.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-tools-browser --no-save playwright-core@1.56.0 --silent
+      - name: Verify preserved React tools and legacy enquiry forms in all languages
+        run: node cloudflare/site-v2/legacy-tools-browser.cjs
