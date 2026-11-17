@@ -1,0 +1,34 @@
+name: TOEFL House Pages Edge Safety
+
+on:
+  push:
+    branches:
+      - website-source-control-20261117
+    paths:
+      - "cloudflare/pages-edge/**"
+      - ".github/workflows/pages-edge-safety.yml"
+  pull_request:
+    paths:
+      - "cloudflare/pages-edge/**"
+      - ".github/workflows/pages-edge-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  edge-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Pages Worker syntax
+        run: node --check cloudflare/pages-edge/worker.mjs
+      - name: Verify pass-through, security and privacy behavior
+        run: node --test cloudflare/pages-edge/tests/*.test.mjs
+      - name: Verify release size stays small
+        run: |
+          test $(wc -c < cloudflare/pages-edge/worker.mjs) -lt 25000
