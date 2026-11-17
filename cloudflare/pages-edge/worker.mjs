@@ -49,7 +49,7 @@ async function passThrough(request){
   const headers=new Headers(request.headers);
   headers.delete("Host");
   const init={method:request.method,headers,redirect:"manual"};
-  if(!["GET","HEAD"].includes(request.method))init.body=request.body;
+  if(!["GET","HEAD"].includes(request.method)&&request.body){init.body=request.body;init.duplex="half";}
   const original=await fetch(new Request(target,init));
   const outHeaders=new Headers(original.headers);
   if(outHeaders.has("Location"))outHeaders.set("Location",rewriteLocation(outHeaders.get("Location")));
