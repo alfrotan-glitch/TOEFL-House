@@ -17,7 +17,8 @@ function staticResponse(request,content,type){
     "Content-Type":type,
     "Cache-Control":"public, max-age=3600, immutable",
     "X-Content-Type-Options":"nosniff",
-    "Cross-Origin-Resource-Policy":"same-origin"
+    "Cross-Origin-Resource-Policy":"same-origin",
+    "X-Robots-Tag":"noindex, nofollow, noarchive"
   }});
 }
 function adjustCsp(csp){
