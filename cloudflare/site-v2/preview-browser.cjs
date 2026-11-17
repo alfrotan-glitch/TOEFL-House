@@ -2,7 +2,7 @@
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const {chromium}=require("/tmp/toefl-v2-browser/node_modules/playwright-core");
-const base="https://5f7d9940.the-toefl-house.pages.dev";
+const base="https://e5c5d758.the-toefl-house.pages.dev";
 const live="https://the-toefl-house.pages.dev";
 const r=await fetch(base+"/__th/v2/site.css");
 assert.equal(r.status,200);
