@@ -243,3 +243,97 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
  .stat-item span{font-size:11px;line-height:1.6;text-align:end;margin:0;max-width:65%}
  .stat-head{margin-bottom:9px}
 }
+
+
+/* V2 program details: editorial, legible, same visual language as the homepage. */
+.breadcrumbs{display:flex;align-items:center;flex-wrap:wrap;gap:10px;color:#85928e;font-size:11px;font-weight:700;margin-bottom:65px}
+.breadcrumbs a:hover{color:var(--red)}
+.breadcrumbs [aria-current]{color:#334b52}
+.detail-hero{background:#f7f6f2;padding:42px 0 85px;border-bottom:1px solid #e4e6e0}
+.detail-grid{display:grid;grid-template-columns:minmax(0,1.16fr) minmax(310px,.72fr);gap:90px;align-items:center}
+.detail-intro h1{font-size:clamp(40px,5vw,66px);line-height:1.26;letter-spacing:-.045em;margin:0 0 24px;max-width:800px}
+html[dir=rtl] .detail-intro h1{line-height:1.65;letter-spacing:0}
+.detail-intro>p{font-size:16px;line-height:2;color:#5e6e75;margin:0 0 34px;max-width:680px}
+.detail-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.detail-disclaimer{margin-top:27px;border-top:1px solid #e3e5df;padding-top:22px;font-size:12px;color:#738384;line-height:1.8}
+.detail-summary{background:var(--ink);color:white;border-radius:9px;padding:42px 40px;box-shadow:0 27px 50px #1b35351d}
+.detail-summary-head{display:flex;flex-direction:column;gap:12px}
+.detail-summary-head span,.detail-small-label{font-size:11px;color:#b1c6c7;font-weight:800}
+.detail-summary-head strong{font-size:26px;line-height:1.65;font-weight:850;color:#fff}
+.detail-summary-line{height:1px;background:#425960;margin:24px 0}
+.detail-summary ul{list-style:none;padding:0;margin:13px 0 0;display:flex;flex-direction:column;gap:12px}
+.detail-summary li{display:flex;gap:12px;align-items:flex-start;font-size:12px;line-height:1.8;color:#e0e9e7}
+.detail-summary li::before{content:"✓";display:inline-flex;align-items:center;justify-content:center;background:#46715c;color:#fff;border-radius:100%;width:20px;height:20px;flex:none;margin-top:1px;font-size:10px}
+.detail-body{background:#fff}
+.detail-body-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(260px,.55fr);gap:110px}
+.detail-body-grid article h2{font-size:32px;line-height:1.45;margin:0 0 25px;letter-spacing:-.025em}
+.detail-longcopy{white-space:pre-line;font-size:15px;line-height:2.2;color:#5a6d72;max-width:790px;margin:0}
+.detail-info{margin-top:35px;border-top:1px solid #e4e7e3;padding-top:25px}
+.detail-info span{font-size:11px;font-weight:850;color:var(--red)}
+.detail-info p{font-size:13px;line-height:2;color:#687b7d;margin:10px 0 0}
+.detail-aside{background:#f6f7f3;border:1px solid #e5e9e4;padding:32px;border-radius:8px;align-self:start}
+.detail-aside h3{font-size:19px;margin:0 0 14px;line-height:1.55}
+.detail-aside p{font-size:13px;line-height:2;color:#6b7c7e;margin:0 0 25px}
+.detail-related{background:#f7f7f3}
+.related-list{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.related-course{padding:22px 25px;background:#fff;border:1px solid #e2e5df;border-radius:6px;display:flex;gap:14px;justify-content:space-between;align-items:center;font-size:14px;font-weight:800;transition:box-shadow .2s}
+.related-course:hover{box-shadow:0 15px 25px #20383914}
+.related-course span{color:var(--red)}
+/* Admissions: three-step human enquiry, not an unverified registration promise. */
+.admissions-hero{background:linear-gradient(120deg,#f8f8f4 0%,#f2f3ed 100%);padding:85px 0 100px}
+.admissions-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,.85fr);gap:95px;align-items:start}
+.admissions-copy h1{font-size:clamp(38px,4.4vw,61px);line-height:1.4;letter-spacing:-.045em;margin:0 0 24px}
+html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
+.admissions-copy>p:not(.eyebrow){font-size:15px;line-height:2.1;color:#62737b;max-width:570px;margin:0}
+.admissions-benefits{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin:26px 0 33px}
+.admissions-benefits span{font-size:13px;font-weight:700;color:#405b5f}
+.admissions-photo{width:100%;height:220px;overflow:hidden;border-radius:9px;background:#e2e7e1}
+.admissions-photo img{width:100%;height:100%;object-fit:cover;object-position:center 65%}
+.admissions-formbox{background:#fff;border:1px solid #e4e9e3;box-shadow:0 23px 70px #203b3a13;border-radius:11px;padding:38px}
+.form-step{font-family:ui-sans-serif,system-ui,sans-serif;letter-spacing:.2em;font-size:11px;color:#9aaba7;font-weight:850}
+.admissions-formbox h2{font-size:27px;margin:14px 0 24px;line-height:1.5;letter-spacing:-.02em}
+.admissions-formbox form{display:flex;flex-direction:column}
+.admissions-formbox label{font-size:13px;color:#354c50;font-weight:800;margin:8px 0 9px}
+.admissions-formbox select{width:100%;appearance:auto;color:var(--ink);background:#f9faf8;border:1px solid #dce4de;border-radius:5px;min-height:55px;font-size:13px;padding:12px 16px;outline-offset:3px;margin-bottom:16px}
+.admissions-formbox select:focus{outline:2px solid #719b8b}
+.admissions-formbox select option{background:#fff}
+.admissions-formbox .form-submit{margin-top:16px;min-height:55px;width:100%;border:0;cursor:pointer;font-size:13px}
+.form-privacy{font-size:11px;color:#829090;line-height:1.8;margin:15px 0}
+.original-form{display:block;border-top:1px solid #e7eae5;margin-top:17px;padding-top:17px;font-size:11px;font-weight:700;color:#697d7e}
+.original-form:hover{color:var(--red)}
+.admission-steps{background:#fff}
+.admission-help{background:#f4f6f1;padding:70px 0}
+.admission-help-inner{display:flex;justify-content:space-between;align-items:center;gap:50px}
+.admission-help-inner h2{font-size:32px;line-height:1.5;margin:0 0 12px}
+.admission-help-inner p:not(.eyebrow){font-size:13px;color:#718081;max-width:550px;line-height:2;margin:0}
+.admission-help-actions{display:flex;flex-wrap:wrap;gap:10px}
+.admission-help-actions .button{min-height:51px;padding:14px 23px;font-size:13px}
+@media(max-width:1020px){
+ .detail-grid{gap:40px}.detail-body-grid{gap:55px}
+ .admissions-grid{gap:45px}
+}
+@media(max-width:760px){
+ .detail-hero{padding:27px 0 60px}.breadcrumbs{margin-bottom:35px;font-size:10px;gap:7px}
+ .detail-grid{display:flex;flex-direction:column;gap:35px;align-items:stretch}
+ .detail-intro h1{font-size:38px;line-height:1.5}
+ .detail-intro>p{font-size:14px;line-height:2}
+ .detail-actions{display:flex;flex-direction:column;align-items:stretch}
+ .detail-actions .button{width:100%;font-size:12px}
+ .detail-summary{padding:28px}
+ .detail-summary-head strong{font-size:22px}
+ .detail-body-grid{display:flex;flex-direction:column;gap:30px}
+ .detail-body-grid article h2{font-size:26px}
+ .detail-longcopy{font-size:13px}
+ .detail-related{padding:65px 0}.related-list{grid-template-columns:1fr}
+ .admissions-hero{padding:55px 0 67px}
+ .admissions-grid{display:flex;flex-direction:column;gap:33px}
+ .admissions-copy h1{font-size:35px}
+ .admissions-copy>p:not(.eyebrow){font-size:13px}
+ .admissions-photo{height:210px}
+ .admissions-formbox{width:100%;padding:26px 21px}
+ .admissions-formbox h2{font-size:23px}
+ .admission-help{padding:55px 0}
+ .admission-help-inner{display:block}
+ .admission-help-inner h2{font-size:26px}
+ .admission-help-actions{margin-top:25px}
+}
