@@ -1,11 +1,7 @@
 name: TOEFL House Live Conversion Collector End-to-End
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "cloudflare/pages-edge/live-collector-smoke.cjs"
-      - ".github/workflows/pages-live-collector-smoke.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read

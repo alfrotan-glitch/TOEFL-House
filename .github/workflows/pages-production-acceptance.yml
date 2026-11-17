@@ -3,7 +3,7 @@ name: TOEFL House Production Post-Deploy Acceptance
 on:
   push:
     branches:
-      - website-source-control-20261117
+      - main
     paths:
       - "cloudflare/pages-edge/production-acceptance.mjs"
       - ".github/workflows/pages-production-acceptance.yml"

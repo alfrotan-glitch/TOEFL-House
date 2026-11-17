@@ -1,12 +1,6 @@
 name: TOEFL House upgrade performance comparison
 
 on:
-  push:
-    branches:
-      - website-source-control-20261117
-    paths:
-      - "cloudflare/pages-edge/performance.mjs"
-      - ".github/workflows/pages-preview-performance.yml"
   workflow_dispatch:
 
 permissions:

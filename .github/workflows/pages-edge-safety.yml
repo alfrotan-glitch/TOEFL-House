@@ -3,7 +3,7 @@ name: TOEFL House Pages Edge Safety
 on:
   push:
     branches:
-      - website-source-control-20261117
+      - main
     paths:
       - "cloudflare/pages-edge/**"
       - ".github/workflows/pages-edge-safety.yml"

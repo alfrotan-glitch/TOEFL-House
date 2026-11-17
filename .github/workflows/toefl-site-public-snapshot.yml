@@ -1,13 +1,6 @@
 name: TOEFL House public Pages snapshot (read-only)
 
 on:
-  push:
-    branches:
-      - website-source-control-20261117
-    paths:
-      - "cloudflare/website-verification/pages-static-manifest.json"
-      - "cloudflare/website-verification/snapshot.mjs"
-      - ".github/workflows/toefl-site-public-snapshot.yml"
   workflow_dispatch:
 
 permissions:

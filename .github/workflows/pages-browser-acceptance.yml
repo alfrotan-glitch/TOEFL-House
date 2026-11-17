@@ -3,7 +3,7 @@ name: TOEFL House Browser Conversion Acceptance
 on:
   push:
     branches:
-      - website-source-control-20261117
+      - main
     paths:
       - "cloudflare/pages-edge/browser-acceptance.cjs"
       - ".github/workflows/pages-browser-acceptance.yml"

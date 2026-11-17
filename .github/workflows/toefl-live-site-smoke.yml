@@ -3,7 +3,7 @@ name: TOEFL House live-site smoke tests
 on:
   push:
     branches:
-      - website-source-control-20261117
+      - main
     paths:
       - "cloudflare/website-verification/**"
       - ".github/workflows/toefl-live-site-smoke.yml"

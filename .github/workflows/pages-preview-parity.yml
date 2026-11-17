@@ -1,12 +1,6 @@
 name: TOEFL House Cloudflare preview parity
 
 on:
-  push:
-    branches:
-      - website-source-control-20261117
-    paths:
-      - "cloudflare/pages-edge/preview-parity.mjs"
-      - ".github/workflows/pages-preview-parity.yml"
   workflow_dispatch:
 
 permissions:

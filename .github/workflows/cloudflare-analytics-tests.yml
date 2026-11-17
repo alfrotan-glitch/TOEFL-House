@@ -3,7 +3,7 @@ name: Cloudflare Analytics Verification
 on:
   push:
     branches:
-      - website-source-control-20261117
+      - main
     paths:
       - "cloudflare/analytics/**"
       - ".github/workflows/cloudflare-analytics-tests.yml"
