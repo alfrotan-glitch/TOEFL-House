@@ -1,0 +1,21 @@
+name: TOEFL House V2 Production Full Acceptance
+on:
+  push:
+    branches: [website-v2-redesign-20261118]
+    paths:
+      - 'cloudflare/site-v2/production-full-acceptance.mjs'
+      - '.github/workflows/toefl-v2-production.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify 39 sitemap pages, indexability, CMS, admin, legacy and V2 assets
+        run: node cloudflare/site-v2/production-full-acceptance.mjs
