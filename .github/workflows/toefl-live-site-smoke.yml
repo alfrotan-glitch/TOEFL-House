@@ -1,0 +1,29 @@
+name: TOEFL House live-site smoke tests
+
+on:
+  push:
+    branches:
+      - website-source-control-20261117
+    paths:
+      - "cloudflare/website-verification/**"
+      - ".github/workflows/toefl-live-site-smoke.yml"
+  pull_request:
+    paths:
+      - "cloudflare/website-verification/**"
+      - ".github/workflows/toefl-live-site-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify the live English, Dari, Pashto and admissions pages
+        run: node cloudflare/website-verification/smoke.mjs
