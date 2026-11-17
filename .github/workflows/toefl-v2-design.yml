@@ -1,0 +1,35 @@
+name: TOEFL House V2 Redesign Safety
+on:
+  push:
+    branches: [website-v2-redesign-20261118]
+    paths:
+      - "cloudflare/site-v2/**"
+      - ".github/workflows/toefl-v2-design.yml"
+  pull_request:
+    paths:
+      - "cloudflare/site-v2/**"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile exact Cloudflare Worker
+        run: node cloudflare/site-v2/build.mjs
+      - name: Check output syntax
+        run: node --check cloudflare/site-v2/dist/_worker.js
+      - name: Verify locale, accessible headings, assets, CMS fallback
+        run: node --test cloudflare/site-v2/tests/*.test.mjs
+      - name: Check bundle size
+        run: test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 120000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toefl-house-v2-compiled-worker
+          path: cloudflare/site-v2/dist/_worker.js
+          retention-days: 7
