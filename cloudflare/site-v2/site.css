@@ -356,3 +356,13 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .form-privacy{color:#52636a}
 .original-form{color:#52636a}
 .admission-help-inner p:not(.eyebrow){color:#52636a}
+
+
+/* Finish AA contrast for small explanatory copy in program, journey and FAQ panels. */
+.course-copy{color:#52636a}
+.journey-step p{color:#52636a}
+.tools-content p{color:#52636a}
+.faq-aside>p:not(.eyebrow){color:#52636a}
+.faq-list details p{color:#52636a}
+.final-inner .eyebrow{color:#ffffff}
+.detail-aside p{color:#52636a}
