@@ -24,7 +24,7 @@ try{
       h1:document.querySelectorAll("h1").length,
       heading:document.querySelector("h1")?.textContent.trim().slice(0,70),
       highlights:document.querySelectorAll(".detail-summary li").length,
-      css:document.querySelector('link[href="/__th/v2/site.css"]')!==null,
+      css:document.querySelector('link[href^="/__th/v2/site.css?v="]')!==null,
       width:doc.scrollWidth,viewport:innerWidth,
       seo:document.querySelector('script[type="application/ld+json"]')?.textContent?.includes('"Course"'),
       duration:document.querySelector(".detail-summary-head strong")?.textContent.trim(),
@@ -44,7 +44,7 @@ try{
   const data=await page.evaluate(()=>({lang:document.documentElement.lang,dir:document.documentElement.dir,h1:document.querySelectorAll("h1").length,
     programOptions:document.querySelectorAll("#v2-program option").length,
     form:!!document.querySelector("#v2-enquiry-form"),hasEmail:!!document.querySelector('input[type="email"]'),
-    width:document.documentElement.scrollWidth,viewport:innerWidth,css:!!document.querySelector('link[href="/__th/v2/site.css"]'),
+    width:document.documentElement.scrollWidth,viewport:innerWidth,css:!!document.querySelector('link[href^="/__th/v2/site.css?v="]'),
     canonical:document.querySelector('link[rel="canonical"]')?.href}));
   if(response.status()!==200||!data.form||data.hasEmail||data.h1!==1||!data.css||data.programOptions<7||data.width>data.viewport+2)failures.push(route+" admissions UI regression");
   await page.screenshot({path:"toefl-v2-detail-evidence/"+l.key+"-admissions-mobile.png",fullPage:true});
