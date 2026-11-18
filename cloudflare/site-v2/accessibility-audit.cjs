@@ -2,7 +2,7 @@
 const assert=require("node:assert/strict");
 const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
 const axe=require("/tmp/toefl-accessibility/node_modules/axe-core");
-const base="https://the-toefl-house.pages.dev";
+const base=process.env.TOEFL_QA_BASE||"https://the-toefl-house.pages.dev";
 const pages=["/","/fa/","/ps/","/courses/toefl-preparation/","/fa/courses/toefl-preparation/","/ps/courses/toefl-preparation/","/admissions/","/fa/admissions/","/ps/admissions/"];
 let browser;
 const results=[],failures=[];
@@ -18,7 +18,7 @@ try{
    runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21a","wcag21aa"]},
    rules:{"region":{enabled:false}}
   }));
-  const issues=output.violations.map(v=>({id:v.id,impact:v.impact,description:v.description,nodes:v.nodes.slice(0,4).map(n=>({target:n.target,summary:n.failureSummary?.slice(0,330)}))}));
+  const issues=output.violations.map(v=>({id:v.id,impact:v.impact,description:v.description,nodes:v.nodes.slice(0,100).map(n=>({target:n.target,summary:n.failureSummary?.slice(0,330)}))}));
   const blocking=issues.filter(x=>["critical","serious"].includes(x.impact));
   results.push({path,passed:output.passes.length,violations:issues});
   if(blocking.length)failures.push({path,blocking});
