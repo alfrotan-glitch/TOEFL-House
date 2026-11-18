@@ -53,4 +53,4 @@ main=main.replace(undo,'if(!["/tools","/tools/","/fa/tools","/fa/tools/","/ps/to
 if(!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("const upstreamPath="))throw Error("Build missing new routes");
 await mkdir(join(here,"dist"),{recursive:true});
 await writeFile(join(here,"dist/_worker.js"),main);
-console.log(JSON.stringify({output:"dist/_worker.js",bytes:Buffer.byteLength(main),cssBytes:Buffer.byteLength(css),clientBytes:Buffer.byteLength(js),legacyPreserved:true}));
+console.log(JSON.stringify({output:"dist/_worker.js",bytes:Buffer.byteLength(main),assetRevision,cssBytes:Buffer.byteLength(css),clientBytes:Buffer.byteLength(js),legacyPreserved:true}));
