@@ -11,3 +11,10 @@ const patterns=[...new Set(
 )].sort();
 console.log(JSON.stringify({assetStatus:r.status,bytes:Buffer.byteLength(raw),literalRoutes:interesting,
  routeFragments:patterns.slice(0,100),routeCount:interesting.length},null,2));
+
+const cms=await fetch("https://the-toefl-house.pages.dev/api/content",{signal:AbortSignal.timeout(15000)});
+if(!cms.ok)throw Error("Public content unavailable");
+const c=await cms.json();
+const keys=x=>x&&typeof x==="object"?Object.keys(x):[];
+const shape={topLevel:keys(c),content:keys(c.content),data:keys(c.data),locales:keys(c.locales),ps:keys(c.ps),pashto:keys(c.pashto),contentLocales:keys(c.content?.locales),cmsStatus:c.cmsStatus,revisionType:typeof c.revision};
+console.log("CMS_SHAPE="+JSON.stringify(shape));
