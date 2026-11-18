@@ -16,8 +16,8 @@ try{
    const r=await page.goto(base+path,{waitUntil:"networkidle",timeout:30000});
    const m=await page.evaluate(()=>({lang:document.documentElement.lang,dir:document.documentElement.dir,title:document.title,
      h1:document.querySelectorAll("h1").length,scroll:document.documentElement.scrollWidth,viewport:innerWidth,
-     css:!!document.querySelector('link[href="/__th/v2/site.css"]'),
-     js:!!document.querySelector('script[src="/__th/v2/site.js"]'),
+     css:!!document.querySelector('link[href^="/__th/v2/site.css?v="]'),
+     js:!!document.querySelector('script[src^="/__th/v2/site.js?v="]'),
      logo:!!document.querySelector('.brand img'),
      cards:document.querySelectorAll(".course-card").length,
      selected:document.querySelector("#v2-program")?.value||null,

@@ -56,6 +56,9 @@ test("the same-origin event script avoids PII and supports click types",async()=
     const s=await r.text();
     assert.equal(r.status,200);
     assert.match(s,/sendBeacon/);
+    assert.match(s,/querySelector\(\"#v2-program\"\)/);
+    assert.match(s,/fromForm=selected&&selected.value/);
+    assert.match(s,/fromQuery=new URLSearchParams/);
     assert.match(s,/\"whatsapp\"/);
     assert.match(s,/\"phone\"/);
     assert.match(s,/\"admissions\"/);

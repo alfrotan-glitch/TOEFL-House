@@ -1,0 +1,24 @@
+name: TOEFL House V2 Admissions and Guides Preview Acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: 'Full Cloudflare Preview URL of candidate to verify (never production)'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-final-qa --no-save playwright-core@1.56.0 --silent
+      - name: Verify complete student journey and safe WhatsApp message without contacting reception
+        env:
+          TOEFL_QA_BASE: ${{ inputs.preview_url }}
+        run: node cloudflare/site-v2/admissions-campaign-preview.cjs

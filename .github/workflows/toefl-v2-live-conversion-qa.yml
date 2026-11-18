@@ -1,0 +1,17 @@
+name: TOEFL House V2 Production Anonymous Conversion Acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-live-conversion --no-save playwright-core@1.56.0 --silent
+      - name: Verify anonymous course-attributed events, intercept all analytics and WhatsApp requests
+        run: node cloudflare/site-v2/live-conversion-qa.cjs

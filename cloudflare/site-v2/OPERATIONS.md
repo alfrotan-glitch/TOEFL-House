@@ -46,3 +46,19 @@ Authenticated CMS editor draft/publish/rollback, teacher schedules, real admissi
 - Independent staff and admissions acceptance after change approval.
 - Remove immutable upstream dependency only after recovering the full legacy Functions/auth implementation and migrating it safely.
 - Validate real user mobile Web Vitals and cohort enrollment conversions, rather than inferring success from synthetic visits.
+
+## November 18 conversion and CMS-quality improvements
+
+- Campus address/title/teaching hours are sourced from the **currently published existing CMS** in the chosen language, with safe fallbacks.
+- `Learning guides` are now discoverable from the header and footer; they are still served by the pinned legacy site.
+- Public V2 CSS and JS use a combined SHA-256 content fingerprint `?v=…` in all HTML templates. Immutable browser caching no longer leaves returning visitors with stale styling after a new release.
+- Only sanitized, anonymous `utm_source` and `utm_campaign` labels are carried through same-tab navigation and optionally shown in the **student-approved WhatsApp draft**; do not treat a generated WhatsApp URL as a delivered message or an enrollment.
+- A real synthetic student flow is checked on a read-only preview: course page → selected TOEFL program → online/afternoon enquiry → intercepted WhatsApp message, in all three languages. **No message is sent.**
+- The Lighthouse lab baseline (18 Nov 2026, mobile): English homepage 100 performance; Dari homepage 99; Dari admissions 100; these are synthetic scores, not real-user country/connection metrics. Source: `cloudflare/site-v2/lighthouse-baseline.mjs`. Repeat weekly through GitHub Actions.
+- Never use a fixed preview as permanent source of truth. Each release must compile current `main`, deploy to a unique Preview, and test the exact same candidate before production promotion.
+
+### Remaining honest acceptance limits
+
+- No authenticated end-to-end CMS draft/save/publish/restore tests have been done using staff accounts.
+- No evidence of real learner conversion, actual WhatsApp send/response, Google ranking improvement or signed staff approval is implied by public-site smoke tests.
+- The current public Worker still transparently proxies the old pinned CMS/auth infrastructure. A full standalone extraction/migration must not proceed without a clean, independently tested backup and role-based acceptance.
