@@ -1,10 +1,5 @@
 name: TOEFL House Public CMS Recovery Snapshot
 on:
-  push:
-    branches: [cms-readiness-and-recovery-20261118]
-    paths:
-      - 'cloudflare/cms-readiness/public-content-snapshot.mjs'
-      - '.github/workflows/toefl-cms-public-snapshot.yml'
   workflow_dispatch:
 permissions:
   contents: read
