@@ -10,11 +10,11 @@ const main={
 };
 const ps={programs:allIds.map((id,i)=>({id,title:"پروګرام "+i,summary:"زده کړې",duration:id==="toefl-preparation"?"څلور میاشتې":"دوه میاشتې"})),statistics:[{value:"۶۰۰۰+",label:"فارغان"},{value:"۵۰۰+",label:"شاګردان"},{value:"۱۰۰+",label:"منل شوي"}],faq:{items:[{q:"آیا سویې معلومول وړیا دي؟",a:"هو"},{q:"آیا ایمیل پکار دی؟",a:"نه"},{q:"آنلاین زده‌کړه",a:"هو"}]}};
 const reads=[];
-function env(){
+function env(testMain=main,testPs=ps){
  return{CMS_DB:{prepare(sql){
   assert.match(sql,/SELECT body,revision/);
   reads.push(sql);
-  return{async first(){return {body:JSON.stringify(sql.includes("pashto_content")?ps:main),revision:40}}};
+  return{async first(){return {body:JSON.stringify(sql.includes("pashto_content")?testPs:testMain),revision:40}}};
  }}};
 }
 for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","ps-AF","rtl"]]){
@@ -136,4 +136,36 @@ test("Admissions language switcher retains admissions context",async()=>{
  assert.match(html,/href="\/fa\/admissions\/"/);
  assert.match(html,/href="\/ps\/admissions\/"/);
  assert.match(html,/href="\/ps\/#programs"/);
+});
+
+test("Public editor changes to address and hours appear in V2 footer without source rebuild",async()=>{
+ const custom=structuredClone(main);
+ custom.locales.fa.contact={title:"آدرس جدید کورس",address:"CMS_DYNAMIC_ADDRESS_QA",operatingHours:"CMS_DYNAMIC_HOURS_QA"};
+ const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env(custom));
+ const html=await r.text();
+ assert.match(html,/CMS_DYNAMIC_ADDRESS_QA/);
+ assert.match(html,/CMS_DYNAMIC_HOURS_QA/);
+ const d=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/courses/toefl-preparation/"),env(custom));
+ const page=await d.text();
+ assert.match(page,/CMS_DYNAMIC_ADDRESS_QA/);
+ assert.match(page,/CMS_DYNAMIC_HOURS_QA/);
+});
+test("Both marketing assets use fingerprinted URLs so old CSS and JS cannot persist after release",async()=>{
+ const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/"),env());
+ const html=await r.text();
+ const css=html.match(/\/__th\/v2\/site\.css\?v=([a-f0-9]{12})/);
+ const js=html.match(/\/__th\/v2\/site\.js\?v=([a-f0-9]{12})/);
+ assert.ok(css,"Missing content-hash CSS");
+ assert.ok(js,"Missing content-hash JS");
+ assert.equal(css[1],js[1]);
+ const file=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css?v="+css[1]),env());
+ assert.equal(file.status,200);
+ assert.match(file.headers.get("Cache-Control")||"",/immutable/);
+});
+test("Learning guides are reachable from main header and footer in all languages",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+prefix),env());
+  const html=await r.text();
+  assert.ok(html.includes('href="'+prefix+'guides/"'),"Missing guides: "+prefix);
+ }
 });
