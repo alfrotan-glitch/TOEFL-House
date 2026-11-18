@@ -1,0 +1,22 @@
+name: TOEFL House CMS QA Pre-Merge
+on:
+  push:
+    branches: [cms-readiness-and-recovery-20261118]
+    paths:
+      - 'cloudflare/cms-readiness/public-auth-readonly.mjs'
+      - '.github/workflows/toefl-cms-qa-premerge.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node cloudflare/cms-readiness/public-auth-readonly.mjs
+      - run: node cloudflare/cms-readiness/legacy-dependency.mjs
+      - run: node cloudflare/cms-readiness/public-content-snapshot.mjs
