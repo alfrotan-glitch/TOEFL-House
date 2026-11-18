@@ -14,7 +14,7 @@ const V2_COURSE_IDS=["general-english","academic-english","toefl-preparation","s
 const V2_COPY={
  en:{
   lang:"en",dir:"ltr",name:"THE TOEFL HOUSE",localName:"خانه موفقیت",tag:"ENGLISH EDUCATION · KABUL",
-  navPrograms:"Programs",navWhy:"Why TOEFL House",navOnline:"Online classes",navFaq:"FAQ",navContact:"Contact",navMenu:"Menu",
+  navPrograms:"Programs",navGuides:"Learning guides",navWhy:"Why TOEFL House",navOnline:"Online classes",navFaq:"FAQ",navContact:"Contact",navMenu:"Menu",
   navApply:"Free assessment",badge:"Admissions are open · Placement assessment is free",
   lead:"Your English journey",leadAccent:"starts here.",subtitle:"From your first English words to fluent conversations, academic English and TOEFL preparation. Find the right level with a free placement assessment.",
   heroCta:"Take a free placement assessment",heroSecondary:"Explore our programs",heroBottom:"In-person classes in Kabul · Private online lessons by arrangement",
@@ -33,7 +33,7 @@ const V2_COPY={
  },
  fa:{
   lang:"fa-AF",dir:"rtl",name:"THE TOEFL HOUSE",localName:"خانه موفقیت",tag:"آموزش زبان انگلیسی · کابل",
-  navPrograms:"برنامه‌ها",navWhy:"چرا خانه موفقیت؟",navOnline:"صنف‌های آنلاین",navFaq:"پرسش‌ها",navContact:"تماس",navMenu:"فهرست",
+  navPrograms:"برنامه‌ها",navGuides:"رهنماهای آموزشی",navWhy:"چرا خانه موفقیت؟",navOnline:"صنف‌های آنلاین",navFaq:"پرسش‌ها",navContact:"تماس",navMenu:"فهرست",
   navApply:"تعیین سطح رایگان",badge:"پذیرش جریان دارد · تعیین سطح رایگان",
   lead:"راه یادگیری انگلیسی شما",leadAccent:"از همین‌جا آغاز می‌شود.",subtitle:"از اولین کلمات انگلیسی تا مکالمهٔ روان، انگلیسی اکادمیک و آمادگی تافل. با تعیین سطح رایگان، صنف مناسب خود را پیدا کنید.",
   heroCta:"درخواست تعیین سطح رایگان",heroSecondary:"دیدن برنامه‌های آموزشی",heroBottom:"صنف‌های حضوری در کابل · آموزش آنلاین انفرادی با هماهنگی",
@@ -52,7 +52,7 @@ const V2_COPY={
  },
  ps:{
   lang:"ps-AF",dir:"rtl",name:"THE TOEFL HOUSE",localName:"خانه موفقیت",tag:"د انګلیسي ژبې زده‌کړه · کابل",
-  navPrograms:"پروګرامونه",navWhy:"ولې خانه موفقیت؟",navOnline:"آنلاین ټولګي",navFaq:"پوښتنې",navContact:"اړیکه",navMenu:"لړلیک",
+  navPrograms:"پروګرامونه",navGuides:"د زده‌کړې لارښودونه",navWhy:"ولې خانه موفقیت؟",navOnline:"آنلاین ټولګي",navFaq:"پوښتنې",navContact:"اړیکه",navMenu:"لړلیک",
   navApply:"وړیا سویه معلومول",badge:"نوم‌لیکنه روانه ده · د سویې معلومول وړیا دي",
   lead:"د انګلیسي زده‌کړې سفر مو",leadAccent:"همدلته پیلېږي.",subtitle:"له لومړنیو کلمو څخه تر روانو خبرو، اکاډمیکې انګلیسي او TOEFL چمتووالي پورې. د وړیا سویې معلومولو له لارې خپل مناسب ټولګی وټاکئ.",
   heroCta:"د وړیا سویې معلومولو غوښتنه",heroSecondary:"زموږ پروګرامونه وګورئ",heroBottom:"په کابل کې حضوري ټولګي · د همغږۍ له مخې انفرادي آنلاین درسونه",
@@ -92,7 +92,7 @@ function v2Header(c,locale,suffix=""){
  const prefix=v2Prefix(locale);
  const l=v2Languages(locale,suffix);
  const anchorBase=suffix?v2Prefix(locale):"";
- const nav=[[anchorBase+"#programs",c.navPrograms],[anchorBase+"#why-us",c.navWhy],[anchorBase+"#online",c.navOnline],[anchorBase+"#faq",c.navFaq],[anchorBase+"#contact",c.navContact]];
+ const nav=[[anchorBase+"#programs",c.navPrograms],[prefix+"guides/",c.navGuides],[anchorBase+"#why-us",c.navWhy],[anchorBase+"#online",c.navOnline],[anchorBase+"#faq",c.navFaq],[anchorBase+"#contact",c.navContact]];
  const links=nav.map(([href,label])=>'<a href="'+href+'">'+v2T(label)+'</a>').join("");
  return '<a class="skip" href="#main">'+(locale==="en"?"Skip to content":locale==="fa"?"رفتن به محتوا":"منځپانګې ته لاړ شئ")+'</a>'
   +'<div class="topline"><div class="shell topline-inner"><span class="top-dots"></span><span>'+v2T(c.badge)+'</span><a class="toplink" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+' <span aria-hidden="true">↗</span></a></div></div>'
@@ -142,10 +142,15 @@ function v2Faq(c,content,locale){
  const entries=list.length?list.map(x=>[x.q||x.question,x.a||x.answer]):c.fallbackFaq;
  return '<section class="faq-section section" id="faq"><div class="shell faq-layout"><div class="faq-aside"><p class="eyebrow">'+v2T(c.faqLabel)+'</p><h2>'+v2T(c.faqTitle)+'</h2><p>'+v2T(c.faqLead)+'</p><a class="text-link" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.faqMore)+' <span aria-hidden="true">↗</span></a></div><div class="faq-list">'+entries.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2Short(q,160)+'<span class="faq-plus" aria-hidden="true"></span></summary><p>'+v2T(a,680)+'</p></details>').join("")+'</div></div></section>';
 }
-function v2Footer(c,locale){
+function v2Footer(c,locale,content){
  const prefix=v2Prefix(locale);
+ const contact=locale==="ps"?content?.pashto?.contact:content?.main?.locales?.[locale]?.contact;
+ const published=(value,fallback,max)=>typeof value==="string"&&value.trim()&&value.length<=max?value:fallback;
+ const visitTitle=published(contact?.title,c.visitTitle,180);
+ const visitAddress=published(contact?.address,c.visitText,350);
+ const visitHours=published(contact?.operatingHours||contact?.hours,c.hours,250);
  const maps="https://www.google.com/maps/search/?api=1&query=The%20TOEFL%20House%20Dasht-e-Barchi%20Kabul";
- return '<footer class="footer" id="contact"><div class="shell"><div class="footer-main"><div class="footer-brand"><span class="eyebrow">'+v2T(c.visitLabel)+'</span><h2>'+v2T(c.visitTitle)+'</h2><p>'+v2T(c.visitText)+'</p><span class="footer-hours">'+v2T(c.hours)+'</span></div><div class="footer-links"><a href="'+prefix+'#programs">'+v2T(c.footPrograms)+'</a><a href="'+prefix+'admissions/">'+v2T(c.footJoin)+'</a><a href="'+prefix+'tools/">'+v2T(c.footTools)+'</a><a href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+'</a><a href="tel:+93745651844">'+v2T(c.phone)+'</a><a href="'+maps+'" target="_blank" rel="noopener noreferrer">'+v2T(c.map)+' ↗</a></div></div><div class="footer-bottom"><span>© '+new Date().getUTCFullYear()+' THE TOEFL HOUSE · '+v2T(c.footerRights)+'</span><span>'+v2T(c.footerNote)+'</span></div></div></footer>';
+ return '<footer class="footer" id="contact"><div class="shell"><div class="footer-main"><div class="footer-brand"><span class="eyebrow">'+v2T(c.visitLabel)+'</span><h2>'+v2T(visitTitle)+'</h2><p>'+v2T(visitAddress)+'</p><span class="footer-hours">'+v2T(visitHours)+'</span></div><div class="footer-links"><a href="'+prefix+'#programs">'+v2T(c.footPrograms)+'</a><a href="'+prefix+'guides/">'+v2T(c.navGuides)+'</a><a href="'+prefix+'admissions/">'+v2T(c.footJoin)+'</a><a href="'+prefix+'tools/">'+v2T(c.footTools)+'</a><a href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+'</a><a href="tel:+93745651844">'+v2T(c.phone)+'</a><a href="'+maps+'" target="_blank" rel="noopener noreferrer">'+v2T(c.map)+' ↗</a></div></div><div class="footer-bottom"><span>© '+new Date().getUTCFullYear()+' THE TOEFL HOUSE · '+v2T(c.footerRights)+'</span><span>'+v2T(c.footerNote)+'</span></div></div></footer>';
 }
 function v2Page(locale,content){
  const c=V2_COPY[locale],prefix=v2Prefix(locale),title=locale==="en"?"The TOEFL House | English Classes & TOEFL Preparation in Kabul":locale==="fa"?"خانه موفقیت | کورس زبان انگلیسی و آمادگی تافل در کابل":"The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه";
@@ -161,7 +166,7 @@ function v2Page(locale,content){
  +'<section class="journey-section section" id="why-us"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.whyLabel)+'</p><h2>'+v2T(c.whyTitle)+'</h2></div><p class="section-intro">'+v2T(c.whyLead)+'</p></div><div class="journey-grid">'+c.steps.map(([n,h,p])=>'<article class="journey-step"><span class="step-no">'+v2T(n)+'</span><div class="step-line"></div><h3>'+v2T(h)+'</h3><p>'+v2T(p)+'</p></article>').join("")+'</div><div class="tools-strip"><div class="tools-glyph" aria-hidden="true">✳</div><div class="tools-content"><span class="eyebrow">'+v2T(c.toolsLabel)+'</span><h3>'+v2T(c.toolsTitle)+'</h3><p>'+v2T(c.toolsText)+'</p></div><a class="text-link" href="'+prefix+'tools/">'+v2T(c.toolsCta)+' <span aria-hidden="true">↗</span></a></div></div></section>'
  +v2Faq(c,content,locale)
  +'<section class="final-cta"><div class="shell final-inner"><div><p class="eyebrow">'+v2T(c.finalEyebrow)+'</p><h2>'+v2T(c.finalTitle)+'</h2><p>'+v2T(c.finalText)+'</p></div><a class="button button-white" href="'+prefix+'admissions/">'+v2T(c.finalCta)+' <span aria-hidden="true">↗</span></a></div></section>'
- +'</main>'+v2Footer(c,locale)+'</body></html>';
+ +'</main>'+v2Footer(c,locale,content)+'</body></html>';
 }
 async function v2Home(request,env,locale){
  if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{"Allow":"GET, HEAD"}});
