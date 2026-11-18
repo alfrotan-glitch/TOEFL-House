@@ -6,11 +6,13 @@ on:
     paths:
       - 'cloudflare/site-v2/**'
       - 'cloudflare/pages-edge/**'
+      - 'cloudflare/cms-readiness/**'
       - '.github/workflows/toefl-v2-production-quality.yml'
   pull_request:
     paths:
       - 'cloudflare/site-v2/**'
       - 'cloudflare/pages-edge/**'
+      - 'cloudflare/cms-readiness/**'
       - '.github/workflows/toefl-v2-production-quality.yml'
   schedule:
     - cron: '17 3 * * *'
@@ -68,6 +70,10 @@ jobs:
         run: |
           node cloudflare/site-v2/production-full-acceptance.mjs
           node cloudflare/site-v2/final-production-navigation.mjs
+      - name: Check anonymous auth, restore/publish refusal and immutable legacy dependencies
+        run: |
+          node cloudflare/cms-readiness/public-auth-readonly.mjs
+          node cloudflare/cms-readiness/legacy-dependency.mjs
 
   accessibility:
     name: WCAG A and AA audit
@@ -84,3 +90,23 @@ jobs:
         run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
       - name: Audit home, TOEFL and admissions in three languages
         run: node cloudflare/site-v2/accessibility-audit.cjs
+
+  public-cms-recovery:
+    name: Archive only public CMS content (no credentials)
+    needs: production-site
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate published course catalog and create checked content snapshot
+        run: node cloudflare/cms-readiness/public-content-snapshot.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toefl-public-cms-recovery-snapshot
+          path: toefl-public-content-recovery/
+          retention-days: 30
+          if-no-files-found: error

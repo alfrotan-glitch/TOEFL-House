@@ -1,0 +1,16 @@
+name: TOEFL House CMS Endpoint Inventory (No Auth)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: List route strings in published JS bundle, without making authenticated calls
+        run: node cloudflare/cms-readiness/endpoint-inventory.mjs

@@ -1,0 +1,23 @@
+name: TOEFL House Public CMS Recovery Snapshot
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Capture published public content only, check shape and recovery digest
+        run: node cloudflare/cms-readiness/public-content-snapshot.mjs
+      - name: Retain a recoverable public-content snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: toefl-house-public-cms-recovery
+          path: toefl-public-content-recovery/
+          retention-days: 30
+          if-no-files-found: error
