@@ -1,0 +1,86 @@
+name: TOEFL House V2 — Production Quality Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/site-v2/**'
+      - 'cloudflare/pages-edge/**'
+      - '.github/workflows/toefl-v2-production-quality.yml'
+  pull_request:
+    paths:
+      - 'cloudflare/site-v2/**'
+      - 'cloudflare/pages-edge/**'
+      - '.github/workflows/toefl-v2-production-quality.yml'
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toefl-v2-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-unit:
+    name: Compile & test production website
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile versioned Pages Worker
+        run: node cloudflare/site-v2/build.mjs
+      - name: Check JavaScript syntax
+        run: |
+          node --check cloudflare/site-v2/dist/_worker.js
+          node --check cloudflare/site-v2/site.js
+      - name: Verify CMS, multilingual pages, conversion tracking and fallback
+        run: |
+          node --test cloudflare/site-v2/tests/*.test.mjs
+          node --test cloudflare/pages-edge/tests/*.test.mjs
+          node --test cloudflare/analytics/tests/*.test.mjs
+      - name: Enforce Cloudflare bundle size budget
+        run: |
+          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 120000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toefl-v2-release-worker
+          path: cloudflare/site-v2/dist/_worker.js
+          retention-days: 14
+
+  production-site:
+    name: Verify live content and security
+    needs: build-and-unit
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check all published URLs, indexing, CMS and preserved tools
+        run: |
+          node cloudflare/site-v2/production-full-acceptance.mjs
+          node cloudflare/site-v2/final-production-navigation.mjs
+
+  accessibility:
+    name: WCAG A and AA audit
+    needs: build-and-unit
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Set up isolated browser
+        run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Audit home, TOEFL and admissions in three languages
+        run: node cloudflare/site-v2/accessibility-audit.cjs
