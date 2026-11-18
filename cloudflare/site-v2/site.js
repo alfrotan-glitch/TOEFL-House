@@ -1,6 +1,19 @@
 /* TOEFL House V2: tiny progressive enhancement; no cookies and no PII. */
 (function(){
 "use strict";
+// Preserve anonymous campaign attribution across same-tab course navigation,
+// including previews where production analytics are intentionally disabled.
+try{
+ var utm=new URLSearchParams(location.search);
+ var utmSource=utm.get("utm_source")||utm.get("s");
+ var utmCampaign=utm.get("utm_campaign")||utm.get("c");
+ function safeUtm(x,max){return typeof x==="string"&&x.length<=max&&/^[a-z0-9][a-z0-9_-]*$/.test(x)?x:"";}
+ var safeSource=safeUtm(utmSource,32);
+ var safeCampaign=safeUtm(utmCampaign,48);
+ if(safeSource||safeCampaign){
+  sessionStorage.setItem("th_campaign",JSON.stringify({source:safeSource||"website",campaign:safeCampaign||"site_cta"}));
+ }
+}catch(_){}
 var known=location.hash?decodeURIComponent(location.hash.slice(1)):"";
 var legacy=/(?:^|\/)(?:fa|ps)?\/?tools\/?$/.test(location.pathname);
 if(known&&!legacy&&!document.getElementById(known)){
