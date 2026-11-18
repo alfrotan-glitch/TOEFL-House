@@ -1,8 +1,7 @@
 name: TOEFL House V2 Lighthouse Mobile Baseline
 on:
-  push:
-    branches: [website-v2-performance-admissions-20261118]
-    paths: ['cloudflare/site-v2/lighthouse-baseline.mjs','.github/workflows/toefl-v2-lighthouse-baseline.yml']
+  schedule:
+    - cron: '30 3 * * 1'
   workflow_dispatch:
 permissions:
   contents: read
