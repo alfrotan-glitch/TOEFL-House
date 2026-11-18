@@ -1,0 +1,27 @@
+name: TOEFL House V2 Lighthouse Mobile Baseline
+on:
+  push:
+    branches: [website-v2-performance-admissions-20261118]
+    paths: ['cloudflare/site-v2/lighthouse-baseline.mjs','.github/workflows/toefl-v2-lighthouse-baseline.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-lighthouse --no-save lighthouse@13.6.0 chrome-launcher@1.2.0 --silent
+      - name: Measure mobile page experience on public website
+        run: node cloudflare/site-v2/lighthouse-baseline.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: toefl-house-lighthouse-mobile-baseline
+          path: lighthouse-results/*.json
+          retention-days: 7
+          if-no-files-found: ignore
