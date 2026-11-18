@@ -1,0 +1,22 @@
+name: TOEFL House V2 Candidate Preview Acceptance
+on:
+  push:
+    branches: [website-v2-quality-20261118]
+    paths:
+      - 'cloudflare/site-v2/quality-preview.cjs'
+      - '.github/workflows/toefl-v2-quality-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-v2-quality-browser --no-save playwright-core@1.56.0 --silent
+      - name: Verify 27 pages and responsive images in the isolated Cloudflare preview
+        run: node cloudflare/site-v2/quality-preview.cjs
