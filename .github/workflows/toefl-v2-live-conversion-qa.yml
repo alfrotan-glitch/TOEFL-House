@@ -1,10 +1,5 @@
 name: TOEFL House V2 Production Anonymous Conversion Acceptance
 on:
-  push:
-    branches: [website-v2-performance-admissions-20261118]
-    paths:
-      - 'cloudflare/site-v2/live-conversion-qa.cjs'
-      - '.github/workflows/toefl-v2-live-conversion-qa.yml'
   workflow_dispatch:
 permissions:
   contents: read
