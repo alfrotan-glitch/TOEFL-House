@@ -1,5 +1,5 @@
 import lighthouse from "/tmp/toefl-lighthouse/node_modules/lighthouse/core/index.js";
-import chromeLauncher from "/tmp/toefl-lighthouse/node_modules/chrome-launcher/dist/chrome-launcher.js";
+import {launch as launchChrome} from "/tmp/toefl-lighthouse/node_modules/chrome-launcher/dist/chrome-launcher.js";
 import {mkdir,writeFile} from "node:fs/promises";
 const targets=[
  ["home","https://the-toefl-house.pages.dev/"],
@@ -9,7 +9,7 @@ const targets=[
 const outputs=[];
 await mkdir("lighthouse-results",{recursive:true});
 for(const [label,url] of targets){
- const chrome=await chromeLauncher.launch({chromePath:"/usr/bin/google-chrome",chromeFlags:["--headless","--no-sandbox","--disable-dev-shm-usage","--disable-gpu"]});
+ const chrome=await launchChrome({chromePath:"/usr/bin/google-chrome",chromeFlags:["--headless","--no-sandbox","--disable-dev-shm-usage","--disable-gpu"]});
  try{
   const r=await lighthouse(url,{port:chrome.port,output:"json",logLevel:"error",onlyCategories:["performance","accessibility","best-practices","seo"],formFactor:"mobile",screenEmulation:{mobile:true,width:390,height:844,deviceScaleFactor:1,disabled:false},throttlingMethod:"simulate"});
   const a=r.lhr.audits,cat=r.lhr.categories;
