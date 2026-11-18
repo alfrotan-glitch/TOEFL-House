@@ -8,7 +8,7 @@ let browser;
 const results=[],failures=[];
 try{
  browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
- const context=await browser.newContext({viewport:{width:390,height:844}});
+ const context=await browser.newContext({viewport:{width:390,height:844},bypassCSP:true});
  for(const path of pages){
   const page=await context.newPage();
   const response=await page.goto(base+path,{waitUntil:"networkidle",timeout:30000});
