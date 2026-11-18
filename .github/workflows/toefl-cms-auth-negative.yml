@@ -1,0 +1,21 @@
+name: TOEFL House CMS Security (Anonymous / Non-mutating)
+on:
+  push:
+    branches: [cms-readiness-and-recovery-20261118]
+    paths:
+      - 'cloudflare/cms-readiness/public-auth-guards.mjs'
+      - '.github/workflows/toefl-cms-auth-negative.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  auth-negative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm anonymous requests cannot read editor history or publish content
+        run: node cloudflare/cms-readiness/public-auth-guards.mjs
