@@ -337,3 +337,32 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
  .admission-help-inner h2{font-size:26px}
  .admission-help-actions{margin-top:25px}
 }
+
+
+/* WCAG 2.1 AA refinement: editorial secondary text must be legible at small sizes. */
+.stat-head p{color:#53656b}
+.stat-item span{color:#53656b}
+.section-intro{color:#52636a}
+.course-top{color:#54676a}
+.course-featured .course-top{color:#d3e0df}
+.course-bottom small{color:#52636a}
+.course-featured .course-bottom small{color:#c2d3d1}
+.breadcrumbs{color:#52636a}
+.detail-disclaimer{color:#52636a}
+.detail-info p{color:#52636a}
+.detail-summary-head span,.detail-small-label{color:#d0e1e0}
+.final-inner p:not(.eyebrow){color:#ffffff}
+.form-step{color:#52636a}
+.form-privacy{color:#52636a}
+.original-form{color:#52636a}
+.admission-help-inner p:not(.eyebrow){color:#52636a}
+
+
+/* Finish AA contrast for small explanatory copy in program, journey and FAQ panels. */
+.course-copy{color:#52636a}
+.journey-step p{color:#52636a}
+.tools-content p{color:#52636a}
+.faq-aside>p:not(.eyebrow){color:#52636a}
+.faq-list details p{color:#52636a}
+.final-inner .eyebrow{color:#ffffff}
+.detail-aside p{color:#52636a}
