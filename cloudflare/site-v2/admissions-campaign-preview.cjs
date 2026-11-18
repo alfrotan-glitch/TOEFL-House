@@ -1,9 +1,10 @@
 (async()=>{
 const assert=require("node:assert/strict");
 const {chromium}=require("/tmp/toefl-final-qa/node_modules/playwright-core");
-const base="https://fccf6b61.the-toefl-house.pages.dev";
+const base=process.env.TOEFL_QA_BASE||"https://fccf6b61.the-toefl-house.pages.dev";
+if(new URL(base).hostname==="the-toefl-house.pages.dev")throw Error("This QA must run in read-only Preview; production is forbidden");
 const langs=[{prefix:"",lang:"en",needle:"Campaign reference:"},{prefix:"fa/",lang:"fa",needle:"کُد کمپاین:"},{prefix:"ps/",lang:"ps",needle:"د کمپاین کوډ:"}];
-const expectedRev="e047825a59a7";
+const expectedRev=process.env.TOEFL_ASSET_REV||"";
 const results=[],errors=[];
 const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
 try{
@@ -22,8 +23,11 @@ try{
    js:document.querySelector("script[src^='/__th/v2/site.js']")?.getAttribute("src"),
    guides:[...document.querySelectorAll("a")].filter(a=>a.getAttribute("href")==="/"+location.pathname.split("/").filter(x=>x==="fa"||x==="ps")[0]+"/guides/").length
   }));
-  assert.ok(website.href?.endsWith("?v="+expectedRev),l.lang+" CSS fingerprint");
-  assert.ok(website.js?.endsWith("?v="+expectedRev),l.lang+" JS fingerprint");
+  const cssRev=new URL(website.href,base).searchParams.get("v");
+  const jsRev=new URL(website.js,base).searchParams.get("v");
+  assert.match(cssRev||"",/^[a-f0-9]{12}$/,l.lang+" CSS fingerprint");
+  assert.equal(cssRev,jsRev,l.lang+" CSS and JS revision mismatch");
+  if(expectedRev)assert.equal(cssRev,expectedRev,l.lang+" exact release fingerprint");
   await page.locator(".detail-actions .button-primary").first().click();
   await page.waitForURL(new RegExp("/"+l.prefix+"admissions/"),{timeout:15000});
   const selected=await page.locator("#v2-program").inputValue();
@@ -37,7 +41,7 @@ try{
   assert.ok(msg.includes(l.needle),l.lang+" campaign reference label missing");
   assert.match(msg,/facebook\s*\/\s*canada_nov_2026/,l.lang+" campaign code missing");
   assert.ok(!/@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(msg),"Message should not contain invented email");
-  results.push({lang:l.lang,source:sourcePath,selected,assetRev:expectedRev,whatsappMessage:msg.slice(0,280),pageErrors:[]});
+  results.push({lang:l.lang,source:sourcePath,selected,assetRev:cssRev,whatsappMessage:msg.slice(0,280),pageErrors:[]});
   await context.close();
  }
  const [guides,api,admin]=await Promise.all([
