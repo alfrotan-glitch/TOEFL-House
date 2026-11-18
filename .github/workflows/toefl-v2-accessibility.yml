@@ -18,5 +18,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
-      - name: Audit 9 mobile pages against WCAG A/AA
+      - name: Audit 9 mobile Preview pages against WCAG A/AA
+        env:
+          TOEFL_QA_BASE: https://5c429fc2.the-toefl-house.pages.dev
         run: node cloudflare/site-v2/accessibility-audit.cjs
