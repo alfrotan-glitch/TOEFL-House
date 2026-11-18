@@ -1,10 +1,5 @@
 name: TOEFL House Legacy CMS Dependency Gate
 on:
-  push:
-    branches: [cms-readiness-and-recovery-20261118]
-    paths:
-      - 'cloudflare/cms-readiness/legacy-dependency.mjs'
-      - '.github/workflows/toefl-cms-legacy-dependency.yml'
   workflow_dispatch:
 permissions:
   contents: read
