@@ -72,7 +72,7 @@ jobs:
           node cloudflare/site-v2/final-production-navigation.mjs
       - name: Check anonymous auth, restore/publish refusal and immutable legacy dependencies
         run: |
-          node cloudflare/cms-readiness/public-auth-guards.mjs
+          node cloudflare/cms-readiness/public-auth-readonly.mjs
           node cloudflare/cms-readiness/legacy-dependency.mjs
 
   accessibility:
