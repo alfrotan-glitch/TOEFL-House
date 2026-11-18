@@ -59,7 +59,7 @@ if(enquiry){
   if(refSource&&refSource!=="website")refParts.push(refSource);
   if(refCampaign&&!["organic_site","site_cta"].includes(refCampaign))refParts.push(refCampaign);
   if(refParts.length){
-   var refLabel=current==="fa"?"\\nکُد کمپاین: ":current==="ps"?"\\nد کمپاین کوډ: ":"\\nCampaign reference: ";
+   var refLabel=current==="fa"?"\nکُد کمپاین: ":current==="ps"?"\nد کمپاین کوډ: ":"\nCampaign reference: ";
    message+=refLabel+refParts.join(" / ");
   }
   var number=enquiry.getAttribute("data-number")||"93794357509";
