@@ -1,0 +1,22 @@
+name: TOEFL House V2 Accessibility Audit
+on:
+  push:
+    branches: [website-v2-quality-20261118]
+    paths:
+      - 'cloudflare/site-v2/accessibility-audit.cjs'
+      - '.github/workflows/toefl-v2-accessibility.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Audit 9 mobile pages against WCAG A/AA
+        run: node cloudflare/site-v2/accessibility-audit.cjs
