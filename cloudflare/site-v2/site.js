@@ -40,8 +40,38 @@ if(enquiry){
   };
   var l=labels[current]||labels.en;
   var message=(template[current]||template.en)+values[0]+l[0]+values[1]+l[1]+values[2]+l[2];
+  // Carry only approved, anonymous campaign labels into the student's own WhatsApp
+  // draft. This lets reception reconcile real conversations without a shadow CRM.
+  function cleanRef(v,max){
+   return typeof v==="string" && v.length<=max && /^[a-z0-9][a-z0-9_-]*$/.test(v)?v:"";
+  }
+  var query=new URLSearchParams(location.search);
+  var refSource=cleanRef(query.get("utm_source")||query.get("s"),32);
+  var refCampaign=cleanRef(query.get("utm_campaign")||query.get("c"),48);
+  try{
+   if(!refSource&&!refCampaign){
+    var remembered=JSON.parse(sessionStorage.getItem("th_campaign")||"null");
+    refSource=cleanRef(remembered?.source,32);
+    refCampaign=cleanRef(remembered?.campaign,48);
+   }
+  }catch(_){}
+  var refParts=[];
+  if(refSource&&refSource!=="website")refParts.push(refSource);
+  if(refCampaign&&!["organic_site","site_cta"].includes(refCampaign))refParts.push(refCampaign);
+  if(refParts.length){
+   var refLabel=current==="fa"?"\\nکُد کمپاین: ":current==="ps"?"\\nد کمپاین کوډ: ":"\\nCampaign reference: ";
+   message+=refLabel+refParts.join(" / ");
+  }
   var number=enquiry.getAttribute("data-number")||"93794357509";
-  location.assign("https://wa.me/"+number+"?text="+encodeURIComponent(message));
+  // A real anchor click is recorded by the site's existing anonymous WhatsApp
+  // click tracker before navigation. No personal form fields are sent to analytics.
+  var link=document.createElement("a");
+  link.href="https://wa.me/"+number+"?text="+encodeURIComponent(message);
+  link.setAttribute("aria-hidden","true");
+  link.style.display="none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
  });
 }
 
