@@ -26,7 +26,7 @@ const V2_COPY={
   steps:[["01","Tell us your goal","Share what you want to improve—speaking, academic English, TOEFL or everyday communication."],["02","Find your level, free","Our team helps you select a suitable starting level through a free assessment."],["03","Join the right class","Confirm available shifts, teaching format and tuition with our admissions team."]],
   toolsLabel:"LEARNING SUPPORT",toolsTitle:"Your learning tools, one place.",toolsText:"Explore class times, curriculum, the TOEFL score planner and the placement advisor in our interactive student toolkit.",toolsCta:"Open learning tools",
   faqLabel:"GOOD TO KNOW",faqTitle:"Before you begin",faqLead:"Clear answers to common admissions questions.",faqMore:"More questions? Message our team",
-  visitLabel:"VISIT US",visitTitle:"Learn with us in Kabul.",visitText:"Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi, Kabul, Afghanistan.",hours:"Saturday–Thursday · Friday closed",phone:"Call admissions",wa:"WhatsApp admissions",map:"Find our campus",
+  visitLabel:"VISIT US",visitTitle:"Learn with us in Kabul.",visitText:"Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi, Kabul, Afghanistan.",hours:"Classes Saturday–Thursday · Friday closed · Confirm class times with admissions",phone:"Call admissions",wa:"WhatsApp admissions",map:"Find our campus",
   finalEyebrow:"YOUR NEXT CHAPTER",finalTitle:"Ready to take the first step?",finalText:"Start with a free placement assessment. Ask admissions about current classes and tuition.",finalCta:"Request your free assessment",
   footerLine:"Unlock the world with TOEFL.",footerRights:"All rights reserved.",footerNote:"Free placement assessment · Course fees are separate",footPrograms:"Programs",footJoin:"Admissions",footTools:"Student tools",
   statsFallback:[["6,000+","Graduates since 2013"],["500+","TOEFL test-takers guided"],["100+","University admissions worldwide"]],courseNames:["General English","Academic English","TOEFL Preparation","Special Speaking","Professional Writing","Teacher Training"],fallbackFaq:[["Is the placement assessment free?","Yes. Placement assessment is free; course tuition is separate."],["Can I enroll without an email?","Yes. You may contact admissions through WhatsApp or by phone."],["Are online classes available?","Private online classes can be arranged based on teacher availability and time zones."]]
@@ -45,7 +45,7 @@ const V2_COPY={
   steps:[["۰۱","هدف‌تان را بگویید","مکالمه، انگلیسی اکادمیک، تافل یا انگلیسی روزمره؛ بگویید کدام مهارت را می‌خواهید بهتر سازید."],["۰۲","سطح خود را رایگان معلوم کنید","با راهنمایی تیم آموزشی، صنف و سطح مناسب خود را پیدا کنید."],["۰۳","در صنف مناسب شامل شوید","تقسیم اوقات، شیوهٔ تدریس و فیس را با پذیرش تأیید کنید."]],
   toolsLabel:"ابزارهای آموزشی",toolsTitle:"امکانات درسی، یک‌جا.",toolsText:"تقسیم اوقات صنف‌ها، نصاب درسی، ابزار تخمین نمرهٔ تافل و رهنمای تعیین سطح را در بخش تعاملی سایت ببینید.",toolsCta:"باز کردن ابزارهای آموزشی",
   faqLabel:"معلومات ضروری",faqTitle:"پیش از شروع، بدانید",faqLead:"پاسخ پرسش‌های رایج دربارهٔ ثبت‌نام و صنف‌ها.",faqMore:"پرسش دیگری دارید؟ در واتساپ پیام بدهید",
-  visitLabel:"آدرس ما",visitTitle:"در کابل پذیرای شما هستیم.",visitText:"کابل، دشت برچی، ایستگاه مغازه، روبروی مرکز جلیلی، افغانستان.",hours:"شنبه تا پنج‌شنبه · جمعه رخصت",phone:"تماس با پذیرش",wa:"واتساپ پذیرش",map:"پیدا کردن آدرس کورس",
+  visitLabel:"آدرس ما",visitTitle:"در کابل پذیرای شما هستیم.",visitText:"کابل، دشت برچی، ایستگاه مغازه، روبروی مرکز جلیلی، افغانستان.",hours:"صنف‌ها از شنبه تا پنج‌شنبه · جمعه رخصت · وقت دقیق صنف را از پذیرش بپرسید",phone:"تماس با پذیرش",wa:"واتساپ پذیرش",map:"پیدا کردن آدرس کورس",
   finalEyebrow:"گام بعدی شما",finalTitle:"برای شروع آماده هستید؟",finalText:"با تعیین سطح رایگان آغاز کنید؛ معلومات صنف‌های موجود و فیس را از پذیرش دریافت کنید.",finalCta:"درخواست تعیین سطح رایگان",
   footerLine:"با تافل، دروازه‌های جهان را باز کنید.",footerRights:"تمام حقوق محفوظ است.",footerNote:"تعیین سطح رایگان · فیس دوره جداگانه است",footPrograms:"برنامه‌ها",footJoin:"پذیرش",footTools:"ابزارهای درسی",
   statsFallback:[["۶٬۰۰۰+","فارغ‌التحصیل از سال ۲۰۱۳"],["۵۰۰+","اشتراک‌کننده در تافل"],["۱۰۰+","پذیرش دانشگاهی در جهان"]],courseNames:["انگلیسی عمومی","انگلیسی اکادمیک","آمادگی تافل","مکالمهٔ ویژه","نگارش مسلکی","تربیهٔ استاد"],fallbackFaq:[["آیا تعیین سطح رایگان است؟","بلی، تعیین سطح رایگان است؛ فیس دوره‌های آموزشی جداگانه می‌باشد."],["آیا بدون ایمیل می‌توانم معلومات بگیرم؟","بلی. از طریق واتساپ یا تماس تلفونی با بخش پذیرش در ارتباط شوید."],["آیا صنف آنلاین دارید؟","صنف‌های آنلاین انفرادی مطابق ظرفیت استاد و منطقهٔ زمانی با هماهنگی برگزار می‌شود."]]
@@ -64,14 +64,14 @@ const V2_COPY={
   steps:[["۰۱","خپل هدف ووایئ","خبرې کول، اکاډمیکه انګلیسي، TOEFL یا ورځنۍ انګلیسي؛ خپل هدف راسره شریک کړئ."],["۰۲","خپله سویه وړیا معلومه کړئ","زموږ ښوونیز ټیم له تاسو سره د مناسبې سویې په ټاکلو کې مرسته کوي."],["۰۳","مناسب ټولګي ته لاړ شئ","مهالوېش، د زده‌کړې بڼه او فیس له ادارې سره تایید کړئ."]],
   toolsLabel:"د زده‌کړې وسایل",toolsTitle:"ټولې زده‌کړیزې اسانتیاوې، په یوه ځای کې.",toolsText:"د ټولګیو مهالوېش، نصاب، د TOEFL نمرې پلان او د سویې معلومولو لارښود په تعاملي برخه کې وګورئ.",toolsCta:"زده‌کړیز وسایل پرانیزئ",
   faqLabel:"اړین معلومات",faqTitle:"تر پیل مخکې پوښتنې",faqLead:"د نوم‌لیکنې او ټولګیو په اړه لنډ ځوابونه.",faqMore:"نورې پوښتنې لرئ؟ موږ ته په واټساپ پیغام واستوئ",
-  visitLabel:"زموږ پته",visitTitle:"په کابل کې ستاسو هرکلی کوو.",visitText:"کابل، دشت برچي، مغازه تمځای، د جلیلي مرکز مخامخ، افغانستان.",hours:"شنبه تر پنجشنبې · جمعه رخصتي",phone:"له ادارې سره اړیکه",wa:"د واټساپ اړیکه",map:"زموږ ځای ومومئ",
+  visitLabel:"زموږ پته",visitTitle:"په کابل کې ستاسو هرکلی کوو.",visitText:"کابل، دشت برچي، مغازه تمځای، د جلیلي مرکز مخامخ، افغانستان.",hours:"ټولګي له شنبې تر پنجشنبې · جمعه رخصتي · د ټولګي دقیق وخت له ادارې وپوښتئ",phone:"له ادارې سره اړیکه",wa:"د واټساپ اړیکه",map:"زموږ ځای ومومئ",
   finalEyebrow:"ستاسو راتلونکی ګام",finalTitle:"پیل ته چمتو یاست؟",finalText:"د سویې له وړیا معلومولو پیل وکړئ؛ د ټولګیو او فیس معلومات له ادارې واخلئ.",finalCta:"د وړیا سویې معلومولو غوښتنه",
   footerLine:"له TOEFL سره نړۍ ته ورسېږئ.",footerRights:"ټول حقونه خوندي دي.",footerNote:"د سویې معلومول وړیا دي · د کورس فیس جلا دی",footPrograms:"پروګرامونه",footJoin:"نوم‌لیکنه",footTools:"د زده‌کړې وسایل",
   statsFallback:[["۶٬۰۰۰+","له ۲۰۱۳ کال راهیسې فارغان"],["۵۰۰+","د TOEFL ازموینې لارښوونه ترلاسه کوونکي"],["۱۰۰+","په نړیوالو پوهنتونونو کې منل شوي"]],courseNames:["عمومي انګلیسي","اکاډمیکه انګلیسي","د TOEFL چمتووالی","ځانګړې خبرې","مسلکي لیکنه","د ښوونکو روزنه"],fallbackFaq:[["آیا د سویې معلومول وړیا دي؟","هو. د سویې معلومول وړیا دي، خو د کورس فیس جلا دی."],["له ایمیل پرته نوم‌لیکنه کېدای شي؟","هو. له ادارې سره په واټساپ یا ټیلیفون اړیکه ونیسئ."],["آنلاین ټولګي شته؟","انفرادي آنلاین ټولګي د ښوونکي د وخت او ظرفیت له مخې همغږي کېږي."]]
  }
 };
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
-function v2T(s,max=1000){return v2Esc(String(s??"").slice(0,max));}
+function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
 function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
 async function v2Cms(env){
  if(!env?.CMS_DB)throw Error("CMS_DB missing");
@@ -140,8 +140,7 @@ function v2Faq(c,content,locale){
  ].filter(Boolean);
  const list=prioritized.length===3?prioritized:items.slice(0,3);
  const entries=list.length?list.map(x=>[x.q||x.question,x.a||x.answer]):c.fallbackFaq;
- const visitorName=value=>String(value??"").replace(/خانه موفقیت/g,"تافل هوس");
- return '<section class="faq-section section" id="faq"><div class="shell faq-layout"><div class="faq-aside"><p class="eyebrow">'+v2T(c.faqLabel)+'</p><h2>'+v2T(c.faqTitle)+'</h2><p>'+v2T(c.faqLead)+'</p><a class="text-link" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.faqMore)+' <span aria-hidden="true">↗</span></a></div><div class="faq-list">'+entries.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2Short(visitorName(q),160)+'<span class="faq-plus" aria-hidden="true"></span></summary><p>'+v2T(visitorName(a),680)+'</p></details>').join("")+'</div></div></section>';
+ return '<section class="faq-section section" id="faq"><div class="shell faq-layout"><div class="faq-aside"><p class="eyebrow">'+v2T(c.faqLabel)+'</p><h2>'+v2T(c.faqTitle)+'</h2><p>'+v2T(c.faqLead)+'</p><a class="text-link" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.faqMore)+' <span aria-hidden="true">↗</span></a></div><div class="faq-list">'+entries.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2Short(q,160)+'<span class="faq-plus" aria-hidden="true"></span></summary><p>'+v2T(a,680)+'</p></details>').join("")+'</div></div></section>';
 }
 function v2Footer(c,locale,content){
  const prefix=v2Prefix(locale);
@@ -149,7 +148,14 @@ function v2Footer(c,locale,content){
  const published=(value,fallback,max)=>typeof value==="string"&&value.trim()&&value.length<=max?value:fallback;
  const visitTitle=published(contact?.title,c.visitTitle,180);
  const visitAddress=published(contact?.address,c.visitText,350);
- const visitHours=published(contact?.operatingHours||contact?.hours,c.hours,250);
+ const storedHours=published(contact?.operatingHours||contact?.hours,c.hours,250);
+ // Keep later CMS edits visible; normalize only the exact three stale published summaries.
+ const outdatedHours={
+  en:"Teaching: Saturday–Thursday · Men: 6:20 AM–5:50 PM · Women: 6:30 AM–5:40 PM · Friday: Closed",
+  fa:"جلسات درسی: شنبه الی پنج‌شنبه · برادران: ۶:۲۰ صبح تا ۵:۵۰ شام · خواهران: ۶:۳۰ صبح تا ۵:۴۰ شام · جمعه: رخصت",
+  ps:"شنبه تر پنجشنبې: سهار ۶:۲۰ تر ماښام ۶:۰۰؛ جمعه رخصتي، ځانګړي پروګرامونه جلا اعلانېږي"
+ };
+ const visitHours=storedHours===outdatedHours[locale]?c.hours:storedHours;
  const maps="https://www.google.com/maps/search/?api=1&query=The%20TOEFL%20House%20Dasht-e-Barchi%20Kabul";
  return '<footer class="footer" id="contact"><div class="shell"><div class="footer-main"><div class="footer-brand"><span class="eyebrow">'+v2T(c.visitLabel)+'</span><h2>'+v2T(visitTitle)+'</h2><p>'+v2T(visitAddress)+'</p><span class="footer-hours">'+v2T(visitHours)+'</span></div><div class="footer-links"><a href="'+prefix+'#programs">'+v2T(c.footPrograms)+'</a><a href="'+prefix+'guides/">'+v2T(c.navGuides)+'</a><a href="'+prefix+'admissions/">'+v2T(c.footJoin)+'</a><a href="'+prefix+'tools/">'+v2T(c.footTools)+'</a><a href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+'</a><a href="tel:+93745651844">'+v2T(c.phone)+'</a><a href="'+maps+'" target="_blank" rel="noopener noreferrer">'+v2T(c.map)+' ↗</a></div></div><div class="footer-bottom"><span>© '+new Date().getUTCFullYear()+' THE TOEFL HOUSE · '+v2T(c.footerRights)+'</span><span>'+v2T(c.footerNote)+'</span></div></div></footer>';
 }
