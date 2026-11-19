@@ -1,0 +1,25 @@
+name: TOEFL House V2 — Exact Preview Final Acceptance
+on:
+  push:
+    branches: [website-v2-final-polish-20261119]
+    paths:
+      - 'cloudflare/site-v2/**'
+      - '.github/workflows/toefl-v2-final-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      V2_PREVIEW_BASE: https://610f9032.the-toefl-house.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated browser
+        run: npm install --prefix /tmp/toefl-v2-final-browser --no-save playwright-core@1.56.0 --silent
+      - name: Verify 27 routed pages, legacy, CMS, language and responsive browser
+        run: node cloudflare/site-v2/final-polish-preview.cjs
