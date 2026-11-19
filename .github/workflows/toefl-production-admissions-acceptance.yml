@@ -1,10 +1,5 @@
 name: TOEFL House Production Admissions End-to-End Acceptance
 on:
-  push:
-    branches: [production-admissions-acceptance-20261119]
-    paths:
-      - 'cloudflare/site-v2/production-admissions-acceptance.cjs'
-      - '.github/workflows/toefl-production-admissions-acceptance.yml'
   workflow_dispatch:
 permissions:
   contents: read
