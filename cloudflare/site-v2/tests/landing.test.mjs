@@ -247,3 +247,17 @@ test("General English course preview remains noindex and HEAD has no body",async
  assert.equal(h.status,200);
  assert.equal(await h.text(),"");
 });
+
+test("Published CMS historical name uses visitor brand without modifying saved data",async()=>{
+ const fa=structuredClone(main);
+ fa.locales.fa.faq.items[0].a="بلی، در خانه موفقیت تعیین سطح رایگان است.";
+ const pashto=structuredClone(ps);
+ pashto.faq.items[0].a="په خانه موفقیت کې د سویې معلومول وړیا دي.";
+ const [faResponse,psResponse]=await Promise.all([
+  worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env(fa,pashto)),
+  worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/"),env(fa,pashto))
+ ]);
+ assert.match(await faResponse.text(),/در تافل هوس تعیین سطح رایگان است/);
+ assert.match(await psResponse.text(),/په تافل هوس کې د سویې معلومول وړیا دي/);
+ assert.equal(fa.locales.fa.faq.items[0].a,"بلی، در خانه موفقیت تعیین سطح رایگان است.");
+});

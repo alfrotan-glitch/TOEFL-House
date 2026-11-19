@@ -13,7 +13,7 @@ const V2_OG="/assets/aistudio/social-preview_cee43595.jpg";
 const V2_COURSE_IDS=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training"];
 const V2_COPY={
  en:{
-  lang:"en",dir:"ltr",name:"THE TOEFL HOUSE",localName:"خانه موفقیت",tag:"ENGLISH EDUCATION · KABUL",
+  lang:"en",dir:"ltr",name:"THE TOEFL HOUSE",localName:"تافل هوس",tag:"ENGLISH EDUCATION · KABUL",
   navPrograms:"Programs",navGuides:"Learning guides",navWhy:"Why TOEFL House",navOnline:"Online classes",navFaq:"FAQ",navContact:"Contact",navMenu:"Menu",
   navApply:"Free assessment",badge:"Admissions are open · Placement assessment is free",
   lead:"Your English journey",leadAccent:"starts here.",subtitle:"From your first English words to fluent conversations, academic English and TOEFL preparation. Find the right level with a free placement assessment.",
@@ -140,7 +140,8 @@ function v2Faq(c,content,locale){
  ].filter(Boolean);
  const list=prioritized.length===3?prioritized:items.slice(0,3);
  const entries=list.length?list.map(x=>[x.q||x.question,x.a||x.answer]):c.fallbackFaq;
- return '<section class="faq-section section" id="faq"><div class="shell faq-layout"><div class="faq-aside"><p class="eyebrow">'+v2T(c.faqLabel)+'</p><h2>'+v2T(c.faqTitle)+'</h2><p>'+v2T(c.faqLead)+'</p><a class="text-link" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.faqMore)+' <span aria-hidden="true">↗</span></a></div><div class="faq-list">'+entries.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2Short(q,160)+'<span class="faq-plus" aria-hidden="true"></span></summary><p>'+v2T(a,680)+'</p></details>').join("")+'</div></div></section>';
+ const visitorName=value=>String(value??"").replace(/خانه موفقیت/g,"تافل هوس");
+ return '<section class="faq-section section" id="faq"><div class="shell faq-layout"><div class="faq-aside"><p class="eyebrow">'+v2T(c.faqLabel)+'</p><h2>'+v2T(c.faqTitle)+'</h2><p>'+v2T(c.faqLead)+'</p><a class="text-link" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.faqMore)+' <span aria-hidden="true">↗</span></a></div><div class="faq-list">'+entries.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2Short(visitorName(q),160)+'<span class="faq-plus" aria-hidden="true"></span></summary><p>'+v2T(visitorName(a),680)+'</p></details>').join("")+'</div></div></section>';
 }
 function v2Footer(c,locale,content){
  const prefix=v2Prefix(locale);
