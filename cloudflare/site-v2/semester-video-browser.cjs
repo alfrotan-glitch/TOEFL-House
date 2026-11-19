@@ -14,7 +14,9 @@ const cases=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
   for(const [path,lang] of cases){
    const response=await page.goto(base+path,{waitUntil:"networkidle",timeout:30000});
    assert.equal(response.status(),200,path);
-   assert.match(response.headers()["x-robots-tag"]||"",/noindex/,path+" preview must not be indexed");
+   const robots=response.headers()["x-robots-tag"]||"";
+   if(new URL(base).hostname==="the-toefl-house.pages.dev")assert.ok(!robots.includes("noindex"),path+" production must be indexable");
+   else assert.match(robots,/noindex/,path+" preview must not be indexed");
    const state=await page.evaluate(()=>{
     const section=document.querySelector("#semester-qaws-1405");
     const video=section?.querySelector("video");
