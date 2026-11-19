@@ -73,6 +73,7 @@ jobs:
         run: |
           node cloudflare/site-v2/production-full-acceptance.mjs
           node cloudflare/site-v2/final-production-navigation.mjs
+          node cloudflare/site-v2/general-english-live-acceptance.mjs
       - name: Check anonymous auth, restore/publish refusal and immutable legacy dependencies
         run: |
           node cloudflare/cms-readiness/public-auth-readonly.mjs
