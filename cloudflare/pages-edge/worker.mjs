@@ -72,7 +72,7 @@ async function passThrough(request){
   const rewriter=new HTMLRewriter()
     .on("head",{element(element){element.append('<link rel="stylesheet" href="'+CSS_PATH+'">',{html:true});}})
     .on("body",{element(element){element.append('<script defer src="'+JS_PATH+'"></script>',{html:true});}});
-  if(/\\/guides\\//.test(incoming.pathname)){
+  if(incoming.pathname.includes("/guides/")){
     // The historic guide navigation used the retired homepage section anchor.
     rewriter.on('a[href*="#th-pathways"]',{element(element){
       const href=element.getAttribute("href");
