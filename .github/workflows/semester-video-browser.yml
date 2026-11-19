@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TH_SEMESTER_URL: ${{ inputs.target_url || 'https://802cf8b6.the-toefl-house.pages.dev' }}
+      TH_SEMESTER_URL: ${{ inputs.target_url || 'https://fa8ca74d.the-toefl-house.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
