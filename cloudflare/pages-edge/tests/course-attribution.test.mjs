@@ -7,7 +7,7 @@ const resp=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__t
 assert.equal(resp.status,200);
 const script=await resp.text();
 
-function eventFrom({pathname="/fa/admissions/",search="",selected=null,href="https://wa.me/93794357509"}){
+function eventFrom({pathname="/fa/admissions/",search="",selected=null,href="https://wa.me/93794357509",expectedEvents=1}){
  const handlers={},sent=[];
  const ElementClass=class {
   closest(selector){return selector==="a[href]"?{getAttribute(){return href;}}:null;}
@@ -33,7 +33,7 @@ function eventFrom({pathname="/fa/admissions/",search="",selected=null,href="htt
  vm.runInNewContext(script,context,{timeout:1000});
  assert.equal(typeof handlers.click,"function");
  handlers.click({target:new ElementClass()});
- assert.equal(sent.length,1);
+ assert.equal(sent.length,expectedEvents);
  return sent[0];
 }
 
@@ -54,4 +54,14 @@ test("No personal form values or visitor identifiers are sent to analytics",()=>
  const e=eventFrom({selected:"teacher-training"});
  assert.deepEqual(Object.keys(e).sort(),["action","campaign","course","source"]);
  assert.equal(e.course,"teacher-training");
+});
+
+test("Changing admissions language is NOT a new admissions conversion",()=>{
+ const e=eventFrom({pathname:"/fa/admissions/",href:"/ps/admissions/?program=toefl-preparation",selected:"toefl-preparation",expectedEvents:0});
+ assert.equal(e,undefined);
+});
+test("Real course-to-admissions CTA remains counted once",()=>{
+ const e=eventFrom({pathname:"/ps/courses/toefl-preparation/",href:"/ps/admissions/?program=toefl-preparation",expectedEvents:1});
+ assert.equal(e.action,"admissions");
+ assert.equal(e.course,"toefl-preparation");
 });
