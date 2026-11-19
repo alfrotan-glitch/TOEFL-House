@@ -148,3 +148,21 @@ test("preview robots always noindex even for JSON",async()=>{
     assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
   });
 });
+
+
+test("Legacy tools brand correction is scoped and does not touch data entry",async()=>{
+ await withMocks(async()=>{
+  const r=await worker.fetch(new Request(canonical+"/__th/tools-brand-v1.js"),{});
+  assert.equal(r.status,200);
+  const script=await r.text();
+  assert.ok(script.includes("خانه موفقیت"));
+  assert.ok(script.includes("document.createTreeWalker"));
+  assert.ok(script.includes("MutationObserver"));
+  assert.ok(script.includes("script,style,noscript,textarea,option"));
+  for(const forbidden of ["fetch(","XMLHttpRequest","sendBeacon","localStorage","sessionStorage"])assert.ok(!script.includes(forbidden));
+  const tools=await worker.fetch(new Request(canonical+"/fa/tools/"),{});
+  assert.ok((await tools.text()).includes("tools-brand-v1.js"));
+  const home=await worker.fetch(new Request(canonical+"/fa/"),{});
+  assert.ok(!(await home.text()).includes("tools-brand-v1.js"));
+ });
+});
