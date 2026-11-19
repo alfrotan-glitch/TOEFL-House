@@ -28,7 +28,7 @@ const V2_GENERAL_ENGLISH={
       ]
     ],
     "levelsTitle": "Your learning pathway",
-    "levelsIntro": "Pre-Starter is a one-month foundation course. Starter, Prep One, Prep Two and Prep Three are separate two-month semesters. These are The TOEFL House's internal course stages, not the publisher's book levels.",
+    "levelsIntro": "Pre-Starter is a one-month foundation course. Starter, Prep One, Prep Two and Prep Three are separate two-month semesters. Find your starting level through our free placement assessment.",
     "stageDescs": [
       "An introductory month for learners preparing to enter the regular English semesters.",
       "Start developing everyday English, key vocabulary and simple communication.",
@@ -55,10 +55,10 @@ const V2_GENERAL_ENGLISH={
     ],
     "oxfordLevelsLabel": "Publisher's book levels",
     "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
-    "oxfordNote": "Important: the publisher has four book levels, while The TOEFL House has five internal course stages. They are not a one-to-one correspondence; the actual textbook used in each class follows the school's teaching plan. Printed workbooks, audio, video and online materials differ by edition and access package; availability must be confirmed with admissions.",
+    "oxfordNote": "Your teacher selects suitable Got it! lessons for your class. Ask admissions about printed books and any digital learning materials.",
     "speakingLabel": "SUPPLEMENTARY SPEAKING CHAPTER",
     "speakingTitle": "Speaking is part of the program—not an afterthought.",
-    "speakingText": "In addition to the Got it! lessons, the program includes a dedicated chapter focused on active spoken English. Its purpose is to give learners extra opportunities to apply what they learn through guided conversation, pronunciation practice, questions and answers, and real-life communication tasks. This chapter is part of The TOEFL House program and should not be mistaken for a separately published Oxford book.",
+    "speakingText": "In addition to the Got it! lessons, the program includes a dedicated chapter focused on active spoken English. Its purpose is to give learners extra opportunities to apply what they learn through guided conversation, pronunciation practice, questions and answers, and real-life communication tasks.",
     "feeLabel": "CLEAR AND TRANSPARENT FEES",
     "feeTitle": "Duration and tuition",
     "feeIntro": "Tuition is AFN 500 per month. Pre-Starter runs for one month (AFN 500). Each following stage is a two-month semester, collected as a semester fee of AFN 1,000.",
@@ -68,7 +68,7 @@ const V2_GENERAL_ENGLISH={
     "totalTitle": "Complete five-stage pathway",
     "totalDuration": "9 months",
     "totalFee": "4,500 AFN",
-    "totalNote": "The total is an illustration for someone completing all five stages in sequence. It is not a required advance payment or a promise of promotion. Ask admissions about textbooks, available shifts and any other costs before enrolling.",
+    "totalNote": "Fees are paid stage by stage. Ask admissions about textbooks, class times and any other costs.",
     "faqTitle": "Before enrolling",
     "faqs": [
       [
@@ -112,7 +112,7 @@ const V2_GENERAL_ENGLISH={
       ]
     ],
     "levelsTitle": "مسیر آموزشی و سطح‌های کورس",
-    "levelsIntro": "Pre-Starter یک دورهٔ یک‌ماههٔ مقدماتی است. Starter، Prep One، Prep Two و Prep Three هرکدام یک سمستر دوماهه هستند. این نام‌ها مربوط به سطح‌بندی داخلی تافل هوس اند و لزوماً معادل سطح‌های کتاب‌های ناشر نیستند.",
+    "levelsIntro": "Pre-Starter یک دورهٔ یک‌ماههٔ مقدماتی است. Starter، Prep One، Prep Two و Prep Three هرکدام یک سمستر دوماهه هستند. با تعیین سطح رایگان، از صنف مناسب خود آغاز کنید.",
     "stageDescs": [
       "دورهٔ مقدماتی برای شاگردانی که می‌خواهند پیش از ورود به سمسترهای اصلی، بنیاد زبان انگلیسی خود را آماده سازند.",
       "آغاز تقویت لغات روزمره، ساختارهای ابتدایی و ارتباط ساده به انگلیسی.",
@@ -139,10 +139,10 @@ const V2_GENERAL_ENGLISH={
     ],
     "oxfordLevelsLabel": "سطح‌های کتاب‌های ناشر",
     "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
-    "oxfordNote": "نکتهٔ مهم: مجموعهٔ Got it! چهار سطح کتابی دارد، اما تافل هوس پنج سطح درسی داخلی دارد. این دو تقسیم‌بندی عین هم نیستند؛ کتاب یا بخش مناسب هر صنف طبق پلان آموزشی مرکز تعیین می‌شود. کتاب تمرین، فایل‌های صوتی، ویدیو و منابع آنلاین بسته به چاپ و بستهٔ دسترسی متفاوت اند؛ موجودیت آن‌ها را باید از پذیرش تأیید کنید.",
+    "oxfordNote": "استاد مطابق سطح صنف، درس‌های مناسب Got it! را انتخاب می‌کند. برای معلومات دربارهٔ کتاب تمرین و منابع دیجیتلی با پذیرش تماس بگیرید.",
     "speakingLabel": "چپتر اختصاصی Speaking",
     "speakingTitle": "برای صحبت‌کردن، فرصت تمرین بیشتر.",
-    "speakingText": "در کنار درس‌های Got it! یک چپتر ویژهٔ Speaking در برنامه تدریس می‌شود. هدف این بخش، فراهم‌کردن تمرین بیشتر برای مکالمهٔ رهنمایی‌شده، تلفظ، پرسش و پاسخ و استفاده از لغات و گرامر در موقعیت‌های روزمره است. این چپتر بخشی از برنامهٔ تافل هوس است و نباید به‌عنوان یک کتاب جداگانهٔ نشرشده توسط Oxford معرفی شود.",
+    "speakingText": "در کنار درس‌های Got it! یک چپتر ویژهٔ Speaking در برنامه تدریس می‌شود. هدف این بخش، فراهم‌کردن تمرین بیشتر برای مکالمهٔ رهنمایی‌شده، تلفظ، پرسش و پاسخ و استفاده از لغات و گرامر در موقعیت‌های روزمره است.",
     "feeLabel": "فیس و مدت شفاف",
     "feeTitle": "تقسیم‌بندی سمسترها و فیس",
     "feeIntro": "فیس تدریس ماهانه ۵۰۰ افغانی است. دورهٔ Pre-Starter یک ماه و فیس آن ۵۰۰ افغانی است. هرکدام از چهار سطح بعدی دو ماه دوام دارد و فیس هر سمستر ۱٬۰۰۰ افغانی بوده و به‌صورت سمستروار اخذ می‌شود.",
@@ -152,7 +152,7 @@ const V2_GENERAL_ENGLISH={
     "totalTitle": "مجموع مسیر پنج‌سطحی",
     "totalDuration": "۹ ماه",
     "totalFee": "۴٬۵۰۰ افغانی",
-    "totalNote": "این مجموع فقط برای شاگردی است که هر پنج سطح را پشت‌سرهم سپری کند؛ به معنی پرداخت یک‌باره یا تضمین ارتقا نیست. در مورد کتاب‌ها، تقسیم اوقات و هر هزینهٔ احتمالی دیگر پیش از ثبت‌نام از پذیرش بپرسید.",
+    "totalNote": "فیس هر سطح جداگانه پرداخت می‌شود. برای کتاب‌ها، تقسیم اوقات و هزینه‌های احتمالی دیگر با پذیرش تماس بگیرید.",
     "faqTitle": "پرسش‌های مهم پیش از ثبت‌نام",
     "faqs": [
       [
@@ -196,7 +196,7 @@ const V2_GENERAL_ENGLISH={
       ]
     ],
     "levelsTitle": "د زده‌کړې پړاوونه",
-    "levelsIntro": "Pre-Starter یوه میاشتنی مقدماتي دوره ده. Starter، Prep One، Prep Two او Prep Three هر یو دوه میاشتنی سمستر دی. دا د تافل هوس داخلي کچې دي، د خپرندوی د کتابونو له کچو سره یې یو شان مه ګڼئ.",
+    "levelsIntro": "Pre-Starter یوه میاشتنی مقدماتي دوره ده. Starter، Prep One، Prep Two او Prep Three هر یو دوه میاشتنی سمستر دی. د وړیا سویې معلومولو له لارې خپل مناسب ټولګی وټاکئ.",
     "stageDescs": [
       "د هغو زده‌کوونکو لپاره مقدماتي دوره چې د اصلي سمسترونو له پیل مخکې د انګلیسي بنسټ پیاوړی کوي.",
       "د ورځنیو لغتونو، اساسي جوړښتونو او ساده خبرو د زده‌کړې پیل.",
@@ -223,10 +223,10 @@ const V2_GENERAL_ENGLISH={
     ],
     "oxfordLevelsLabel": "د خپرندوی د کتابونو کچې",
     "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
-    "oxfordNote": "مهمه یادونه: Got it! څلور کتابي کچې لري، خو تافل هوس پنځه داخلي درسي کچې لري. د دې دواړو تر منځ مستقیمه برابري نشته؛ د هر ټولګي کتاب یا اړوند برخې د مرکز د تدریسي پلان له مخې ټاکل کېږي. Workbook، غږیزې، ویډیویي او آنلاین سرچینې د چاپ او لاسرسي له بستې سره توپیر لري؛ د موجودیت په اړه یې له پذیرش څخه پوښتنه وکړئ.",
+    "oxfordNote": "استاد د ټولګي د سویې له مخې د Got it! مناسب درسونه ټاکي. د کتاب او ډیجیټلي سرچینو په اړه له ادارې معلومات واخلئ.",
     "speakingLabel": "د Speaking ځانګړی څپرکی",
     "speakingTitle": "د روانو خبرو لپاره ځانګړی تمرین.",
-    "speakingText": "د Got it! د درسونو ترڅنګ د Speaking ځانګړی څپرکی هم تدریسېږي. موخه یې د لارښوول شویو خبرو، تلفظ، پوښتنو او ځوابونو او په ورځنیو حالاتو کې د زده‌کړل شوو لغتونو او ګرامر د کارونې زیات تمرین دی. دا د تافل هوس د پروګرام برخه ده، نه د Oxford یو جلا خپور شوی کتاب.",
+    "speakingText": "د Got it! د درسونو ترڅنګ د Speaking ځانګړی څپرکی هم تدریسېږي. موخه یې د لارښوول شویو خبرو، تلفظ، پوښتنو او ځوابونو او په ورځنیو حالاتو کې د زده‌کړل شوو لغتونو او ګرامر د کارونې زیات تمرین دی.",
     "feeLabel": "روښانه فیس او موده",
     "feeTitle": "د سمسترونو موده او فیس",
     "feeIntro": "میاشتنی تدریسي فیس ۵۰۰ افغانۍ دی. Pre-Starter یوه میاشت دوام کوي او فیس یې ۵۰۰ افغانۍ دی. څلور نورې کچې هره یوه دوه میاشتې دي او د هر سمستر فیس ۱٬۰۰۰ افغانۍ په سمستري ډول اخیستل کېږي.",
@@ -236,7 +236,7 @@ const V2_GENERAL_ENGLISH={
     "totalTitle": "د ټولو پنځو کچو مجموعه",
     "totalDuration": "۹ میاشتې",
     "totalFee": "۴٬۵۰۰ افغانۍ",
-    "totalNote": "دا یوازې د هغه زده‌کوونکي د ټولو کچو حساب دی چې پنځه واړه پرله‌پسې ووایي؛ د یو ځل ټول فیس اخیستل یا د راتلونکې کچې ضمانت نه دی. د کتابونو، وختونو او احتمالي نورو لګښتونو په اړه له پذیرش څخه معلومات واخلئ.",
+    "totalNote": "د هرې کچې فیس جلا اخیستل کېږي. د مهالوېش، کتابونو او نورو احتمالي لګښتونو په اړه له ادارې معلومات واخلئ.",
     "faqTitle": "تر نوم‌لیکنې مخکې مهمې پوښتنې",
     "faqs": [
       [
@@ -309,7 +309,6 @@ function v2GeneralEnglish(locale){
   '<strong class="ge-total-money">'+esc(c.totalFee)+'</strong></div>'+
   '<p class="ge-fee-note">'+esc(c.totalNote)+'</p></section>'+
   '<section class="ge-questions" aria-labelledby="ge-faq-title"><h3 id="ge-faq-title">'+esc(c.faqTitle)+'</h3>'+faqs+'</section>'+
-  '<aside class="ge-references"><h3>'+esc(c.sourcesTitle)+'</h3><ol>'+sourceLinks+'</ol><p>'+esc(c.sourcesNote)+'</p></aside>'+
   '<div class="ge-cta"><div><strong>'+esc(c.cta)+'</strong><span>'+esc(c.ctaSub)+'</span></div>'+
   '<a class="button button-primary" href="'+prefix+'admissions/?program=general-english">'+esc(c.cta)+' <span aria-hidden="true">↗</span></a></div>'+
  '</div></section>';
