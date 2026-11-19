@@ -70,6 +70,68 @@ const V2_COPY={
   statsFallback:[["۶٬۰۰۰+","له ۲۰۱۳ کال راهیسې فارغان"],["۵۰۰+","د TOEFL ازموینې لارښوونه ترلاسه کوونکي"],["۱۰۰+","په نړیوالو پوهنتونونو کې منل شوي"]],courseNames:["عمومي انګلیسي","اکاډمیکه انګلیسي","د TOEFL چمتووالی","ځانګړې خبرې","مسلکي لیکنه","د ښوونکو روزنه"],fallbackFaq:[["آیا د سویې معلومول وړیا دي؟","هو. د سویې معلومول وړیا دي، خو د کورس فیس جلا دی."],["له ایمیل پرته نوم‌لیکنه کېدای شي؟","هو. له ادارې سره په واټساپ یا ټیلیفون اړیکه ونیسئ."],["آنلاین ټولګي شته؟","انفرادي آنلاین ټولګي د ښوونکي د وخت او ظرفیت له مخې همغږي کېږي."]]
  }
 };
+const V2_SEMESTER_VIDEO="https://d2ol7oe51mr4n9.cloudfront.net/user_3LPLI9IxwqxpPOe3cVF5EVhg2wd/21a66634-3b32-49c7-9034-8680714ebf17.mp4";
+const V2_SEMESTER={
+ "en": {
+  "heroTeaser": "New semester · Qaws 1405",
+  "eyebrow": "ENROLLMENT · QAWS 1405",
+  "title": "A new semester.",
+  "accent": "A stronger start.",
+  "lead": "Your next step in English starts with the right class. Explore General English, Academic English, Special Speaking, Professional Writing, TOEFL Preparation and Teacher Training at The TOEFL House.",
+  "chips": [
+   "General English",
+   "Special Speaking",
+   "TOEFL Preparation"
+  ],
+  "free": "Free placement assessment · Course tuition is separate",
+  "cta": "Ask about the new semester",
+  "secondary": "Explore programs",
+  "videoLabel": "Watch our new semester announcement",
+  "videoCaption": "Our new semester · 36-second video",
+  "videoFallback": "Watch the semester video"
+ },
+ "fa": {
+  "heroTeaser": "ثبت‌نام سمستر قوس ۱۴۰۵",
+  "eyebrow": "ثبت‌نام سمستر جدید · قوس ۱۴۰۵",
+  "title": "سمستر نو،",
+  "accent": "فرصت تازه برای پیشرفت شما.",
+  "lead": "برای یادگیری انگلیسی، از امروز یک قدم هدفمند بردارید. در تافل هوس برنامه‌های انگلیسی عمومی، انگلیسی اکادمیک، مکالمهٔ ویژه، نگارش مسلکی، آمادگی تافل و تربیهٔ استاد برگزار می‌شود. برای انتخاب صنف و وقت مناسب، با پذیرش در تماس شوید.",
+  "chips": [
+   "انگلیسی عمومی",
+   "مکالمهٔ ویژه",
+   "آمادگی TOEFL"
+  ],
+  "free": "تعیین سطح رایگان است؛ کورس‌های آموزشی فیس جداگانه دارند.",
+  "cta": "دربارهٔ سمستر جدید معلومات بگیرم",
+  "secondary": "دیدن تمام برنامه‌ها",
+  "videoLabel": "ویدیوی معرفی سمستر جدید تافل هوس",
+  "videoCaption": "اعلان سمستر جدید · ویدیوی ۳۶ ثانیه‌ای",
+  "videoFallback": "تماشای ویدیوی سمستر"
+ },
+ "ps": {
+  "heroTeaser": "د قوس ۱۴۰۵ نوي سمستر نوم‌لیکنه",
+  "eyebrow": "د نوي سمستر نوم‌لیکنه · قوس ۱۴۰۵",
+  "title": "نوی سمستر،",
+  "accent": "ستاسو د پرمختګ نوی فرصت.",
+  "lead": "د انګلیسي زده‌کړې لپاره همدا اوس خپل مناسب مسیر وټاکئ. په تافل هوس کې عمومي او اکاډمیکه انګلیسي، ځانګړې خبرې، مسلکي لیکنه، د TOEFL چمتووالی او د ښوونکو روزنه شته. د ټولګي وخت او شته ځایونه له ادارې سره تایید کړئ.",
+  "chips": [
+   "عمومي انګلیسي",
+   "ځانګړې خبرې",
+   "د TOEFL چمتووالی"
+  ],
+  "free": "د سویې معلومول وړیا دي؛ د کورس فیس جلا دی.",
+  "cta": "د نوي سمستر په اړه معلومات غواړم",
+  "secondary": "ټول پروګرامونه وګورئ",
+  "videoLabel": "د تافل هوس د نوي سمستر معرفي ویډیو",
+  "videoCaption": "د نوي سمستر اعلان · ۳۶ ثانیې ویډیو",
+  "videoFallback": "د سمستر ویډیو وګورئ"
+ }
+};
+function v2SemesterCampaign(locale){
+ const p=v2Prefix(locale),c=V2_SEMESTER[locale];
+ const signup=p+"admissions/?utm_source=website&utm_campaign=qaws_1405_semester";
+ return '<section class="semester-section" id="semester-qaws-1405" aria-labelledby="semester-heading"><div class="shell"><div class="semester-card"><div class="semester-copy"><p class="semester-eyebrow"><span class="semester-dot" aria-hidden="true"></span>'+v2T(c.eyebrow)+'</p><h2 id="semester-heading" class="semester-title">'+v2T(c.title)+' <span>'+v2T(c.accent)+'</span></h2><p class="semester-lead">'+v2T(c.lead)+'</p><ul class="semester-chips">'+c.chips.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul><p class="semester-free"><span aria-hidden="true">✦</span> '+v2T(c.free)+'</p><div class="semester-actions"><a class="button semester-primary" href="'+signup+'">'+v2T(c.cta)+' <span aria-hidden="true">↗</span></a><a class="button semester-secondary" href="#programs">'+v2T(c.secondary)+'</a></div></div><div class="semester-media"><div class="semester-video-frame"><video class="semester-video" controls playsinline preload="none" poster="'+V2_IMG_640+'" width="720" height="1280" aria-label="'+v2T(c.videoLabel)+'"><source src="'+V2_SEMESTER_VIDEO+'" type="video/mp4">'+v2T(c.videoFallback)+'</video><span class="semester-filmmark" aria-hidden="true">THE TOEFL HOUSE · 00:36</span></div><p class="semester-video-caption">'+v2T(c.videoCaption)+'</p></div></div></div></section>';
+}
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
 function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
 function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
@@ -166,7 +228,8 @@ function v2Page(locale,content){
  const ld=JSON.stringify({"@context":"https://schema.org","@type":"EducationalOrganization","name":"The TOEFL House","alternateName":"خانه موفقیت","url":V2_ORIGIN+"/","description":c.subtitle,"address":{"@type":"PostalAddress","streetAddress":"Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi","addressLocality":"Kabul","addressCountry":"AF"},"telephone":"+93745651844","availableLanguage":["en","fa-AF","ps-AF"]}).replace(/</g,"\\u003c");
  return '<!doctype html><html lang="'+c.lang+'" dir="'+c.dir+'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>'+v2T(title)+'</title><meta name="description" content="'+v2T(desc,400)+'"><meta name="theme-color" content="#f7f6f2"><meta property="og:type" content="website"><meta property="og:title" content="'+v2T(title)+'"><meta property="og:description" content="'+v2T(desc)+'"><meta property="og:url" content="'+canonical+'"><meta property="og:image" content="'+V2_ORIGIN+V2_OG+'"><link rel="canonical" href="'+canonical+'">'+language+'<link rel="icon" href="/assets/aistudio/favicon_afa00a26.png"><link rel="preload" href="'+V2_IMG_640+'" as="image" imagesrcset="'+V2_IMG_SET+'" imagesizes="'+V2_IMG_SIZES+'" fetchpriority="high"><link rel="stylesheet" href="/__th/v2/site.css?v='+V2_REV+'"><script defer src="/__th/v2/site.js?v='+V2_REV+'"></script><script defer src="/__th/engagement-v1.js"></script><script type="application/ld+json">'+ld+'</script></head><body>'
  +v2Header(c,locale)
- +'<main id="main"><section class="hero"><div class="shell hero-grid"><div class="hero-copy"><span class="eyebrow eyebrow-hero"><span class="eyebrow-rule"></span>'+v2T(c.tag)+'</span><h1>'+v2T(c.lead)+' <span>'+v2T(c.leadAccent)+'</span></h1><p class="hero-lead">'+v2T(c.subtitle)+'</p><div class="hero-actions"><a class="button button-primary button-xl" href="'+prefix+'admissions/">'+v2T(c.heroCta)+' <span aria-hidden="true">↗</span></a><a class="button button-quiet button-xl" href="#programs">'+v2T(c.heroSecondary)+'</a></div><div class="hero-fine"><span aria-hidden="true">✦</span>'+v2T(c.heroBottom)+'</div></div><div class="hero-art"><div class="photo-frame"><img src="'+V2_IMG_640+'" srcset="'+V2_IMG_SET+'" sizes="'+V2_IMG_SIZES+'" width="680" height="820" alt="'+v2T(c.photoSub)+'" fetchpriority="high" decoding="async"><div class="photo-shade"></div><div class="photo-label"><strong>'+v2T(c.photoBadge)+'</strong><small>'+v2T(c.photoSub)+'</small></div></div><div class="photo-side"><span>'+v2T(c.micro)+'</span></div><div class="photo-accent" aria-hidden="true"></div></div></div></section>'
+ +'<main id="main"><section class="hero"><div class="shell hero-grid"><div class="hero-copy"><span class="eyebrow eyebrow-hero"><span class="eyebrow-rule"></span>'+v2T(c.tag)+'</span><a class="semester-hero-pill" href="#semester-qaws-1405"><span class="semester-mini-dot" aria-hidden="true"></span>'+v2T(V2_SEMESTER[locale].heroTeaser)+' <span aria-hidden="true">↗</span></a><h1>'+v2T(c.lead)+' <span>'+v2T(c.leadAccent)+'</span></h1><p class="hero-lead">'+v2T(c.subtitle)+'</p><div class="hero-actions"><a class="button button-primary button-xl" href="'+prefix+'admissions/">'+v2T(c.heroCta)+' <span aria-hidden="true">↗</span></a><a class="button button-quiet button-xl" href="#programs">'+v2T(c.heroSecondary)+'</a></div><div class="hero-fine"><span aria-hidden="true">✦</span>'+v2T(c.heroBottom)+'</div></div><div class="hero-art"><div class="photo-frame"><img src="'+V2_IMG_640+'" srcset="'+V2_IMG_SET+'" sizes="'+V2_IMG_SIZES+'" width="680" height="820" alt="'+v2T(c.photoSub)+'" fetchpriority="high" decoding="async"><div class="photo-shade"></div><div class="photo-label"><strong>'+v2T(c.photoBadge)+'</strong><small>'+v2T(c.photoSub)+'</small></div></div><div class="photo-side"><span>'+v2T(c.micro)+'</span></div><div class="photo-accent" aria-hidden="true"></div></div></div></section>'
+ +v2SemesterCampaign(locale)
  +v2Stats(c,content,locale)
  +v2Programs(c,content,locale)
  +'<section class="online-section section" id="online"><div class="shell"><div class="online-panel"><div class="online-symbol" aria-hidden="true"><span>1:1</span><svg viewBox="0 0 70 70" fill="none" aria-hidden="true"><circle cx="35" cy="35" r="31" stroke="currentColor" stroke-width="1.5"/><path d="M15 35h40M35 15v40" stroke="currentColor" stroke-width="1.5"/></svg></div><div class="online-copy"><p class="eyebrow">'+v2T(c.onlineLabel)+'</p><h2>'+v2T(c.onlineTitle)+'</h2><p>'+v2T(c.onlineText)+'</p></div><a class="button button-light" href="'+prefix+'admissions/?program=online-individual-zoom">'+v2T(c.onlineCta)+' <span aria-hidden="true">↗</span></a></div></div></section>'
@@ -180,7 +243,7 @@ async function v2Home(request,env,locale){
  try{
   const data=await v2Cms(env);
   const html=v2Page(locale,data),preview=new URL(request.url).hostname!=="the-toefl-house.pages.dev";
-  const headers=new Headers({"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache, no-store, must-revalidate","X-Content-Type-Options":"nosniff","Referrer-Policy":"strict-origin-when-cross-origin","X-Frame-Options":"DENY","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Content-Language":V2_COPY[locale].lang,"Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://toefl-house-conversions.alfrotan2.workers.dev https://static.cloudflareinsights.com https://cloudflareinsights.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"});
+  const headers=new Headers({"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache, no-store, must-revalidate","X-Content-Type-Options":"nosniff","Referrer-Policy":"strict-origin-when-cross-origin","X-Frame-Options":"DENY","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Content-Language":V2_COPY[locale].lang,"Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self' https://d2ol7oe51mr4n9.cloudfront.net; connect-src 'self' https://toefl-house-conversions.alfrotan2.workers.dev https://static.cloudflareinsights.com https://cloudflareinsights.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"});
   if(preview)headers.set("X-Robots-Tag","noindex, nofollow, noarchive");
   return new Response(request.method==="HEAD"?null:html,{status:200,headers});
  }catch(error){
