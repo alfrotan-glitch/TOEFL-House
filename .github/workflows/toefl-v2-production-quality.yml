@@ -46,9 +46,12 @@ jobs:
           node --test cloudflare/site-v2/tests/*.test.mjs
           node --test cloudflare/pages-edge/tests/*.test.mjs
           node --test cloudflare/analytics/tests/*.test.mjs
-      - name: Enforce Cloudflare bundle size budget
+      - name: Enforce Cloudflare server-rendered Worker size budget
         run: |
-          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 120000
+          # Course guide translations run on the edge; visitors download only the small CSS/JS assets.
+          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 160000
+          test $(wc -c < cloudflare/site-v2/site.css) -lt 45000
+          test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
       - uses: actions/upload-artifact@v4
         with:
           name: toefl-v2-release-worker

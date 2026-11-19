@@ -1,0 +1,31 @@
+name: TOEFL House General English Exact Preview Visual & WCAG Acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: 'Exact isolated Cloudflare Preview URL'
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-ge-browser --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Audit six English-Dari-Pashto mobile and desktop browser views
+        env:
+          TOEFL_GE_PREVIEW: ${{ inputs.preview_url }}
+        run: node cloudflare/site-v2/general-english-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: general-english-visual-acceptance
+          path: general-english-qa/*.png
+          retention-days: 7
+          if-no-files-found: ignore
