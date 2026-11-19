@@ -114,4 +114,19 @@ if(enquiry){
  });
 }
 
+
+/* Accessible, click-to-play semester poster; native video controls remain as fallback. */
+var semesterVideo=document.querySelector(".semester-video");
+var semesterCover=document.querySelector(".semester-video-cover");
+if(semesterVideo&&semesterCover){
+ semesterCover.hidden=false;
+ semesterCover.addEventListener("click",function(){
+  semesterCover.hidden=true;
+  try{
+   var playback=semesterVideo.play();
+   if(playback&&typeof playback.catch==="function")playback.catch(function(){semesterVideo.controls=true;});
+  }catch(_){semesterVideo.controls=true;}
+ });
+}
+
 })();

@@ -1,0 +1,38 @@
+name: Qaws 1405 — real-browser semester campaign acceptance
+on:
+  push:
+    branches: [semester-qaws-1405-video-homepage]
+    paths:
+      - 'cloudflare/site-v2/**'
+      - '.github/workflows/semester-video-browser.yml'
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Preview or live website URL to verify'
+        required: false
+        default: 'https://the-toefl-house.pages.dev'
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TH_SEMESTER_URL: ${{ inputs.target_url || 'https://152f3b4e.the-toefl-house.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser client
+        run: npm install --prefix /tmp/toefl-campaign-browser --no-save playwright-core@1.56.0 --silent
+      - name: Check trilingual marketing, video playback, conversion and mobile layout
+        run: node cloudflare/site-v2/semester-video-browser.cjs
+      - name: Save visual QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qaws-1405-semester-campaign-screenshots
+          path: /tmp/semester-proof/*.png
+          if-no-files-found: warn
+          retention-days: 14
