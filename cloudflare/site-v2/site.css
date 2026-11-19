@@ -438,3 +438,40 @@ html[dir=rtl] .ge-stage h4{align-self:flex-start;text-align:start}
 .ge-cta .button{white-space:normal;min-width:215px;text-align:center}
 @media(max-width:1020px){.ge-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.ge-columns{grid-template-columns:1fr}.ge-side{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto}.ge-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.ge-section{padding-block:60px 68px}.ge-heading h2{font-size:30px}.ge-heading>p:not(.eyebrow){font-size:13px}.ge-facts{gap:8px;margin-bottom:46px}.ge-fact{padding:16px;min-height:98px}.ge-fact strong{font-size:17px}.ge-fact span{font-size:11px}.ge-stages{grid-template-columns:1fr;gap:9px}.ge-stage{padding:16px}.ge-stages-block{margin-bottom:46px}.ge-columns{margin-bottom:46px}.ge-side{display:grid;grid-template-columns:1fr}.ge-panel{padding:24px 20px}.ge-fees{padding:25px 15px;margin-bottom:45px}.ge-fee-table th,.ge-fee-table td{font-size:11px;padding:13px 6px}.ge-fee-table tbody td strong{font-size:12px}.ge-fee-total{padding:17px 15px}.ge-questions{margin-bottom:38px}.ge-references{padding:19px 17px}.ge-cta{display:flex;flex-direction:column;align-items:stretch;padding:21px}.ge-cta .button{width:100%}}
+
+
+/* Seasonal enrollment campaign: intentionally separate from permanent learning content. */
+.semester-hero-pill{display:inline-flex;align-items:center;gap:10px;max-width:100%;margin:0 0 17px;padding:9px 15px;border:1px solid #e8c5cd;border-radius:999px;background:#fff8f9;color:#991933;font-size:12px;font-weight:800;line-height:1.65;transition:transform .22s var(--ease),box-shadow .22s var(--ease)}
+.semester-hero-pill:hover{transform:translateY(-2px);box-shadow:0 7px 24px #98263b15}
+.semester-mini-dot,.semester-dot{width:8px;height:8px;border-radius:50%;background:#ce3046;flex:none}
+.semester-section{position:relative;padding:72px 0 78px;background:#fff;overflow:hidden}
+.semester-card{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.32fr) minmax(285px,.74fr);align-items:center;gap:46px;padding:62px clamp(30px,5vw,77px);border-radius:25px;background:linear-gradient(132deg,#aa1934 0%,#8e1732 52%,#611022 100%);box-shadow:0 24px 65px #7e193323}
+.semester-card:before{content:"";position:absolute;z-index:-1;width:650px;height:650px;border:1px solid #ffffff20;border-radius:50%;inset-inline-end:-220px;inset-block-start:-210px;box-shadow:0 0 0 80px #ffffff06,0 0 0 165px #ffffff05}
+.semester-copy{position:relative;z-index:2;min-width:0;color:#fff}
+.semester-eyebrow{display:flex;align-items:center;gap:10px;margin:0 0 21px;color:#fff;font-size:11px;font-weight:850;letter-spacing:.12em}
+html[dir=rtl] .semester-eyebrow{letter-spacing:0;font-size:13px}
+.semester-dot{background:#fff;box-shadow:0 0 0 5px #ffffff2a}
+.semester-title{margin:0 0 21px;max-width:710px;color:#fff;font-size:clamp(34px,3.8vw,56px);font-weight:850;letter-spacing:-.035em;line-height:1.24;text-wrap:balance}
+.semester-title span{display:block;color:#ffd3de}
+html[dir=rtl] .semester-title{font-weight:750;letter-spacing:-.015em;line-height:1.58;font-size:clamp(31px,3.4vw,49px)}
+.semester-lead{font-size:14px;line-height:1.95;color:#fff;margin:0 0 20px;max-width:590px}
+html[dir=rtl] .semester-lead{line-height:2.05}
+.semester-chips{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:0 0 24px}
+.semester-chips li{font-size:11px;font-weight:750;padding:7px 13px;border:1px solid #ffffff54;border-radius:999px;background:#ffffff14;color:#fff}
+html[dir=rtl] .semester-chips li{font-size:12px}
+.semester-free{margin:0 0 27px;display:flex;gap:9px;align-items:flex-start;color:#fff;font-size:12px;font-weight:700;line-height:1.8}
+.semester-free span{color:#ffe0e7}
+.semester-actions{display:flex;flex-wrap:wrap;align-items:center;gap:11px}
+.semester-primary{padding:15px 19px;min-height:53px;background:#fff;color:#82132b;font-weight:850;font-size:12px}
+.semester-primary:hover{background:#fff0f3}
+.semester-secondary{padding:14px 18px;min-height:53px;border:1px solid #ffffffad;background:transparent;color:#fff;font-size:12px}
+.semester-secondary:hover{background:#ffffff20}
+.semester-media{position:relative;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.semester-video-frame{position:relative;width:min(100%,310px);aspect-ratio:9/16;overflow:hidden;border:6px solid #ffffffee;border-radius:22px;background:#173038;box-shadow:0 28px 50px #28050e75;transform:rotate(2deg)}
+.semester-video{width:100%;height:100%;display:block;object-fit:cover;background:#173038;outline-offset:-7px}
+.semester-filmmark{position:absolute;top:16px;inset-inline-start:15px;border-radius:20px;padding:6px 10px;background:#17090bab;color:#fff;font-family:ui-sans-serif,system-ui,sans-serif;font-size:9px;font-weight:800;letter-spacing:.08em;pointer-events:none}
+.semester-video-caption{color:#fff;text-align:center;font-size:11px;font-weight:750;margin:20px 0 0}
+@media(max-width:1020px){.semester-card{grid-template-columns:minmax(0,1fr) 280px;gap:26px;padding:48px 35px}.semester-title{font-size:clamp(29px,3.6vw,40px)}.semester-video-frame{width:260px}}
+@media(max-width:760px){.semester-section{padding:48px 0}.semester-card{grid-template-columns:1fr;gap:34px;padding:36px 25px 40px;border-radius:18px}.semester-title{font-size:clamp(31px,7vw,40px)}.semester-lead{font-size:13px}.semester-media{padding-top:4px}.semester-video-frame{width:min(100%,300px);transform:none}.semester-video-caption{margin-top:15px}.semester-actions{align-items:stretch}.semester-actions .button{flex:1 1 200px}.semester-hero-pill{font-size:11px}}
+@media(max-width:460px){.semester-card{padding:31px 19px 35px}.semester-eyebrow{font-size:11px}.semester-title{font-size:31px}.semester-actions{display:grid;grid-template-columns:1fr}.semester-actions .button{width:100%}.semester-video-frame{width:min(100%,275px)}html[dir=rtl] .semester-title{font-size:29px}}
+@media(prefers-reduced-motion:reduce){.semester-hero-pill{transition:none}.semester-hero-pill:hover{transform:none}.semester-video-frame{transform:none}}
