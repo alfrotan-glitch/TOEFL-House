@@ -197,3 +197,52 @@ test("Malformed URL hash does not crash the student menu or enrolment script",as
  });
  assert.ok(handlers.includes("keydown"),"Mobile navigation handlers must still initialize");
 });
+
+
+test("General English exposes five school levels, realistic AFN tuition and Oxford book-level distinction in EN/FA/PS",async()=>{
+ const cases=[
+  {path:"/courses/general-english/",two:"2 instructors",monthly:"500 AFN",semester:"1,000 AFN",total:"4,500 AFN",free:"Free"},
+  {path:"/fa/courses/general-english/",two:"۲ استاد",monthly:"۵۰۰ افغانی",semester:"۱٬۰۰۰ افغانی",total:"۴٬۵۰۰ افغانی",free:"رایگان"},
+  {path:"/ps/courses/general-english/",two:"۲ استادان",monthly:"۵۰۰ افغانۍ",semester:"۱٬۰۰۰ افغانۍ",total:"۴٬۵۰۰ افغانۍ",free:"وړیا"}
+ ];
+ for(const c of cases){
+  const res=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+c.path),env());
+  assert.equal(res.status,200,c.path);
+  const html=await res.text();
+  assert.match(html,/id="general-english-details"/,c.path);
+  assert.match(html,/id="ge-fees-title"/,c.path);
+  assert.match(html,/Got it!/);
+  assert.match(html,/Oxford University Press/);
+  assert.ok(html.includes(c.two),c.path+" two instructors");
+  assert.ok(html.includes(c.monthly),c.path+" monthly AFN 500");
+  assert.ok(html.includes(c.semester),c.path+" semester AFN 1000");
+  assert.ok(html.includes(c.total),c.path+" optional complete path AFN 4500");
+  assert.ok(html.includes(c.free),c.path+" free assessment");
+  for(const level of ["Pre-Starter","Starter","Prep One","Prep Two","Prep Three"]){
+   assert.ok(html.includes('>'+level+'</h4>'),c.path+" "+level);
+  }
+  assert.equal((html.match(/class="ge-stage"/g)||[]).length,5,"Exactly five stages");
+  assert.equal((html.match(/class="ge-faq"/g)||[]).length,3,"Three useful FAQs");
+  assert.ok(html.includes("Got it! Level 3"),"Four publisher book levels explained");
+  assert.ok(html.includes("Oxford Learner"),"Reference to Oxford eBook platform");
+  assert.ok(html.includes("Speaking"),"Dedicated Speaking chapter");
+  assert.match(html,/admissions\/\?program=general-english/,"GE placement CTA");
+  assert.doesNotMatch(html,/<img[^>]+(?:got-it|gotit|oxford-cover)/i,"No unlicensed Oxford images");
+ }
+});
+test("General English supplement is exclusive to General English; other courses unchanged",async()=>{
+ for(const route of ["/courses/toefl-preparation/","/fa/courses/academic-english/","/ps/courses/special-speaking/"]){
+  const res=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+route),env());
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.doesNotMatch(html,/id="general-english-details"/,route);
+ }
+});
+test("General English course preview remains noindex and HEAD has no body",async()=>{
+ const q=await worker.fetch(new Request("https://abc12345.the-toefl-house.pages.dev/fa/courses/general-english/"),env());
+ assert.equal(q.status,200);
+ assert.match(q.headers.get("X-Robots-Tag"),/noindex/);
+ const h=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/courses/general-english/",{method:"HEAD"}),env());
+ assert.equal(h.status,200);
+ assert.equal(await h.text(),"");
+});
