@@ -53,14 +53,19 @@ const cases=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
    assert.equal(state.programAnchor,true,path);
    assert.equal(state.rootVideos,1,path);
    assert.equal(state.cssLoaded,true,path);
-   results.push({path,status:response.status(),...state});
+   const cover=page.locator(".semester-video-cover");
+   assert.equal(await cover.isVisible(),true,path+" video poster button missing");
+   const focus=await page.evaluate(()=>({active:document.activeElement?.tagName,skipFocused:document.querySelector(".skip")?.matches(":focus"),skipVisible:document.querySelector(".skip")?.matches(":focus-visible")}));
+   results.push({path,status:response.status(),focus,...state});
+   await page.evaluate(()=>{const el=document.activeElement;if(el&&el instanceof HTMLElement&&el!==document.body)el.blur();});
    await page.locator("#semester-qaws-1405").screenshot({path:"/tmp/semester-proof/campaign-"+(lang==="fa-AF"?"fa":lang==="ps-AF"?"ps":"en")+"-mobile.png"});
   }
   await page.goto(base+"/fa/",{waitUntil:"networkidle",timeout:30000});
-  await page.locator("#semester-qaws-1405 video").evaluate(async video=>{
-   video.muted=true;
-   await video.play();
-  });
+  const playButton=page.locator(".semester-video-cover");
+  assert.equal(await playButton.isVisible(),true,"Poster overlay must be visible before playing");
+  await page.locator("#semester-qaws-1405 video").evaluate(video=>{video.muted=true;});
+  await playButton.click();
+  assert.equal(await playButton.isVisible(),false,"Poster overlay must hide on play");
   await page.waitForFunction(()=>document.querySelector("#semester-qaws-1405 video").currentTime>0.2,null,{timeout:15000});
   const playback=await page.locator("#semester-qaws-1405 video").evaluate(video=>({duration:video.duration,ready:video.readyState,time:video.currentTime,paused:video.paused,width:video.videoWidth,height:video.videoHeight}));
   assert.ok(playback.duration>35&&playback.duration<37,"Unexpected original video duration");
