@@ -282,3 +282,20 @@ test("Public course and admissions pages remove legacy branding and internal-ver
  }
  assert.ok(updated.locales.fa.programs[0].details.includes("خانه موفقیت"),"Original CMS remains unchanged");
 });
+
+test("Legacy published timetable blurbs use a consistent, verifiable public schedule",async()=>{
+ const e=structuredClone(main),p=structuredClone(ps);
+ e.locales.en.contact={operatingHours:"Teaching: Saturday–Thursday · Men: 6:20 AM–5:50 PM · Women: 6:30 AM–5:40 PM · Friday: Closed"};
+ e.locales.fa.contact={operatingHours:"جلسات درسی: شنبه الی پنج‌شنبه · برادران: ۶:۲۰ صبح تا ۵:۵۰ شام · خواهران: ۶:۳۰ صبح تا ۵:۴۰ شام · جمعه: رخصت"};
+ p.contact={hours:"شنبه تر پنجشنبې: سهار ۶:۲۰ تر ماښام ۶:۰۰؛ جمعه رخصتي، ځانګړي پروګرامونه جلا اعلانېږي"};
+ for(const path of ["/","/fa/","/ps/"]){
+  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env(e,p));
+  const html=await r.text();
+  assert.equal(r.status,200,path);
+  assert.doesNotMatch(html,/6:20 AM–5:50 PM|۶:۲۰ صبح تا ۵:۵۰ شام|سهار ۶:۲۰ تر ماښام ۶:۰۰/);
+  assert.match(html,/Confirm class times with admissions|وقت دقیق صنف را از پذیرش بپرسید|د ټولګي دقیق وخت له ادارې وپوښتئ/);
+ }
+ p.contact.hours="د نوې دورې مهالوېش CMS_EDITED_HOURS";
+ const page=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/"),env(e,p));
+ assert.match(await page.text(),/CMS_EDITED_HOURS/);
+});
