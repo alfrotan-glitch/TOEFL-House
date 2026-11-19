@@ -3,7 +3,8 @@ const assert=require("node:assert/strict");
 const {chromium}=require("/tmp/toefl-ge-browser/node_modules/playwright-core");
 const axe=require("/tmp/toefl-ge-browser/node_modules/axe-core");
 const fs=require("node:fs/promises");
-const base="https://818c8713.the-toefl-house.pages.dev";
+const base=process.env.TOEFL_GE_PREVIEW;
+assert.ok(/^https:\/\/[a-f0-9]{8}\.the-toefl-house\.pages\.dev$/.test(base||""),"QA requires an exact isolated Cloudflare Preview URL");
 const variants=[
  {path:"/courses/general-english/",lang:"en",dir:"ltr",staff:"2 instructors",monthly:"500 AFN",semester:"1,000 AFN",total:"4,500 AFN"},
  {path:"/fa/courses/general-english/",lang:"fa-AF",dir:"rtl",staff:"۲ استاد",monthly:"۵۰۰ افغانی",semester:"۱٬۰۰۰ افغانی",total:"۴٬۵۰۰ افغانی"},
