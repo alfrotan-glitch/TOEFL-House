@@ -1,0 +1,17 @@
+name: TOEFL House Production Admissions End-to-End Acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-production-admissions --no-save playwright-core@1.56.0 --silent
+      - name: Test live trilingual course-to-WhatsApp flow while intercepting ALL external analytics and messages
+        run: node cloudflare/site-v2/production-admissions-acceptance.cjs
