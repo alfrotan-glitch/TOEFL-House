@@ -14,7 +14,8 @@ try{
   sessionStorage.setItem("th_campaign",JSON.stringify({source:safeSource||"website",campaign:safeCampaign||"site_cta"}));
  }
 }catch(_){}
-var known=location.hash?decodeURIComponent(location.hash.slice(1)):"";
+var known="";
+if(location.hash){try{known=decodeURIComponent(location.hash.slice(1));}catch(_){known="";}}
 var legacy=/(?:^|\/)(?:fa|ps)?\/?tools\/?$/.test(location.pathname);
 if(known&&!legacy&&!document.getElementById(known)){
   var current=location.pathname;
@@ -43,7 +44,7 @@ if(enquiry){
   var current=enquiry.getAttribute("data-locale")||"en";
   var template={
    en:"Hello. I would like information about courses at The TOEFL House and a free placement assessment.\nProgram: ",
-   fa:"سلام. می‌خواهم در مورد صنف‌های خانه موفقیت معلومات بگیرم و تعیین سطح رایگان انجام بدهم.\nبرنامه: ",
+   fa:"سلام. می‌خواهم در مورد صنف‌های تافل هوس معلومات بگیرم و تعیین سطح رایگان انجام بدهم.\nبرنامه: ",
    ps:"سلام. د خانه موفقیت د کورسونو معلومات او د وړیا سویې معلومولو غوښتنه لرم.\nپروګرام: "
   };
   var labels={
