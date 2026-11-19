@@ -32,13 +32,13 @@ const V2_COPY={
   statsFallback:[["6,000+","Graduates since 2013"],["500+","TOEFL test-takers guided"],["100+","University admissions worldwide"]],courseNames:["General English","Academic English","TOEFL Preparation","Special Speaking","Professional Writing","Teacher Training"],fallbackFaq:[["Is the placement assessment free?","Yes. Placement assessment is free; course tuition is separate."],["Can I enroll without an email?","Yes. You may contact admissions through WhatsApp or by phone."],["Are online classes available?","Private online classes can be arranged based on teacher availability and time zones."]]
  },
  fa:{
-  lang:"fa-AF",dir:"rtl",name:"THE TOEFL HOUSE",localName:"خانه موفقیت",tag:"آموزش زبان انگلیسی · کابل",
-  navPrograms:"برنامه‌ها",navGuides:"رهنماهای آموزشی",navWhy:"چرا خانه موفقیت؟",navOnline:"صنف‌های آنلاین",navFaq:"پرسش‌ها",navContact:"تماس",navMenu:"فهرست",
+  lang:"fa-AF",dir:"rtl",name:"THE TOEFL HOUSE",localName:"تافل هوس",tag:"آموزش زبان انگلیسی · کابل",
+  navPrograms:"برنامه‌ها",navGuides:"رهنماهای آموزشی",navWhy:"چرا تافل هوس؟",navOnline:"صنف‌های آنلاین",navFaq:"پرسش‌ها",navContact:"تماس",navMenu:"فهرست",
   navApply:"تعیین سطح رایگان",badge:"پذیرش جریان دارد · تعیین سطح رایگان",
   lead:"راه یادگیری انگلیسی شما",leadAccent:"از همین‌جا آغاز می‌شود.",subtitle:"از اولین کلمات انگلیسی تا مکالمهٔ روان، انگلیسی اکادمیک و آمادگی تافل. با تعیین سطح رایگان، صنف مناسب خود را پیدا کنید.",
   heroCta:"درخواست تعیین سطح رایگان",heroSecondary:"دیدن برنامه‌های آموزشی",heroBottom:"صنف‌های حضوری در کابل · آموزش آنلاین انفرادی با هماهنگی",
-  photoBadge:"باهم یاد می‌گیریم",photoSub:"دشت برچی · کابل",micro:"خانه موفقیت • از سال ۲۰۱۳",
-  trustTitle:"جایی برای پیشرفت",trustSub:"آمار منتشرشده توسط خانه موفقیت",
+  photoBadge:"باهم یاد می‌گیریم",photoSub:"دشت برچی · کابل",micro:"تافل هوس • از سال ۲۰۱۳",
+  trustTitle:"جایی برای پیشرفت",trustSub:"آمار منتشرشده توسط تافل هوس",
   courseEyebrow:"مسیر آموزشی خود را انتخاب کنید",coursesTitle:"برنامهٔ مناسب برای",coursesAccent:"هدف شما.",coursesLead:"شش برنامهٔ آموزشی برای نیازهای متفاوت. فیس، ظرفیت و زمان صنف‌ها را از بخش پذیرش بپرسید.",
   courseDetail:"معلومات برنامه",courseDuration:"مدت دوره",onlineLabel:"آموزش آنلاین انفرادی",onlineTitle:"یک استاد، یک شاگرد؛ مطابق وقت شما.",onlineText:"صنف‌های زنده از طریق Zoom برای علاقه‌مندان خارج از کابل، از جمله اروپا و کانادا، با هماهنگی قابل برگزاری است. فیس، مضمون، منطقهٔ زمانی و اوقات صنف پیش از ثبت‌نام تأیید می‌شود.",onlineCta:"معلومات صنف‌های آنلاین",
   whyLabel:"شروع آسان و روشن",whyTitle:"با اطمینان آغاز کنید.",whyLead:"از انتخاب برنامه تا شامل‌شدن در صنف، سه گام ساده پیش روی شماست.",
@@ -153,7 +153,7 @@ function v2Footer(c,locale,content){
  return '<footer class="footer" id="contact"><div class="shell"><div class="footer-main"><div class="footer-brand"><span class="eyebrow">'+v2T(c.visitLabel)+'</span><h2>'+v2T(visitTitle)+'</h2><p>'+v2T(visitAddress)+'</p><span class="footer-hours">'+v2T(visitHours)+'</span></div><div class="footer-links"><a href="'+prefix+'#programs">'+v2T(c.footPrograms)+'</a><a href="'+prefix+'guides/">'+v2T(c.navGuides)+'</a><a href="'+prefix+'admissions/">'+v2T(c.footJoin)+'</a><a href="'+prefix+'tools/">'+v2T(c.footTools)+'</a><a href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+'</a><a href="tel:+93745651844">'+v2T(c.phone)+'</a><a href="'+maps+'" target="_blank" rel="noopener noreferrer">'+v2T(c.map)+' ↗</a></div></div><div class="footer-bottom"><span>© '+new Date().getUTCFullYear()+' THE TOEFL HOUSE · '+v2T(c.footerRights)+'</span><span>'+v2T(c.footerNote)+'</span></div></div></footer>';
 }
 function v2Page(locale,content){
- const c=V2_COPY[locale],prefix=v2Prefix(locale),title=locale==="en"?"The TOEFL House | English Classes & TOEFL Preparation in Kabul":locale==="fa"?"خانه موفقیت | کورس زبان انگلیسی و آمادگی تافل در کابل":"The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه";
+ const c=V2_COPY[locale],prefix=v2Prefix(locale),title=locale==="en"?"The TOEFL House | English Classes & TOEFL Preparation in Kabul":locale==="fa"?"تافل هوس | کورس زبان انگلیسی و آمادگی تافل در کابل":"The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه";
  const desc=c.subtitle,canonical=V2_ORIGIN+prefix;
  const language="<link rel=\"alternate\" hreflang=\"en\" href=\""+V2_ORIGIN+"/\"><link rel=\"alternate\" hreflang=\"fa-AF\" href=\""+V2_ORIGIN+"/fa/\"><link rel=\"alternate\" hreflang=\"ps-AF\" href=\""+V2_ORIGIN+"/ps/\"><link rel=\"alternate\" hreflang=\"x-default\" href=\""+V2_ORIGIN+"/\">";
  const ld=JSON.stringify({"@context":"https://schema.org","@type":"EducationalOrganization","name":"The TOEFL House","alternateName":"خانه موفقیت","url":V2_ORIGIN+"/","description":c.subtitle,"address":{"@type":"PostalAddress","streetAddress":"Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi","addressLocality":"Kabul","addressCountry":"AF"},"telephone":"+93745651844","availableLanguage":["en","fa-AF","ps-AF"]}).replace(/</g,"\\u003c");
