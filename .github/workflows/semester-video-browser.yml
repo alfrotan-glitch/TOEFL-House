@@ -4,6 +4,7 @@ on:
     branches: [semester-qaws-1405-video-homepage, main]
     paths:
       - '.github/workflows/semester-video-browser.yml'
+      - 'cloudflare/site-v2/semester-video-browser.cjs'
   workflow_dispatch:
     inputs:
       target_url:
