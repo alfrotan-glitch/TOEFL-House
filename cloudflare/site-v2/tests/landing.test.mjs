@@ -261,3 +261,24 @@ test("Published CMS historical name uses visitor brand without modifying saved d
  assert.match(await psResponse.text(),/په تافل هوس کې د سویې معلومول وړیا دي/);
  assert.equal(fa.locales.fa.faq.items[0].a,"بلی، در خانه موفقیت تعیین سطح رایگان است.");
 });
+
+test("Public course and admissions pages remove legacy branding and internal-version wording",async()=>{
+ const updated=structuredClone(main);
+ updated.locales.fa.programs[0].details="در خانه موفقیت معلومات داخلی مرکز";
+ const pashto=structuredClone(ps);
+ pashto.programs[0].details="په خانه موفقیت کې د کورس معلومات";
+ for(const [path,site] of [
+  ["/fa/courses/general-english/",updated],
+  ["/ps/courses/general-english/",updated],
+  ["/ps/admissions/",updated],
+  ["/fa/admissions/",updated],
+  ["/admissions/",updated]
+ ]){
+  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env(updated,pashto));
+  assert.equal(response.status,200,path);
+  const html=await response.text();
+  assert.doesNotMatch(html,/خانه موفقیت|View original student form|فورم قبلی|پخوانی فورم/,path);
+  assert.match(html,/THE TOEFL HOUSE/,path);
+ }
+ assert.ok(updated.locales.fa.programs[0].details.includes("خانه موفقیت"),"Original CMS remains unchanged");
+});
