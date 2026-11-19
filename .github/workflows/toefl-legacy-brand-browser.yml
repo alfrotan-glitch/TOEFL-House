@@ -1,0 +1,31 @@
+name: TOEFL House — Legacy Tools Brand Browser Acceptance
+on:
+  push:
+    branches: [legacy-tools-public-brand-20261119]
+    paths:
+      - 'cloudflare/pages-edge/**'
+      - 'cloudflare/site-v2/legacy-brand-browser.cjs'
+      - '.github/workflows/toefl-legacy-brand-browser.yml'
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Exact preview or canonical site to check'
+        required: false
+        default: 'https://the-toefl-house.pages.dev'
+permissions:
+  contents: read
+jobs:
+  verify-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      V2_TOOLS_BRAND_BASE: ${{ github.event_name == 'push' && 'https://0ec8f3b5.the-toefl-house.pages.dev' || inputs.target_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Playwright client
+        run: npm install --prefix /tmp/toefl-tools-browser --no-save playwright-core@1.56.0 --silent
+      - name: Verify preserved React student tools, public branding, navigation and mobile layout
+        run: node cloudflare/site-v2/legacy-brand-browser.cjs
