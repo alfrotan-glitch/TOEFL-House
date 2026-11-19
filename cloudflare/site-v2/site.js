@@ -49,7 +49,7 @@ if(enquiry){
  function syncLanguageLinks(){
   document.querySelectorAll(".language-links a[hreflang], .mobile-language a[hreflang]").forEach(function(link){
    var dest=new URL(link.getAttribute("href"),location.href);
-   if(dest.origin!==location.origin||!\/\/admissions\/$/.test(dest.pathname))return;
+   if(dest.origin!==location.origin||!/\/admissions\/$/.test(dest.pathname))return;
    var params=new URLSearchParams();
    if(allowed(courseChoice,courseChoice.value))params.set("program",courseChoice.value);
    if(allowed(formatChoice,formatChoice.value))params.set("format",formatChoice.value);
