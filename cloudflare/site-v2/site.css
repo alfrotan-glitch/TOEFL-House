@@ -475,3 +475,13 @@ html[dir=rtl] .semester-chips li{font-size:12px}
 @media(max-width:760px){.semester-section{padding:48px 0}.semester-card{grid-template-columns:1fr;gap:34px;padding:36px 25px 40px;border-radius:18px}.semester-title{font-size:clamp(31px,7vw,40px)}.semester-lead{font-size:13px}.semester-media{padding-top:4px}.semester-video-frame{width:min(100%,300px);transform:none}.semester-video-caption{margin-top:15px}.semester-actions{align-items:stretch}.semester-actions .button{flex:1 1 200px}.semester-hero-pill{font-size:11px}}
 @media(max-width:460px){.semester-card{padding:31px 19px 35px}.semester-eyebrow{font-size:11px}.semester-title{font-size:31px}.semester-actions{display:grid;grid-template-columns:1fr}.semester-actions .button{width:100%}.semester-video-frame{width:min(100%,275px)}html[dir=rtl] .semester-title{font-size:29px}}
 @media(prefers-reduced-motion:reduce){.semester-hero-pill{transition:none}.semester-hero-pill:hover{transform:none}.semester-video-frame{transform:none}}
+
+.semester-video-cover{position:absolute;inset:0;display:grid;place-items:center;width:100%;height:100%;padding:0;border:0;color:#fff;background:#193642;cursor:pointer;isolation:isolate}
+.semester-video-cover[hidden]{display:none}
+.semester-video-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+.semester-cover-shade{position:absolute;inset:0;background:linear-gradient(0deg,#15070b7d 0%,#14060d0d 42%,#14060d00 68%);pointer-events:none}
+.semester-play-circle{display:grid;place-items:center;position:relative;z-index:1;width:78px;height:78px;border-radius:50%;border:2px solid #ffffffdb;background:#c72b45eb;color:#fff;box-shadow:0 0 0 12px #ffffff29,0 16px 45px #180a1280;transition:transform .24s var(--ease),background .2s}
+.semester-video-cover:hover .semester-play-circle{transform:scale(1.08);background:#aa1f3b}
+.semester-video-cover:focus-visible{outline:4px solid #ffd3de;outline-offset:-9px}
+.semester-play-caption{position:absolute;z-index:1;inset-block-end:38px;inset-inline:15px;text-align:center;color:#fff;font-size:14px;line-height:1.75;font-weight:800;text-shadow:0 2px 9px #1b0614ba}
+@media(prefers-reduced-motion:reduce){.semester-play-circle{transition:none}.semester-video-cover:hover .semester-play-circle{transform:none}}
