@@ -1,0 +1,26 @@
+name: Semester Qaws 1405 — promotional video source acceptance
+on:
+  push:
+    branches: [semester-qaws-1405-video-homepage]
+    paths:
+      - '.github/workflows/semester-video-source-check.yml'
+      - 'cloudflare/site-v2/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  media-access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify original user-supplied H.264/AAC promotional video is reachable
+        env:
+          MEDIA_URL: https://d2ol7oe51mr4n9.cloudfront.net/user_3LPLI9IxwqxpPOe3cVF5EVhg2wd/21a66634-3b32-49c7-9034-8680714ebf17.mp4
+        run: |
+          set -euo pipefail
+          curl --location --fail --retry 2 --max-time 35 --range 0-65535 --output /tmp/video-part.mp4 --dump-header /tmp/video-headers.txt "$MEDIA_URL"
+          grep -Eai 'HTTP/|content-type|content-range|accept-ranges|content-length' /tmp/video-headers.txt
+          test -s /tmp/video-part.mp4
+          bytes=$(wc -c </tmp/video-part.mp4)
+          echo "Downloaded media probe bytes: $bytes"
+          head -c 12 /tmp/video-part.mp4 | od -An -tx1
