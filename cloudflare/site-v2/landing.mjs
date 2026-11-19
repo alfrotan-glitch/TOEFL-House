@@ -87,6 +87,8 @@ const V2_SEMESTER={
   "cta": "Ask about the new semester",
   "secondary": "Explore programs",
   "videoLabel": "Watch our new semester announcement",
+  "play": "Play the new semester video",
+  "playText": "Watch the video"
   "videoCaption": "Our new semester · 36-second video",
   "videoFallback": "Watch the semester video"
  },
@@ -105,6 +107,8 @@ const V2_SEMESTER={
   "cta": "دربارهٔ سمستر جدید معلومات بگیرم",
   "secondary": "دیدن تمام برنامه‌ها",
   "videoLabel": "ویدیوی معرفی سمستر جدید تافل هوس",
+  "play": "پخش ویدیوی معرفی سمستر جدید",
+  "playText": "ویدیو را تماشا کنید"
   "videoCaption": "اعلان سمستر جدید · ویدیوی ۳۶ ثانیه‌ای",
   "videoFallback": "تماشای ویدیوی سمستر"
  },
@@ -123,6 +127,8 @@ const V2_SEMESTER={
   "cta": "د نوي سمستر په اړه معلومات غواړم",
   "secondary": "ټول پروګرامونه وګورئ",
   "videoLabel": "د تافل هوس د نوي سمستر معرفي ویډیو",
+  "play": "د نوي سمستر ویډیو پلې کړئ",
+  "playText": "ویډیو وګورئ"
   "videoCaption": "د نوي سمستر اعلان · ۳۶ ثانیې ویډیو",
   "videoFallback": "د سمستر ویډیو وګورئ"
  }
@@ -130,7 +136,7 @@ const V2_SEMESTER={
 function v2SemesterCampaign(locale){
  const p=v2Prefix(locale),c=V2_SEMESTER[locale];
  const signup=p+"admissions/?utm_source=website&amp;utm_campaign=qaws_1405_semester";
- return '<section class="semester-section" id="semester-qaws-1405" aria-labelledby="semester-heading"><div class="shell"><div class="semester-card"><div class="semester-copy"><p class="semester-eyebrow"><span class="semester-dot" aria-hidden="true"></span>'+v2T(c.eyebrow)+'</p><h2 id="semester-heading" class="semester-title">'+v2T(c.title)+' <span>'+v2T(c.accent)+'</span></h2><p class="semester-lead">'+v2T(c.lead)+'</p><ul class="semester-chips">'+c.chips.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul><p class="semester-free"><span aria-hidden="true">✦</span> '+v2T(c.free)+'</p><div class="semester-actions"><a class="button semester-primary" href="'+signup+'">'+v2T(c.cta)+' <span aria-hidden="true">↗</span></a><a class="button semester-secondary" href="#programs">'+v2T(c.secondary)+'</a></div></div><div class="semester-media"><div class="semester-video-frame"><video class="semester-video" controls playsinline preload="none" poster="'+V2_IMG_640+'" width="720" height="1280" aria-label="'+v2T(c.videoLabel)+'"><source src="'+V2_SEMESTER_VIDEO+'" type="video/mp4">'+v2T(c.videoFallback)+'</video><span class="semester-filmmark" aria-hidden="true">THE TOEFL HOUSE · 00:36</span></div><p class="semester-video-caption">'+v2T(c.videoCaption)+'</p></div></div></div></section>';
+ return '<section class="semester-section" id="semester-qaws-1405" aria-labelledby="semester-heading"><div class="shell"><div class="semester-card"><div class="semester-copy"><p class="semester-eyebrow"><span class="semester-dot" aria-hidden="true"></span>'+v2T(c.eyebrow)+'</p><h2 id="semester-heading" class="semester-title">'+v2T(c.title)+' <span>'+v2T(c.accent)+'</span></h2><p class="semester-lead">'+v2T(c.lead)+'</p><ul class="semester-chips">'+c.chips.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul><p class="semester-free"><span aria-hidden="true">✦</span> '+v2T(c.free)+'</p><div class="semester-actions"><a class="button semester-primary" href="'+signup+'">'+v2T(c.cta)+' <span aria-hidden="true">↗</span></a><a class="button semester-secondary" href="#programs">'+v2T(c.secondary)+'</a></div></div><div class="semester-media"><div class="semester-video-frame"><video class="semester-video" controls playsinline preload="none" poster="'+V2_IMG_640+'" width="720" height="1280" aria-label="'+v2T(c.videoLabel)+'"><source src="'+V2_SEMESTER_VIDEO+'" type="video/mp4">'+v2T(c.videoFallback)+'</video><button class="semester-video-cover" type="button" hidden aria-label="'+v2T(c.play)+'"><img src="'+V2_IMG_640+'" width="640" height="820" loading="lazy" decoding="async" alt=""><span class="semester-cover-shade" aria-hidden="true"></span><span class="semester-play-circle" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M8 5.6c0-.8.9-1.3 1.6-.9L20 11.2c.6.4.6 1.2 0 1.6L9.6 19.3C8.9 19.7 8 19.2 8 18.4V5.6z"/></svg></span><span class="semester-play-caption" aria-hidden="true">'+v2T(c.playText)+'</span></button><span class="semester-filmmark" aria-hidden="true">THE TOEFL HOUSE · 00:36</span></div><p class="semester-video-caption">'+v2T(c.videoCaption)+'</p></div></div></div></section>';
 }
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
 function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
