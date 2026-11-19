@@ -169,3 +169,31 @@ test("Learning guides are reachable from main header and footer in all languages
   assert.ok(html.includes('href="'+prefix+'guides/"'),"Missing guides: "+prefix);
  }
 });
+
+
+test("Afghan Dari V2 public marketing uses the current TOEFL House name",async()=>{
+ const home=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env());
+ const html=await home.text();
+ assert.match(html,/<title>تافل هوس \| کورس زبان انگلیسی و آمادگی تافل در کابل<\/title>/);
+ assert.match(html,/تافل هوس/);
+ const admissions=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/admissions/"),env());
+ assert.match(await admissions.text(),/تافل هوس/);
+});
+
+test("Malformed URL hash does not crash the student menu or enrolment script",async()=>{
+ const {runInNewContext}=await import("node:vm");
+ const client=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.js"),env());
+ const source=await client.text();
+ const handlers=[];
+ const menu={querySelectorAll(){return []},open:false,contains(){return true}};
+ runInNewContext(source,{
+  location:{hash:"#%not-valid",pathname:"/fa/",search:"",replace(){throw Error("Unexpected redirect")}},
+  document:{
+   querySelector(selector){return selector===".mobile-menu"?menu:null},
+   getElementById(){return null},
+   addEventListener(type){handlers.push(type)}
+  },
+  URLSearchParams,decodeURIComponent,sessionStorage:{setItem(){},getItem(){return null}}
+ });
+ assert.ok(handlers.includes("keydown"),"Mobile navigation handlers must still initialize");
+});
