@@ -88,7 +88,7 @@ const V2_SEMESTER={
   "secondary": "Explore programs",
   "videoLabel": "Watch our new semester announcement",
   "play": "Play the new semester video",
-  "playText": "Watch the video"
+  "playText": "Watch the video",
   "videoCaption": "Our new semester · 36-second video",
   "videoFallback": "Watch the semester video"
  },
@@ -108,7 +108,7 @@ const V2_SEMESTER={
   "secondary": "دیدن تمام برنامه‌ها",
   "videoLabel": "ویدیوی معرفی سمستر جدید تافل هوس",
   "play": "پخش ویدیوی معرفی سمستر جدید",
-  "playText": "ویدیو را تماشا کنید"
+  "playText": "ویدیو را تماشا کنید",
   "videoCaption": "اعلان سمستر جدید · ویدیوی ۳۶ ثانیه‌ای",
   "videoFallback": "تماشای ویدیوی سمستر"
  },
@@ -128,7 +128,7 @@ const V2_SEMESTER={
   "secondary": "ټول پروګرامونه وګورئ",
   "videoLabel": "د تافل هوس د نوي سمستر معرفي ویډیو",
   "play": "د نوي سمستر ویډیو پلې کړئ",
-  "playText": "ویډیو وګورئ"
+  "playText": "ویډیو وګورئ",
   "videoCaption": "د نوي سمستر اعلان · ۳۶ ثانیې ویډیو",
   "videoFallback": "د سمستر ویډیو وګورئ"
  }
