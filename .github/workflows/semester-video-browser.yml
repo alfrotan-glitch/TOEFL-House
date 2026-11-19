@@ -1,9 +1,8 @@
 name: Qaws 1405 — real-browser semester campaign acceptance
 on:
   push:
-    branches: [semester-qaws-1405-video-homepage]
+    branches: [semester-qaws-1405-video-homepage, main]
     paths:
-      - 'cloudflare/site-v2/**'
       - '.github/workflows/semester-video-browser.yml'
   workflow_dispatch:
     inputs:
@@ -18,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      TH_SEMESTER_URL: ${{ inputs.target_url || 'https://152f3b4e.the-toefl-house.pages.dev' }}
+      TH_SEMESTER_URL: ${{ inputs.target_url || (github.ref == 'refs/heads/main' && 'https://the-toefl-house.pages.dev' || 'https://152f3b4e.the-toefl-house.pages.dev') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
