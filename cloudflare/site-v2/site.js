@@ -33,7 +33,32 @@ var enquiry=document.getElementById("v2-enquiry-form");
 if(enquiry){
  var selectedProgram=new URLSearchParams(location.search).get("program");
  var courseChoice=enquiry.querySelector("#v2-program");
- if(selectedProgram && courseChoice && [...courseChoice.options].some(function(x){return x.value===selectedProgram;}))courseChoice.value=selectedProgram;
+ var timeChoice=enquiry.querySelector("#v2-when");
+ var formatChoice=enquiry.querySelector("#v2-format");
+ // Carry only the chosen public program/format/time across language switches.
+ // Never use a visitor name, phone number, email, token or draft message in URLs.
+ function allowed(select,value){
+  return !!select && typeof value==="string" &&
+   value.length<=64 && /^[a-z0-9-]+$/.test(value) &&
+   Array.prototype.some.call(select.options,function(option){return option.value===value;});
+ }
+ var admissionQuery=new URLSearchParams(location.search);
+ if(allowed(courseChoice,selectedProgram))courseChoice.value=selectedProgram;
+ if(allowed(formatChoice,admissionQuery.get("format")))formatChoice.value=admissionQuery.get("format");
+ if(allowed(timeChoice,admissionQuery.get("when")))timeChoice.value=admissionQuery.get("when");
+ function syncLanguageLinks(){
+  document.querySelectorAll(".language-links a[hreflang], .mobile-language a[hreflang]").forEach(function(link){
+   var dest=new URL(link.getAttribute("href"),location.href);
+   if(dest.origin!==location.origin||!/\/admissions\/$/.test(dest.pathname))return;
+   var params=new URLSearchParams();
+   if(allowed(courseChoice,courseChoice.value))params.set("program",courseChoice.value);
+   if(allowed(formatChoice,formatChoice.value))params.set("format",formatChoice.value);
+   if(allowed(timeChoice,timeChoice.value))params.set("when",timeChoice.value);
+   link.setAttribute("href",dest.pathname+(params.size?"?"+params.toString():""));
+  });
+ }
+ enquiry.addEventListener("change",syncLanguageLinks);
+ syncLanguageLinks();
  enquiry.addEventListener("submit",function(event){
   event.preventDefault();
   if(!enquiry.checkValidity()){enquiry.reportValidity();return;}
