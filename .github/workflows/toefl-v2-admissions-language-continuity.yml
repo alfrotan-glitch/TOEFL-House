@@ -1,0 +1,24 @@
+name: TOEFL House Admissions Language Continuity (Exact Preview)
+on:
+  push:
+    branches: [website-v2-admissions-continuity-20261119]
+    paths:
+      - 'cloudflare/site-v2/admissions-languages-browser.cjs'
+      - '.github/workflows/toefl-v2-admissions-language-continuity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix /tmp/toefl-admission-continuity --no-save playwright-core@1.56.0 --silent
+      - name: Test EN-FA-PS mobile and desktop language switch, validation and intercepted WhatsApp
+        env:
+          TOEFL_PREVIEW_BASE: https://9d4aae4f.the-toefl-house.pages.dev
+        run: node cloudflare/site-v2/admissions-languages-browser.cjs
