@@ -71,7 +71,7 @@ const V2_COPY={
  }
 };
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
-function v2T(s,max=1000){return v2Esc(String(s??"").slice(0,max));}
+function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
 function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
 async function v2Cms(env){
  if(!env?.CMS_DB)throw Error("CMS_DB missing");
@@ -140,8 +140,7 @@ function v2Faq(c,content,locale){
  ].filter(Boolean);
  const list=prioritized.length===3?prioritized:items.slice(0,3);
  const entries=list.length?list.map(x=>[x.q||x.question,x.a||x.answer]):c.fallbackFaq;
- const visitorName=value=>String(value??"").replace(/خانه موفقیت/g,"تافل هوس");
- return '<section class="faq-section section" id="faq"><div class="shell faq-layout"><div class="faq-aside"><p class="eyebrow">'+v2T(c.faqLabel)+'</p><h2>'+v2T(c.faqTitle)+'</h2><p>'+v2T(c.faqLead)+'</p><a class="text-link" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.faqMore)+' <span aria-hidden="true">↗</span></a></div><div class="faq-list">'+entries.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2Short(visitorName(q),160)+'<span class="faq-plus" aria-hidden="true"></span></summary><p>'+v2T(visitorName(a),680)+'</p></details>').join("")+'</div></div></section>';
+ return '<section class="faq-section section" id="faq"><div class="shell faq-layout"><div class="faq-aside"><p class="eyebrow">'+v2T(c.faqLabel)+'</p><h2>'+v2T(c.faqTitle)+'</h2><p>'+v2T(c.faqLead)+'</p><a class="text-link" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.faqMore)+' <span aria-hidden="true">↗</span></a></div><div class="faq-list">'+entries.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2Short(q,160)+'<span class="faq-plus" aria-hidden="true"></span></summary><p>'+v2T(a,680)+'</p></details>').join("")+'</div></div></section>';
 }
 function v2Footer(c,locale,content){
  const prefix=v2Prefix(locale);
