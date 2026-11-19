@@ -299,3 +299,21 @@ test("Legacy published timetable blurbs use a consistent, verifiable public sche
  const page=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/"),env(e,p));
  assert.match(await page.text(),/CMS_EDITED_HOURS/);
 });
+
+test("Semester Qaws 1405 video announcement is visible, accessible and localised without autoplay",async()=>{
+ for(const [path,lang,teaser] of [["/","en","New semester"],["/fa/","fa","سمستر قوس ۱۴۰۵"],["/ps/","ps","قوس ۱۴۰۵"]]){
+  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  const html=await r.text();
+  assert.equal(r.status,200,path);
+  assert.equal((html.match(/id="semester-qaws-1405"/g)||[]).length,1,path);
+  assert.ok(html.includes(teaser),path+" does not show new semester offer");
+  assert.match(html,/class="semester-video" controls playsinline preload="none" poster="\/assets\/aistudio\/campus-640_/);
+  assert.match(html,/type="video\/mp4"/);
+  assert.match(html,/src="https:\/\/d2ol7oe51mr4n9\.cloudfront\.net\/user_[^"]+\.mp4"/);
+  assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/\?utm_source=website&amp;utm_campaign=qaws_1405_semester"/);
+  assert.match(html,/href="#programs"/);
+  assert.doesNotMatch(html,/<video[^>]+autoplay/);
+  assert.match(r.headers.get("Content-Security-Policy"),/media-src 'self' https:\/\/d2ol7oe51mr4n9\.cloudfront\.net/);
+  assert.match(html,/تعیین سطح رایگان|placement assessment|سویې معلومول/);
+ }
+});
