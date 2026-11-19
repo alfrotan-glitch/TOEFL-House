@@ -37,6 +37,7 @@ for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","
   assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/"/);
   assert.match(html,/<script type="application\/ld\+json">/);
   assert.doesNotMatch(html,/500 Internal Server Error/);
+  assert.doesNotMatch(html,/Figures reported by The TOEFL House|آمار منتشرشده توسط تافل هوس|د خانه موفقیت خپاره کړي شمېرې|The course itself is not free|01:01/,"No editorial/design leftovers in public content");
  });
 }
 test("Preview home is noindex but visible",async()=>{
@@ -224,7 +225,7 @@ test("General English exposes five school levels, realistic AFN tuition and Oxfo
   assert.equal((html.match(/class="ge-stage"/g)||[]).length,5,"Exactly five stages");
   assert.equal((html.match(/class="ge-faq"/g)||[]).length,3,"Three useful FAQs");
   assert.ok(html.includes("Got it! Level 3"),"Four publisher book levels explained");
-  assert.ok(html.includes("Oxford Learner"),"Reference to Oxford eBook platform");
+  assert.doesNotMatch(html,/class="ge-references"/,"Internal bibliography not displayed to visitors");
   assert.ok(html.includes("Speaking"),"Dedicated Speaking chapter");
   assert.match(html,/admissions\/\?program=general-english/,"GE placement CTA");
   assert.doesNotMatch(html,/<img[^>]+(?:got-it|gotit|oxford-cover)/i,"No unlicensed Oxford images");
