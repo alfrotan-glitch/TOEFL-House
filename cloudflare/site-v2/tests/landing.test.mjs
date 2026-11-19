@@ -317,3 +317,16 @@ test("Semester Qaws 1405 video announcement is visible, accessible and localised
   assert.match(html,/تعیین سطح رایگان|placement assessment|سویې معلومول/);
  }
 });
+
+test("Semester campaign has a keyboard-accessible poster play control with native video fallback",async()=>{
+ const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env());
+ assert.equal(r.status,200);
+ const html=await r.text();
+ assert.match(html,/<button class="semester-video-cover" type="button" hidden aria-label="پخش ویدیوی معرفی سمستر جدید"/);
+ assert.match(html,/class="semester-play-circle"/);
+ const client=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.js"),env());
+ const code=await client.text();
+ assert.match(code,/semesterCover\.addEventListener\("click"/);
+ assert.match(code,/semesterVideo\.play\(\)/);
+ assert.doesNotMatch(code,/semesterVideo\.autoplay\s*=\s*true/);
+});
