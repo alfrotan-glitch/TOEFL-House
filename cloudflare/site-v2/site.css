@@ -366,3 +366,75 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .faq-list details p{color:#52636a}
 .final-inner .eyebrow{color:#ffffff}
 .detail-aside p{color:#52636a}
+
+
+/* General English editorial program guide — five school stages vs four Oxford book levels */
+.ge-section{padding-block:90px 96px;background:#f7f8f5}
+.ge-section h2,.ge-section h3,.ge-section h4{color:var(--ink)}
+.ge-heading{max-width:920px;margin-bottom:29px}
+.ge-heading h2{font-size:clamp(30px,3.5vw,46px);line-height:1.35;letter-spacing:-.025em;margin:10px 0 17px;text-wrap:balance}
+.ge-heading>p:not(.eyebrow){color:#40545a;line-height:1.95;font-size:15px;margin:0;max-width:870px}
+.ge-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 62px}
+.ge-fact{padding:22px 21px;background:#fff;border:1px solid #e0e7e2;border-radius:12px;min-height:113px;display:flex;flex-direction:column;justify-content:center}
+.ge-fact strong{font-size:clamp(17px,2vw,24px);font-weight:800;line-height:1.35;color:#173d43;overflow-wrap:anywhere}
+.ge-fact span{font-size:12px;line-height:1.7;color:#53666c;margin-top:7px}
+.ge-section-intro{max-width:920px;margin-bottom:26px}
+.ge-section-intro h3{font-size:clamp(24px,2.5vw,33px);margin:5px 0 12px;line-height:1.45}
+.ge-section-intro p{color:#475e62;line-height:1.9;font-size:14px;margin:0}
+.ge-stages-block{margin:0 0 70px}
+.ge-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;list-style:none;padding:0;margin:0}
+.ge-stage{display:flex;gap:17px;background:#fff;border:1px solid #e0e7e2;border-radius:14px;padding:21px;min-width:0}
+.ge-number{font-size:13px;color:#a12b41;font-weight:900;letter-spacing:.04em;padding-top:3px}
+.ge-stage>div{min-width:0;display:flex;flex-direction:column;align-items:flex-start}
+.ge-stage h4{font-size:18px;font-weight:800;line-height:1.5;margin:0 0 8px;direction:ltr;text-align:start}
+html[dir=rtl] .ge-stage h4{align-self:flex-start;text-align:start}
+.ge-stage p{color:#516269;line-height:1.85;font-size:12.5px;margin:0 0 14px;flex:1}
+.ge-stage-meta{border-radius:7px;background:#edf1ed;color:#294448;padding:5px 10px;font-size:11px;font-weight:750;line-height:1.7}
+.ge-columns{display:grid;grid-template-columns:minmax(0,1.22fr) minmax(0,.78fr);gap:17px;align-items:stretch;margin-bottom:75px}
+.ge-panel{background:#fff;border:1px solid #dfe7e1;border-radius:16px;padding:35px}
+.ge-panel h3{font-size:clamp(22px,2vw,28px);line-height:1.45;margin:10px 0 16px}
+.ge-panel p{color:#41585f;line-height:1.95;font-size:13px;margin:0 0 14px}
+.ge-benefits{list-style:none;margin:23px 0;padding:0;display:grid;gap:13px}
+.ge-benefits li{position:relative;padding-inline-start:22px;color:#365158;font-size:13px;line-height:1.9}
+.ge-benefits li:before{content:"✓";position:absolute;inset-inline-start:0;color:#b52b43;font-weight:900}
+.ge-book-levels{padding:16px 18px;background:#edf2ee;border-radius:11px;margin:24px 0}
+.ge-book-levels strong{display:block;font-size:12px;color:#25454c;margin-bottom:5px}
+.ge-book-levels span{display:block;font-size:13px;line-height:1.9;color:#173e49;overflow-wrap:anywhere}
+.ge-panel .ge-note{border-inline-start:3px solid #b1344c;padding-inline-start:15px;margin:15px 0 0;font-size:12px;color:#4c5e65}
+.ge-side{display:grid;grid-template-rows:auto auto;gap:17px;min-width:0}
+.ge-speaking{background:#173944;border-color:#173944}
+.ge-speaking h3,.ge-speaking .eyebrow{color:#fff}
+.ge-speaking .eyebrow{color:#eabec8}
+.ge-speaking p{color:#e4efef}
+.ge-teachers{background:#f0f2ee}
+.ge-fees{background:#fff;border:1px solid #dfe7e1;border-radius:17px;padding:38px;margin-bottom:61px}
+.ge-table-wrap{overflow-x:auto}
+.ge-fee-table{width:100%;border-collapse:collapse;table-layout:fixed}
+.ge-fee-table th,.ge-fee-table td{padding:16px 14px;text-align:start;border-bottom:1px solid #e3e8e4;vertical-align:middle;font-size:13px;color:#304b53}
+.ge-fee-table thead th{font-size:12px;font-weight:800;background:#eef3ef;color:#2a454a}
+.ge-fee-table tbody th{font-weight:800}
+.ge-fee-table tbody td strong{font-size:14px;color:#18393f}
+.ge-fee-total{margin-top:18px;padding:22px 24px;background:#173944;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:18px;border-radius:11px}
+.ge-fee-total>div{display:flex;flex-direction:column;gap:5px}
+.ge-fee-total>div strong{font-size:15px}
+.ge-fee-total>div span{font-size:12px;color:#dbe8e7}
+.ge-total-money{font-size:clamp(20px,2.3vw,28px);font-weight:900;white-space:nowrap}
+.ge-fee-note{font-size:12px;color:#4c6065;line-height:1.95;margin:17px 0 0}
+.ge-questions{max-width:980px;margin:0 auto 58px}
+.ge-questions h3{font-size:clamp(22px,2.6vw,30px);margin:0 0 22px}
+.ge-faq{border:1px solid #dfe7e1;background:#fff;border-radius:9px;margin-bottom:10px}
+.ge-faq summary{cursor:pointer;padding:19px 22px;font-weight:750;color:#23414a;font-size:14px;line-height:1.75}
+.ge-faq p{border-top:1px solid #e8ece8;font-size:13px;color:#465e64;line-height:1.9;padding:16px 22px 21px;margin:0}
+.ge-references{max-width:980px;margin:0 auto 35px;padding:20px 24px;border:1px solid #dce4de;border-radius:11px;background:#f0f3ef}
+.ge-references h3{font-size:15px;margin:0 0 10px}
+.ge-references ol{margin:0 0 10px;padding-inline-start:23px}
+.ge-references li{font-size:12px;line-height:1.85;overflow-wrap:anywhere}
+.ge-references a{color:#205e69;text-decoration:underline;text-underline-offset:3px}
+.ge-references p{font-size:11.5px;line-height:1.85;color:#4c6165;margin:0}
+.ge-cta{background:#fff;border:1px solid #dee6e0;border-radius:14px;padding:28px;display:flex;justify-content:space-between;align-items:center;gap:26px}
+.ge-cta>div{display:grid;gap:7px;max-width:560px}
+.ge-cta strong{font-size:19px;color:#153841}
+.ge-cta span{font-size:12px;color:#54696e;line-height:1.85}
+.ge-cta .button{white-space:normal;min-width:215px;text-align:center}
+@media(max-width:1020px){.ge-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.ge-columns{grid-template-columns:1fr}.ge-side{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto}.ge-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.ge-section{padding-block:60px 68px}.ge-heading h2{font-size:30px}.ge-heading>p:not(.eyebrow){font-size:13px}.ge-facts{gap:8px;margin-bottom:46px}.ge-fact{padding:16px;min-height:98px}.ge-fact strong{font-size:17px}.ge-fact span{font-size:11px}.ge-stages{grid-template-columns:1fr;gap:9px}.ge-stage{padding:16px}.ge-stages-block{margin-bottom:46px}.ge-columns{margin-bottom:46px}.ge-side{display:grid;grid-template-columns:1fr}.ge-panel{padding:24px 20px}.ge-fees{padding:25px 15px;margin-bottom:45px}.ge-fee-table th,.ge-fee-table td{font-size:11px;padding:13px 6px}.ge-fee-table tbody td strong{font-size:12px}.ge-fee-total{padding:17px 15px}.ge-questions{margin-bottom:38px}.ge-references{padding:19px 17px}.ge-cta{display:flex;flex-direction:column;align-items:stretch;padding:21px}.ge-cta .button{width:100%}}
