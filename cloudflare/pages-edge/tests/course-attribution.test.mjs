@@ -12,7 +12,7 @@ function eventFrom({pathname="/fa/admissions/",search="",selected=null,href="htt
  const ElementClass=class {
   closest(selector){return selector==="a[href]"?{getAttribute(){return href;}}:null;}
  };
- const location={hostname:"the-toefl-house.pages.dev",pathname,search,href:"https://the-toefl-house.pages.dev"+pathname+search};
+ const location={hostname:"the-toefl-house.pages.dev",origin:"https://the-toefl-house.pages.dev",pathname,search,href:"https://the-toefl-house.pages.dev"+pathname+search};
  const data=new Map();
  const context={
   location,
