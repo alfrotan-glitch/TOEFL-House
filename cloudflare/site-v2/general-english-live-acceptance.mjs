@@ -23,7 +23,8 @@ for(const c of cases){
  assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/\?program=general-english"/,"Placement/registration link");
  assert.match(html,/rel="canonical"/,"Canonical link missing");
  assert.match(html,/\?v=[a-f0-9]{12}/,"Versioned styles missing");
- assert.match(html,/Oxford Learner/,"Publisher references missing");
+ assert.doesNotMatch(html,/class="ge-references"/,"Internal research bibliography must not appear in the student-facing course page");
+ assert.match(html,/Oxford University Press/,"Publisher identity and textbook facts must remain accurate");
  assert.doesNotMatch(html,/\bPDF download\b|free Oxford books/i,"Don't market pirated textbook copies");
  const head=await fetch(base+c.path,{method:"HEAD",signal:AbortSignal.timeout(15000)});
  assert.equal(head.status,200);
