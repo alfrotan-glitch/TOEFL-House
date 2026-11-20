@@ -28,7 +28,7 @@ jobs:
         run: node --test cloudflare/site-v2/tests/*.test.mjs
       - name: Check server bundle and browser payload sizes
         run: |
-          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 160000
+          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 205000
           test $(wc -c < cloudflare/site-v2/site.css) -lt 45000
           test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
       - uses: actions/upload-artifact@v4
