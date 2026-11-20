@@ -390,3 +390,28 @@ test("New semester billboard promotes the EAP page directly on all three homepag
   assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/\?utm_source=website&amp;utm_campaign=qaws_1405_semester"/);
  }
 });
+
+test("EAP 1–4 explicitly assigns all three matching volume numbers to the four school levels",async()=>{
+ for(const lang of ["/","/fa/","/ps/"]){
+  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+lang+"courses/academic-english/"),env());
+  assert.equal(response.status,200);
+  const html=await response.text();
+  const sections=[...html.matchAll(/<li class="eap-level">([\s\S]*?)(?=<li class="eap-level">|<\/ol>)/g)];
+  assert.equal(sections.length,4,lang+" needs four distinct curriculum levels");
+  for(let i=1;i<=4;i++){
+   const block=sections[i-1][1];
+   assert.match(block,new RegExp('EAP '+i));
+   for(const name of ["ACTIVE Skills for Reading","Contemporary Topics","Longman Academic Writing"]){
+    assert.ok(block.includes(name+" "+i),lang+" "+name+" does not match EAP "+i);
+   }
+   assert.equal((block.match(/<li dir="ltr">/g)||[]).length,3,lang+" must show precisely three assigned books per EAP level");
+  }
+  assert.match(html,/Reading/);
+  assert.match(html,/Vocabulary/);
+  assert.match(html,/Listening/);
+  assert.match(html,/Speaking/);
+  assert.match(html,/Academic Writing/);
+  assert.match(html,/Longman Academic Writing 4: Essays/);
+  assert.match(html,/۲٬۰۰۰ افغانی|AFN 2,000|۲٬۰۰۰ افغانۍ/);
+ }
+});
