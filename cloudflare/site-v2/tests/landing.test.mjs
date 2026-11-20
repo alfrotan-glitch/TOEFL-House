@@ -414,7 +414,7 @@ test("EAP four levels retain three series while distinguishing publisher edition
     assert.ok(!block.includes("Contemporary Topics 4"),lang+" must not invent a publisher book 4");
     assert.ok(block.includes('class="eap-fourth-note"'),lang+" must explain EAP4 book selection in the page language");
    }
-   assert.equal((block.match(/<li dir="ltr">/g)||[]).length,3,lang+" must show precisely three assigned books per EAP level");
+   assert.equal((block.match(/<li dir="ltr" lang="en">/g)||[]).length,3,lang+" must show precisely three assigned books per EAP level");
   }
   assert.match(html,/Reading|خواندن|لوستل/);
   assert.match(html,/Vocabulary|واژگان|لغات|لغتونو/);
