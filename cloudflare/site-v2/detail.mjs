@@ -22,6 +22,7 @@ function v2SubpageResponse(request,html,locale){
 }
 function v2CoursePage(locale,cms,id){
  const c=V2_COPY[locale],l=V2_DETAIL_LABELS[locale],prefix=v2Prefix(locale);
+ if(id==="academic-english")return v2AcademicEnglishPage(locale,cms);
  const source=locale==="ps"?cms.pashto.programs:cms.main.locales[locale].programs;
  const program=source.find(x=>x.id===id);
  if(!program)return null;

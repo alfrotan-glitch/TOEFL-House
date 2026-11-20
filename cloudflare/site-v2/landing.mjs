@@ -75,68 +75,80 @@ const V2_SEMESTER={
  "en": {
   "heroTeaser": "New semester · Qaws 1405",
   "eyebrow": "ENROLLMENT · QAWS 1405",
-  "title": "A new semester.",
-  "accent": "A stronger start.",
-  "lead": "Your next step in English starts with the right class. Explore General English, Academic English, Special Speaking, Professional Writing, TOEFL Preparation and Teacher Training at The TOEFL House.",
+  "title": "New semester.",
+  "accent": "Make your next step count.",
+  "lead": "Build English you can actually use. Whether your goal is confident speaking, university study, stronger writing or TOEFL preparation, The TOEFL House helps you choose a course suited to your level. Begin with a free placement assessment.",
   "chips": [
    "General English",
-   "Special Speaking",
-   "TOEFL Preparation"
+   "Academic English · EAP",
+   "Special Speaking"
   ],
   "free": "Free placement assessment · Course tuition is separate",
-  "cta": "Ask about the new semester",
-  "secondary": "Explore programs",
+  "cta": "Request my free placement assessment",
+  "secondary": "Explore all six programs",
   "videoLabel": "Watch our new semester announcement",
   "play": "Play the new semester video",
   "playText": "Watch the video",
   "videoCaption": "Our new semester · 36-second video",
-  "videoFallback": "Watch the semester video"
+  "videoFallback": "Watch the semester video",
+  "eapLabel": "ACADEMIC ENGLISH · EAP",
+  "eapTeaser": "Four levels. Three instructors. Three core books.",
+  "eapDetail": "AFN 1,000/month · AFN 2,000 per two-month level",
+  "eapLink": "Explore the EAP pathway"
  },
  "fa": {
   "heroTeaser": "ثبت‌نام سمستر قوس ۱۴۰۵",
   "eyebrow": "ثبت‌نام سمستر جدید · قوس ۱۴۰۵",
   "title": "سمستر نو،",
-  "accent": "فرصت تازه برای پیشرفت شما.",
-  "lead": "برای یادگیری انگلیسی، از امروز یک قدم هدفمند بردارید. در تافل هوس برنامه‌های انگلیسی عمومی، انگلیسی اکادمیک، مکالمهٔ ویژه، نگارش مسلکی، آمادگی تافل و تربیهٔ استاد برگزار می‌شود. برای انتخاب صنف و وقت مناسب، با پذیرش در تماس شوید.",
+  "accent": "فرصتی تازه برای ساختن آیندهٔ شما.",
+  "lead": "انگلیسی را تنها برای امتحان نخوانید؛ برای صحبت‌کردن، درس‌های پوهنتون و فرصت‌های آینده بیاموزید. در تافل هوس از انگلیسی عمومی و اکادمیک تا مکالمهٔ ویژه، نگارش مسلکی و آمادگی TOEFL برنامهٔ مناسب خود را پیدا کنید. اولین قدم: تعیین سطح رایگان.",
   "chips": [
-   "انگلیسی عمومی",
-   "مکالمهٔ ویژه",
-   "آمادگی TOEFL"
+   "General English",
+   "Academic English · EAP",
+   "Special Speaking"
   ],
   "free": "تعیین سطح رایگان است؛ کورس‌های آموزشی فیس جداگانه دارند.",
-  "cta": "دربارهٔ سمستر جدید معلومات بگیرم",
-  "secondary": "دیدن تمام برنامه‌ها",
+  "cta": "درخواست تعیین سطح رایگان",
+  "secondary": "دیدن تمام شش برنامه",
   "videoLabel": "ویدیوی معرفی سمستر جدید تافل هوس",
   "play": "پخش ویدیوی معرفی سمستر جدید",
   "playText": "ویدیو را تماشا کنید",
   "videoCaption": "اعلان سمستر جدید · ویدیوی ۳۶ ثانیه‌ای",
-  "videoFallback": "تماشای ویدیوی سمستر"
+  "videoFallback": "تماشای ویدیوی سمستر",
+  "eapLabel": "برنامهٔ ویژهٔ انگلیسی اکادمیک · EAP",
+  "eapTeaser": "۴ لول؛ در هر لول ۳ استاد و ۳ کتاب اصلی",
+  "eapDetail": "۱٬۰۰۰ افغانی ماهانه · ۲٬۰۰۰ افغانی هر لول دوماهه",
+  "eapLink": "معلومات کامل EAP"
  },
  "ps": {
   "heroTeaser": "د قوس ۱۴۰۵ نوي سمستر نوم‌لیکنه",
   "eyebrow": "د نوي سمستر نوم‌لیکنه · قوس ۱۴۰۵",
   "title": "نوی سمستر،",
-  "accent": "ستاسو د پرمختګ نوی فرصت.",
-  "lead": "د انګلیسي زده‌کړې لپاره همدا اوس خپل مناسب مسیر وټاکئ. په تافل هوس کې عمومي او اکاډمیکه انګلیسي، ځانګړې خبرې، مسلکي لیکنه، د TOEFL چمتووالی او د ښوونکو روزنه شته. د ټولګي وخت او شته ځایونه له ادارې سره تایید کړئ.",
+  "accent": "ستاسو د راتلونکي لپاره نوی فرصت.",
+  "lead": "انګلیسي یوازې د ازموینې لپاره مه زده کوئ؛ د خبرو، پوهنتون او راتلونکو فرصتونو لپاره یې وکاروئ. په تافل هوس کې له عمومي او اکاډمیکې انګلیسي تر ځانګړو خبرو، مسلکي لیکنې او TOEFL چمتووالي خپل مناسب پروګرام وټاکئ. لومړی ګام: وړیا سویه معلومول.",
   "chips": [
-   "عمومي انګلیسي",
-   "ځانګړې خبرې",
-   "د TOEFL چمتووالی"
+   "General English",
+   "Academic English · EAP",
+   "Special Speaking"
   ],
   "free": "د سویې معلومول وړیا دي؛ د کورس فیس جلا دی.",
-  "cta": "د نوي سمستر په اړه معلومات غواړم",
-  "secondary": "ټول پروګرامونه وګورئ",
+  "cta": "د وړیا سویې معلومولو غوښتنه",
+  "secondary": "ټول شپږ پروګرامونه وګورئ",
   "videoLabel": "د تافل هوس د نوي سمستر معرفي ویډیو",
   "play": "د نوي سمستر ویډیو پلې کړئ",
   "playText": "ویډیو وګورئ",
   "videoCaption": "د نوي سمستر اعلان · ۳۶ ثانیې ویډیو",
-  "videoFallback": "د سمستر ویډیو وګورئ"
+  "videoFallback": "د سمستر ویډیو وګورئ",
+  "eapLabel": "ځانګړې اکاډمیکه انګلیسي · EAP",
+  "eapTeaser": "۴ لولونه؛ هر لول کې ۳ ښوونکي او ۳ کتابونه",
+  "eapDetail": "۱٬۰۰۰ افغانۍ میاشتنی · ۲٬۰۰۰ افغانۍ دوه میاشتنی لول",
+  "eapLink": "د EAP پوره معلومات"
  }
 };
 function v2SemesterCampaign(locale){
  const p=v2Prefix(locale),c=V2_SEMESTER[locale];
  const signup=p+"admissions/?utm_source=website&amp;utm_campaign=qaws_1405_semester";
- return '<section class="semester-section" id="semester-qaws-1405" aria-labelledby="semester-heading"><div class="shell"><div class="semester-card"><div class="semester-copy"><p class="semester-eyebrow"><span class="semester-dot" aria-hidden="true"></span>'+v2T(c.eyebrow)+'</p><h2 id="semester-heading" class="semester-title">'+v2T(c.title)+' <span>'+v2T(c.accent)+'</span></h2><p class="semester-lead">'+v2T(c.lead)+'</p><ul class="semester-chips">'+c.chips.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul><p class="semester-free"><span aria-hidden="true">✦</span> '+v2T(c.free)+'</p><div class="semester-actions"><a class="button semester-primary" href="'+signup+'">'+v2T(c.cta)+' <span aria-hidden="true">↗</span></a><a class="button semester-secondary" href="#programs">'+v2T(c.secondary)+'</a></div></div><div class="semester-media"><div class="semester-video-frame"><video class="semester-video" controls playsinline preload="none" poster="'+V2_IMG_640+'" width="720" height="1280" aria-label="'+v2T(c.videoLabel)+'"><source src="'+V2_SEMESTER_VIDEO+'" type="video/mp4">'+v2T(c.videoFallback)+'</video><button class="semester-video-cover" type="button" hidden aria-label="'+v2T(c.play)+'"><img src="'+V2_IMG_640+'" width="640" height="820" loading="lazy" decoding="async" alt=""><span class="semester-cover-shade" aria-hidden="true"></span><span class="semester-play-circle" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M8 5.6c0-.8.9-1.3 1.6-.9L20 11.2c.6.4.6 1.2 0 1.6L9.6 19.3C8.9 19.7 8 19.2 8 18.4V5.6z"/></svg></span><span class="semester-play-caption" aria-hidden="true">'+v2T(c.playText)+'</span></button><span class="semester-filmmark" aria-hidden="true">THE TOEFL HOUSE · 00:36</span></div><p class="semester-video-caption">'+v2T(c.videoCaption)+'</p></div></div></div></section>';
+ return '<section class="semester-section" id="semester-qaws-1405" aria-labelledby="semester-heading"><div class="shell"><div class="semester-card"><div class="semester-copy"><p class="semester-eyebrow"><span class="semester-dot" aria-hidden="true"></span>'+v2T(c.eyebrow)+'</p><h2 id="semester-heading" class="semester-title">'+v2T(c.title)+' <span>'+v2T(c.accent)+'</span></h2><p class="semester-lead">'+v2T(c.lead)+'</p><ul class="semester-chips">'+c.chips.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul><p class="semester-free"><span aria-hidden="true">✦</span> '+v2T(c.free)+'</p><div class="semester-actions"><a class="button semester-primary" href="'+signup+'">'+v2T(c.cta)+' <span aria-hidden="true">↗</span></a><a class="button semester-secondary" href="#programs">'+v2T(c.secondary)+'</a></div></div><div class="semester-media"><div class="semester-video-frame"><video class="semester-video" controls playsinline preload="none" poster="'+V2_IMG_640+'" width="720" height="1280" aria-label="'+v2T(c.videoLabel)+'"><source src="'+V2_SEMESTER_VIDEO+'" type="video/mp4">'+v2T(c.videoFallback)+'</video><button class="semester-video-cover" type="button" hidden aria-label="'+v2T(c.play)+'"><img src="'+V2_IMG_640+'" width="640" height="820" loading="lazy" decoding="async" alt=""><span class="semester-cover-shade" aria-hidden="true"></span><span class="semester-play-circle" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M8 5.6c0-.8.9-1.3 1.6-.9L20 11.2c.6.4.6 1.2 0 1.6L9.6 19.3C8.9 19.7 8 19.2 8 18.4V5.6z"/></svg></span><span class="semester-play-caption" aria-hidden="true">'+v2T(c.playText)+'</span></button><span class="semester-filmmark" aria-hidden="true">THE TOEFL HOUSE · 00:36</span></div><p class="semester-video-caption">'+v2T(c.videoCaption)+'</p></div></div><a class="semester-eap-spotlight" href="'+p+'courses/academic-english/"><span class="semester-eap-mark">EAP</span><span class="semester-eap-copy"><small>'+v2T(c.eapLabel)+'</small><strong>'+v2T(c.eapTeaser)+'</strong><span>'+v2T(c.eapDetail)+'</span></span><span class="semester-eap-link">'+v2T(c.eapLink)+' <span aria-hidden="true">↗</span></span></a></div></section>';
 }
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
 function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}

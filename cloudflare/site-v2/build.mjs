@@ -7,6 +7,7 @@ let main=await readFile(join(here,"../pages-edge/worker.mjs"),"utf8");
 const landing=await readFile(join(here,"landing.mjs"),"utf8");
 const detail=await readFile(join(here,"detail.mjs"),"utf8");
 const generalEnglish=await readFile(join(here,"general-english.mjs"),"utf8");
+const academicEnglish=await readFile(join(here,"academic-english.mjs"),"utf8");
 const css=await readFile(join(here,"site.css"),"utf8");
 const js=await readFile(join(here,"site.js"),"utf8");
 const assetRevision=createHash("sha256").update(css).update(js).digest("hex").slice(0,12);
@@ -41,7 +42,7 @@ const rewrittenTarget=[
 '  const target=new URL(upstreamPath+incoming.search,UPSTREAM);'
 ].join("\n");
 main=main.replace(target,rewrittenTarget);
-main=main.replace(entry,landing+"\n"+generalEnglish+"\n"+detail+"\nconst V2_REV="+JSON.stringify(assetRevision)+";\nconst V2_CSS="+JSON.stringify(css)+";\nconst V2_JS="+JSON.stringify(js)+";\n"+entry);
+main=main.replace(entry,landing+"\n"+generalEnglish+"\n"+academicEnglish+"\n"+detail+"\nconst V2_REV="+JSON.stringify(assetRevision)+";\nconst V2_CSS="+JSON.stringify(css)+";\nconst V2_JS="+JSON.stringify(js)+";\n"+entry);
 const at=main.lastIndexOf(matching);
 if(at<0)throw Error("fetch entry missing");
 main=main.slice(0,at+matching.length)+"\n"+render+main.slice(at+matching.length);
@@ -51,7 +52,7 @@ main=main.replace(headerFlag,'if(noindex(incoming.hostname)||["/tools","/tools/"
 const undo='if(outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");';
 if(!main.includes(undo))throw Error("Existing noindex behavior moved");
 main=main.replace(undo,'if(!["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname) && outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");');
-if(!main.includes("function v2GeneralEnglish")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("const upstreamPath="))throw Error("Build missing new routes");
+if(!main.includes("function v2GeneralEnglish")||!main.includes("function v2AcademicEnglishPage")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("const upstreamPath="))throw Error("Build missing new routes");
 await mkdir(join(here,"dist"),{recursive:true});
 await writeFile(join(here,"dist/_worker.js"),main);
 console.log(JSON.stringify({output:"dist/_worker.js",bytes:Buffer.byteLength(main),assetRevision,cssBytes:Buffer.byteLength(css),clientBytes:Buffer.byteLength(js),legacyPreserved:true}));
