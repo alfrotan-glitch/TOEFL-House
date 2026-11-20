@@ -43,9 +43,14 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
    for(let i=1;i<=4;i++){
     assert.ok(d.levels[i-1].heading.includes("EAP "+i));
     assert.equal(d.levels[i-1].books.length,3);
-    for(const series of ["ACTIVE Skills for Reading","Contemporary Topics","Longman Academic Writing"]){
+    for(const series of ["ACTIVE Skills for Reading","Longman Academic Writing"]){
      assert.ok(d.levels[i-1].books.some(x=>x.includes(series+" "+i)),path+" missing "+series+" "+i);
     }
+    // Publisher's Contemporary Topics 4th edition lists Books 1–3.
+    // EAP 4 therefore names the approved school syllabus assignment without
+    // inventing a nonexistent 4th-edition Book 4 or ISBN.
+    if(i<=3)assert.ok(d.levels[i-1].books.some(x=>x.includes("Contemporary Topics "+i)),path+" missing Contemporary Topics "+i);
+    else assert.ok(d.levels[i-1].books.some(x=>x.includes("Contemporary Topics")&&x.includes("EAP 4")),path+" EAP 4 selection unclear");
    }
    assert.ok(d.fees.includes("2,000")||d.fees.includes("۲٬۰۰۰"));
    const key=lang==="fa-AF"?"fa":lang==="ps-AF"?"ps":"en";
