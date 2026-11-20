@@ -595,6 +595,7 @@ html[dir=rtl] .eap-hero-copy h1{font-size:clamp(35px,4vw,55px);letter-spacing:-.
 .eap-assigned-books ul{list-style:none;display:grid;gap:7px;margin:9px 0 0;padding:0}
 .eap-assigned-books li{position:relative;color:#223b43;font-size:12px;line-height:1.7;padding:0 0 0 16px;text-align:left;overflow-wrap:anywhere}
 .eap-assigned-books li:before{content:"•";position:absolute;left:0;color:#ac2845}
+.eap-assigned-books .eap-fourth-note{margin:12px 0 0;padding:10px 12px;border-inline-start:3px solid #ac2845;background:#fff;color:#684354;font-size:12px;line-height:1.9;overflow-wrap:anywhere}
 
 
 /* 2026 editorial accessibility pass — deliberate type scale, generous controls,
