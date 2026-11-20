@@ -4,9 +4,19 @@ import {dirname,join} from "node:path";
 import {createHash} from "node:crypto";
 const here=dirname(fileURLToPath(import.meta.url));
 let main=await readFile(join(here,"../pages-edge/worker.mjs"),"utf8");
-const landing=await readFile(join(here,"landing.mjs"),"utf8");
+const landingSource=await readFile(join(here,"landing.mjs"),"utf8");
+// Compact authored static locale copy without changing the runtime markup.
+function compactStatic(source,name){
+ const re=new RegExp("const "+name+"=(\\\\{[\\\\s\\\\S]*?\\\\n\\\\});");
+ return source.replace(re,(_,json)=>{
+  const normalized=name==="V2_COPY"?json.replace(/([\\{\\[, ]\\s*)([A-Za-z_][A-Za-z0-9_]*)(\\s*:)/g,'$1"$2"$3'):json;
+  return "const "+name+"="+JSON.stringify(JSON.parse(normalized))+";";
+ });
+}
+const landing=compactStatic(compactStatic(landingSource,"V2_SEMESTER"),"V2_COPY");
 const detail=await readFile(join(here,"detail.mjs"),"utf8");
-const generalEnglish=await readFile(join(here,"general-english.mjs"),"utf8");
+const generalEnglish=compactStatic(await readFile(join(here,"general-english.mjs"),"utf8"),"V2_GENERAL_ENGLISH");
+const guides=await readFile(join(here,"guides.mjs"),"utf8");
 const academicEnglishSource=await readFile(join(here,"academic-english.mjs"),"utf8");
 // Keep the three-language editorial source readable in Git, but compact its
 // static JSON data in the deployed Worker to stay below the safe Pages budget.
@@ -31,6 +41,10 @@ const render=[
 '      const page=await v2Detail(request,env,routeLocale,"course",parts[1]);',
 '      if(page)return page;',
 '    }',
+'    if(parts[0]==="guides"&&(parts.length===1||(parts.length===2&&V2_GUIDE_SLUGS.includes(parts[1])))){',
+'      const page=await v2Guides(request,env,routeLocale,parts[1]||null);',
+'      if(page)return page;',
+'    }',
 '    if(parts[0]==="admissions"&&parts.length===1){',
 '      const page=await v2Detail(request,env,routeLocale,"admissions",null);',
 '      if(page)return page;',
@@ -47,7 +61,7 @@ const rewrittenTarget=[
 '  const target=new URL(upstreamPath+incoming.search,UPSTREAM);'
 ].join("\n");
 main=main.replace(target,rewrittenTarget);
-main=main.replace(entry,landing+"\n"+generalEnglish+"\n"+academicEnglish+"\n"+detail+"\nconst V2_REV="+JSON.stringify(assetRevision)+";\nconst V2_CSS="+JSON.stringify(css)+";\nconst V2_JS="+JSON.stringify(js)+";\n"+entry);
+main=main.replace(entry,landing+"\n"+generalEnglish+"\n"+academicEnglish+"\n"+detail+"\n"+guides+"\nconst V2_REV="+JSON.stringify(assetRevision)+";\nconst V2_CSS="+JSON.stringify(css)+";\nconst V2_JS="+JSON.stringify(js)+";\n"+entry);
 const at=main.lastIndexOf(matching);
 if(at<0)throw Error("fetch entry missing");
 main=main.slice(0,at+matching.length)+"\n"+render+main.slice(at+matching.length);
@@ -57,7 +71,7 @@ main=main.replace(headerFlag,'if(noindex(incoming.hostname)||["/tools","/tools/"
 const undo='if(outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");';
 if(!main.includes(undo))throw Error("Existing noindex behavior moved");
 main=main.replace(undo,'if(!["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname) && outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");');
-if(!main.includes("function v2GeneralEnglish")||!main.includes("function v2AcademicEnglishPage")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("const upstreamPath="))throw Error("Build missing new routes");
+if(!main.includes("function v2GeneralEnglish")||!main.includes("function v2AcademicEnglishPage")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("const upstreamPath=")||!main.includes("function v2Guides"))throw Error("Build missing new routes");
 await mkdir(join(here,"dist"),{recursive:true});
 await writeFile(join(here,"dist/_worker.js"),main);
 console.log(JSON.stringify({output:"dist/_worker.js",bytes:Buffer.byteLength(main),assetRevision,cssBytes:Buffer.byteLength(css),clientBytes:Buffer.byteLength(js),legacyPreserved:true}));
