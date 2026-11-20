@@ -63,7 +63,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 1 · Third Edition",
      "Contemporary Topics 1 · Fourth Edition",
-     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release"
+     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release (2nd Edition)"
     ]
    },
    {
@@ -78,7 +78,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 2 · Third Edition",
      "Contemporary Topics 2 · Fourth Edition",
-     "Longman Academic Writing 2: Paragraphs · Updated release"
+     "Longman Academic Writing 2: Paragraphs · Updated release (3rd Edition)"
     ]
    },
    {
@@ -93,7 +93,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 3 · Third Edition",
      "Contemporary Topics 3 · Fourth Edition",
-     "Longman Academic Writing 3: Paragraphs to Essays · Updated release"
+     "Longman Academic Writing 3: Paragraphs to Essays · Updated release (4th Edition)"
     ]
    },
    {
@@ -107,8 +107,8 @@ const V2_EAP={
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 4 · Third Edition",
-     "Contemporary Topics · Fourth Edition (EAP 4 materials per school syllabus)",
-     "Longman Academic Writing 4: Essays · Updated release"
+     "Contemporary Topics · Fourth Edition",
+     "Longman Academic Writing 4: Essays · Updated release (5th Edition)"
     ]
    }
   ],
@@ -192,7 +192,8 @@ const V2_EAP={
   "cta": "Request a free placement assessment",
   "secondary": "Ask about the EAP program",
   "other": "See all programs",
-  "levelBookLabel": "Textbooks assigned to this level",
+  "levelBookLabel": "Course textbooks and materials",
+  "fourthNote": "The Contemporary Topics Fourth Edition does not contain a Book 4. Confirm the listening textbook or approved materials for EAP 4 with the academic department.",
   "writingTitles": [
    "Sentences to Paragraphs",
    "Paragraphs",
@@ -263,7 +264,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 1 · Third Edition",
      "Contemporary Topics 1 · Fourth Edition",
-     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release"
+     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release (2nd Edition)"
     ]
    },
    {
@@ -278,7 +279,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 2 · Third Edition",
      "Contemporary Topics 2 · Fourth Edition",
-     "Longman Academic Writing 2: Paragraphs · Updated release"
+     "Longman Academic Writing 2: Paragraphs · Updated release (3rd Edition)"
     ]
    },
    {
@@ -293,7 +294,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 3 · Third Edition",
      "Contemporary Topics 3 · Fourth Edition",
-     "Longman Academic Writing 3: Paragraphs to Essays · Updated release"
+     "Longman Academic Writing 3: Paragraphs to Essays · Updated release (4th Edition)"
     ]
    },
    {
@@ -307,8 +308,8 @@ const V2_EAP={
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 4 · Third Edition",
-     "Contemporary Topics · Fourth Edition (EAP 4 materials per school syllabus)",
-     "Longman Academic Writing 4: Essays · Updated release"
+     "Contemporary Topics · Fourth Edition",
+     "Longman Academic Writing 4: Essays · Updated release (5th Edition)"
     ]
    }
   ],
@@ -371,7 +372,7 @@ const V2_EAP={
    ],
    [
     "آیا در هر سطح هر سه کتاب تدریس می‌شود؟",
-    "بلی. هر سطح از سه مجموعه استفاده می‌کند. شمارهٔ کتاب‌های ACTIVE Skills for Reading و Longman Academic Writing از ۱ تا ۴ است. Contemporary Topics در ویرایش چهارم فقط سه کتاب دارد؛ مواد EAP 4 را بخش آموزشی تعیین می‌کند."
+    "بلی. در هر سطح از سه مجموعهٔ درسی استفاده می‌شود. کتاب‌های ACTIVE Skills for Reading و Longman Academic Writing از شمارهٔ ۱ تا ۴ هستند. در ویرایش چهارم Contemporary Topics کتاب‌های شمارهٔ ۱ تا ۳ موجود است، نه کتاب شمارهٔ ۴؛ مواد EAP 4 را بخش آموزشی تعیین می‌کند."
    ],
    [
     "آیا فیس ۲٬۰۰۰ افغانی شامل قیمت کتاب‌ها نیز است؟",
@@ -392,7 +393,8 @@ const V2_EAP={
   "cta": "درخواست تعیین سطح رایگان",
   "secondary": "مشوره با پذیرش دربارهٔ EAP",
   "other": "دیدن تمام برنامه‌ها",
-  "levelBookLabel": "سه کتاب درسی همین سطح",
+  "levelBookLabel": "کتاب‌ها و مواد درسی این سطح",
+  "fourthNote": "در ویرایش چهارم Contemporary Topics کتابی با عنوان «کتاب شمارهٔ ۴» وجود ندارد. کتاب یا مواد درسی بخش شنیداری EAP 4 را از بخش آموزشی تأیید کنید.",
   "writingTitles": [
    "Sentences to Paragraphs",
    "Paragraphs",
@@ -463,7 +465,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 1 · Third Edition",
      "Contemporary Topics 1 · Fourth Edition",
-     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release"
+     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release (2nd Edition)"
     ]
    },
    {
@@ -478,7 +480,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 2 · Third Edition",
      "Contemporary Topics 2 · Fourth Edition",
-     "Longman Academic Writing 2: Paragraphs · Updated release"
+     "Longman Academic Writing 2: Paragraphs · Updated release (3rd Edition)"
     ]
    },
    {
@@ -493,7 +495,7 @@ const V2_EAP={
     "textbooks": [
      "ACTIVE Skills for Reading 3 · Third Edition",
      "Contemporary Topics 3 · Fourth Edition",
-     "Longman Academic Writing 3: Paragraphs to Essays · Updated release"
+     "Longman Academic Writing 3: Paragraphs to Essays · Updated release (4th Edition)"
     ]
    },
    {
@@ -507,8 +509,8 @@ const V2_EAP={
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 4 · Third Edition",
-     "Contemporary Topics · Fourth Edition (EAP 4 materials per school syllabus)",
-     "Longman Academic Writing 4: Essays · Updated release"
+     "Contemporary Topics · Fourth Edition",
+     "Longman Academic Writing 4: Essays · Updated release (5th Edition)"
     ]
    }
   ],
@@ -592,7 +594,8 @@ const V2_EAP={
   "cta": "د سویې د وړیا ارزونې غوښتنه",
   "secondary": "د EAP په اړه له ادارې سره مشوره",
   "other": "ټول پروګرامونه وګورئ",
-  "levelBookLabel": "د همدې کچې درې درسي کتابونه",
+  "levelBookLabel": "د دې کچې درسي کتابونه او مواد",
+  "fourthNote": "د Contemporary Topics په څلورمه ګڼه کې څلورم کتاب نشته. د EAP 4 د اورېدو اړوند کتاب یا درسي مواد له ښوونیزې څانګې سره تایید کړئ.",
   "writingTitles": [
    "Sentences to Paragraphs",
    "Paragraphs",
@@ -604,7 +607,7 @@ const V2_EAP={
 
 function v2AcademicEnglishPage(locale,cms){
  const c=V2_EAP[locale],site=V2_COPY[locale],p=v2Prefix(locale),route=p+"courses/academic-english/";
- const title=locale==="en"?"Academic English (EAP) in Kabul | Four Levels & Tuition | The TOEFL House":locale==="fa"?"انگلیسی اکادمیک EAP در کابل | چهار سطح، سه مجموعهٔ درسی و فیس | تافل هوس":"اکاډمیکه انګلیسي EAP | څلور لولونه او فیس | تافل هوس";
+ const title=locale==="en"?"Academic English (EAP) in Kabul | Four Levels & Tuition | The TOEFL House":locale==="fa"?"انگلیسی اکادمیک EAP در کابل | چهار سطح، سه مجموعهٔ درسی و فیس | تافل هوس":"اکاډمیکه انګلیسي EAP | څلور کچې او فیس | تافل هوس";
  const desc=locale==="en"?"EAP 1–4 at The TOEFL House: four two-month levels; three instructors, three textbook series per level. AFN 1,000/month, AFN 2,000/level. Free assessment.":locale==="fa"?"EAP تافل هوس: چهار سطح دوماهه، سه استاد و سه مجموعهٔ درسی در هر سطح. فیس ماهانه ۱٬۰۰۰ افغانی؛ تعیین سطح رایگان.":"EAP د تافل هوس څلور دوه میاشتني کچې، په هره کچه درې ښوونکي او درې درسي لړۍ لري. میاشتنی فیس ۱٬۰۰۰ او د هرې کچې فیس ۲٬۰۰۰ افغانۍ.";
  const schema=[{"@context":"https://schema.org","@type":"Course","name":"English for Academic Purposes (EAP)","description":desc,"courseCode":"EAP","educationalLevel":"EAP 1–EAP 4","provider":{"@type":"EducationalOrganization","name":"The TOEFL House","url":V2_ORIGIN+"/"},"url":V2_ORIGIN+route},{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"The TOEFL House","item":V2_ORIGIN+p},{"@type":"ListItem","position":2,"name":"English for Academic Purposes","item":V2_ORIGIN+route}]}];
  const heading=v2SubpageHead(locale,route,title,desc,schema),apply=p+"admissions/?program=academic-english";
@@ -612,7 +615,7 @@ function v2AcademicEnglishPage(locale,cms){
  const feeLevel=locale==="en"?"AFN 2,000":locale==="fa"?"۲٬۰۰۰ افغانی":"۲٬۰۰۰ افغانۍ";
  const facts=c.facts.map(([n,desc])=>'<div class="eap-fact"><strong>'+v2T(n)+'</strong><span>'+v2T(desc)+'</span></div>').join("");
  const goals=c.outcomes.map(([h,d],i)=>'<article class="eap-goal"><span class="eap-index">'+String(i+1).padStart(2,"0")+'</span><h3>'+v2T(h)+'</h3><p>'+v2T(d)+'</p></article>').join("");
- const steps=c.levels.map((v,i)=>'<li class="eap-level"><span class="eap-level-number">'+String(i+1).padStart(2,"0")+'</span><div><div class="eap-level-top"><h3>'+v2T(v.title)+'</h3><span>'+v2T(locale==="en"?"2 months":locale==="fa"?"۲ ماه":"۲ میاشتې")+'</span></div><strong class="eap-level-subtitle">'+v2T(v.subtitle)+'</strong><p>'+v2T(v.desc)+'</p><div class="eap-assigned-books"><span>'+v2T(c.levelBookLabel)+'</span><ul>'+v.textbooks.map(book=>'<li dir="ltr">'+v2T(book)+'</li>').join("")+'</ul></div><ul>'+v.skills.map(t=>'<li>'+v2T(t)+'</li>').join("")+'</ul></div></li>').join("");
+ const steps=c.levels.map((v,i)=>'<li class="eap-level"><span class="eap-level-number">'+String(i+1).padStart(2,"0")+'</span><div><div class="eap-level-top"><h3>'+v2T(v.title)+'</h3><span>'+v2T(locale==="en"?"2 months":locale==="fa"?"۲ ماه":"۲ میاشتې")+'</span></div><strong class="eap-level-subtitle">'+v2T(v.subtitle)+'</strong><p>'+v2T(v.desc)+'</p><div class="eap-assigned-books"><span>'+v2T(c.levelBookLabel)+'</span><ul>'+v.textbooks.map(book=>'<li dir="ltr">'+v2T(book)+'</li>').join("")+'</ul>'+(i===3?'<p class="eap-fourth-note">'+v2T(c.fourthNote)+'</p>':"")+'</div><ul>'+v.skills.map(t=>'<li>'+v2T(t)+'</li>').join("")+'</ul></div></li>').join("");
  const books=c.books.map((b,i)=>'<article class="eap-book"><div class="eap-book-top"><span class="eap-book-index">0'+(i+1)+'</span><span class="eap-book-skill">'+v2T(b.role)+'</span></div><h3 dir="ltr">'+v2T(b.title)+'</h3><p class="eap-publisher" dir="ltr">'+v2T(b.publisher)+'</p><p>'+v2T(b.intro)+'</p><ul>'+b.points.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul></article>').join("");
  const questions=c.faq.map(([q,a],i)=>'<details'+(i===0?' open':'')+'><summary>'+v2T(q)+'<span class="eap-faq-plus" aria-hidden="true">+</span></summary><p>'+v2T(a)+'</p></details>').join("");
  return heading+
