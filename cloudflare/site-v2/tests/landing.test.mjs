@@ -330,3 +330,63 @@ test("Semester campaign has a keyboard-accessible poster play control with nativ
  assert.match(code,/semesterVideo\.play\(\)/);
  assert.doesNotMatch(code,/semesterVideo\.autoplay\s*=\s*true/);
 });
+
+
+test("EAP is a complete, stand-alone multilingual academic guide with owner-confirmed tuition",async()=>{
+ const cases=[
+  ["/courses/academic-english/","en","AFN 1,000","AFN 2,000"],
+  ["/fa/courses/academic-english/","fa-AF","۱٬۰۰۰ افغانی","۲٬۰۰۰ افغانی"],
+  ["/ps/courses/academic-english/","ps-AF","۱٬۰۰۰ افغانۍ","۲٬۰۰۰ افغانۍ"]
+ ];
+ for(const [path,lang,monthly,semester] of cases){
+  const result=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  assert.equal(result.status,200,path);
+  const html=await result.text();
+  assert.match(html,new RegExp('<html lang="'+lang+'" dir="'));
+  assert.equal((html.match(/<h1>/g)||[]).length,1,path);
+  assert.match(html,/<meta name="description"/,path);
+  assert.match(html,/<script type="application\/ld\+json">/,path);
+  assert.match(html,/id="eap-levels"/,path);
+  assert.match(html,/id="eap-books"/,path);
+  assert.match(html,/id="eap-fees"/,path);
+  assert.equal((html.match(/<li class="eap-level">/g)||[]).length,4,path);
+  assert.equal((html.match(/<article class="eap-book">/g)||[]).length,3,path);
+  assert.equal((html.match(/<article class="eap-goal">/g)||[]).length,4,path);
+  for(const book of ["Active Skills for Reading","Contemporary Topics","Longman Academic Writing Series"]){
+   assert.ok(html.includes(book),path+" missing "+book);
+  }
+  for(const level of ["EAP 1","EAP 2","EAP 3","EAP 4"]){
+   assert.ok(html.includes(level),path+" missing "+level);
+  }
+  assert.ok(html.includes(monthly),path+" monthly fee missing");
+  assert.ok(html.includes(semester),path+" two-month level fee missing");
+  assert.match(html,/Cengage/);
+  assert.match(html,/Pearson/);
+  assert.match(html,new RegExp('href="'+path.replace("courses/academic-english/","admissions/")+"\\?program=academic-english"'));
+  assert.doesNotMatch(html,/خانه موفقیت|EAP 1 uses Active Skills for Reading 1|EAP 4 uses Contemporary Topics 4/);
+ }
+});
+test("EAP preview remains unindexed, HEAD returns no body and no CMS records are mutated",async()=>{
+ const before=JSON.stringify(main)+JSON.stringify(ps);
+ const preview=await worker.fetch(new Request("https://preview.the-toefl-house.pages.dev/fa/courses/academic-english/"),env());
+ assert.equal(preview.status,200);
+ assert.match(preview.headers.get("X-Robots-Tag"),/noindex/);
+ const h=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/courses/academic-english/",{method:"HEAD"}),env());
+ assert.equal(h.status,200);
+ assert.equal(await h.text(),"");
+ assert.equal(JSON.stringify(main)+JSON.stringify(ps),before,"published CMS object must not be changed");
+});
+test("New semester billboard promotes the EAP page directly on all three homepages",async()=>{
+ for(const path of ["/","/fa/","/ps/"]){
+  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  assert.equal(r.status,200);
+  const html=await r.text();
+  assert.match(html,/class="semester-eap-spotlight"/);
+  assert.match(html,new RegExp('href="'+path+'courses/academic-english/"'));
+  assert.ok(html.includes("EAP"));
+  assert.ok(html.includes("2,000")||html.includes("۲٬۰۰۰"));
+  assert.match(html,/id="semester-qaws-1405"/);
+  assert.match(html,/class="semester-video" controls playsinline preload="none"/);
+  assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/\?utm_source=website&amp;utm_campaign=qaws_1405_semester"/);
+ }
+});
