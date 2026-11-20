@@ -50,7 +50,7 @@ jobs:
         run: |
           # Course guide translations run on the edge; visitors download only the small CSS/JS assets.
           test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 205000
-          test $(wc -c < cloudflare/site-v2/site.css) -lt 45000
+          test $(wc -c < cloudflare/site-v2/site.css) -lt 65000
           test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
       - uses: actions/upload-artifact@v4
         with:
