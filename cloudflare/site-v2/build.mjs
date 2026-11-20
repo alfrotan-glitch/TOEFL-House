@@ -7,9 +7,12 @@ let main=await readFile(join(here,"../pages-edge/worker.mjs"),"utf8");
 const landingSource=await readFile(join(here,"landing.mjs"),"utf8");
 // Compact authored static locale copy without changing the runtime markup.
 function compactStatic(source,name){
- const re=new RegExp("const "+name+"=(\\\\{[\\\\s\\\\S]*?\\\\n\\\\});");
- return source.replace(re,(_,json)=>{
-  const normalized=name==="V2_COPY"?json.replace(/([\\{\\[, ]\\s*)([A-Za-z_][A-Za-z0-9_]*)(\\s*:)/g,'$1"$2"$3'):json;
+ const pattern=name==="V2_COPY"?/const V2_COPY=(\{[\s\S]*?\n\});/:
+  name==="V2_SEMESTER"?/const V2_SEMESTER=(\{[\s\S]*?\n\});/:
+  /const V2_GENERAL_ENGLISH=(\{[\s\S]*?\n\});/;
+ if(!pattern.test(source))throw Error("Static source shape moved: "+name);
+ return source.replace(pattern,(_,json)=>{
+  const normalized=name==="V2_COPY"?json.replace(/([\{\[,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g,'$1"$2"$3'):json;
   return "const "+name+"="+JSON.stringify(JSON.parse(normalized))+";";
  });
 }
