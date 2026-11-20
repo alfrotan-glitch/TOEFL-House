@@ -70,7 +70,7 @@ if(enquiry){
   var template={
    en:"Hello. I would like information about courses at The TOEFL House and a free placement assessment.\nProgram: ",
    fa:"سلام. می‌خواهم در مورد صنف‌های تافل هوس معلومات بگیرم و تعیین سطح رایگان انجام بدهم.\nبرنامه: ",
-   ps:"سلام. د خانه موفقیت د کورسونو معلومات او د وړیا سویې معلومولو غوښتنه لرم.\nپروګرام: "
+   ps:"سلام. د تافل هوس د انګلیسي پروګرامونو په اړه معلومات او د سویې د وړیا ارزونې غوښتنه لرم.\nپروګرام: "
   };
   var labels={
    en:["\nLearning format: ","\nPreferred time: ","\nPlease share class times and fees. Thank you."],
