@@ -5,258 +5,258 @@
  * Never imports copyrighted Oxford textbook pages or photos.
  */
 const V2_GENERAL_ENGLISH={
-  "en": {
-    "eyebrow": "GENERAL ENGLISH · THE COMPLETE PROGRAM",
-    "title": "Five clear stages. One confident English journey.",
-    "intro": "General English at The TOEFL House follows five in-house stages, from Pre-Starter through Prep Three. Classes are taught by two instructors and combine the Oxford Got it! textbook series with a dedicated Speaking chapter. Your starting point is selected through a free placement assessment.",
-    "facts": [
-      [
-        "2 instructors",
-        "Teaching the General English program"
-      ],
-      [
-        "5 stages",
-        "Pre-Starter to Prep Three"
-      ],
-      [
-        "500 AFN",
-        "Monthly tuition"
-      ],
-      [
-        "Free",
-        "Placement assessment"
-      ]
-    ],
-    "levelsTitle": "Your learning pathway",
-    "levelsIntro": "Pre-Starter is a one-month foundation course. Starter, Prep One, Prep Two and Prep Three are separate two-month semesters. Find your starting level through our free placement assessment.",
-    "stageDescs": [
-      "An introductory month for learners preparing to enter the regular English semesters.",
-      "Start developing everyday English, key vocabulary and simple communication.",
-      "Strengthen language foundations through guided listening, reading and short conversations.",
-      "Build more independent use of English for practical interaction and connected ideas.",
-      "Consolidate the General English foundation for further academic or specialized study."
-    ],
-    "foundation": "1 month",
-    "semester": "2 months / semester",
-    "pacing": "Stage duration",
-    "tuition": "Tuition",
-    "monthlyRate": "500 AFN per month",
-    "semesterRate": "1,000 AFN per semester",
-    "twoTitle": "Teaching with two instructors",
-    "twoText": "The General English program is delivered by two instructors. Learners benefit from the coordinated delivery of the core lessons and speaking practice. Teacher names and the timetable for the available class can be confirmed with admissions.",
-    "oxfordLabel": "CORE COURSE BOOKS",
-    "oxfordTitle": "About the Oxford Got it! series",
-    "oxfordIntro": "Got it! is a four-level American English textbook series published by Oxford University Press, originally developed for secondary learners. It emphasizes communication and the development of language skills through meaningful contexts and guided practice.",
-    "oxfordFeatures": [
-      "Vocabulary and grammar introduced in meaningful contexts rather than isolated lists.",
-      "Listening, speaking, reading and writing activities that reinforce each other.",
-      "Dialogues, pair-work and communicative tasks that help learners practise language.",
-      "Review and self-assessment activities designed to make progress visible."
-    ],
-    "oxfordLevelsLabel": "Publisher's book levels",
-    "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
-    "oxfordNote": "Your teacher selects suitable Got it! lessons for your class. Ask admissions about printed books and any digital learning materials.",
-    "speakingLabel": "SUPPLEMENTARY SPEAKING CHAPTER",
-    "speakingTitle": "Speaking is part of the program—not an afterthought.",
-    "speakingText": "In addition to the Got it! lessons, the program includes a dedicated chapter focused on active spoken English. Its purpose is to give learners extra opportunities to apply what they learn through guided conversation, pronunciation practice, questions and answers, and real-life communication tasks.",
-    "feeLabel": "CLEAR AND TRANSPARENT FEES",
-    "feeTitle": "Duration and tuition",
-    "feeIntro": "Tuition is AFN 500 per month. Pre-Starter runs for one month (AFN 500). Each following stage is a two-month semester, collected as a semester fee of AFN 1,000.",
-    "colLevel": "Course stage",
-    "colDuration": "Duration",
-    "colFee": "Tuition due for that stage",
-    "totalTitle": "Complete five-stage pathway",
-    "totalDuration": "9 months",
-    "totalFee": "4,500 AFN",
-    "totalNote": "Fees are paid stage by stage. Ask admissions about textbooks, class times and any other costs.",
-    "faqTitle": "Before enrolling",
-    "faqs": [
-      [
-        "Does every learner have to start at Pre-Starter?",
-        "The placement assessment is free and helps admissions recommend an appropriate starting class. A final placement is confirmed by the academic team."
-      ],
-      [
-        "Are these five levels the same as Oxford's Got it! levels?",
-        "No. The TOEFL House names five teaching stages; Oxford's Got it! series names four book levels. The class teaching plan determines the book or sections used."
-      ],
-      [
-        "Is the book or online access included in tuition?",
-        "The figures above specify tuition only. Ask admissions to confirm the applicable book edition, materials and any separate charges."
-      ]
-    ],
-    "sourcesTitle": "Textbook information and references",
-    "sourcesNote": "Book details are based on Oxford University Press bibliographic and catalogue information. Teaching with a published Oxford textbook does not mean the institute is endorsed or accredited by Oxford University Press.",
-    "cta": "Request a free placement assessment",
-    "ctaSub": "No email required. Confirm current teacher assignments, class times, materials and places with admissions."
-  },
-  "fa": {
-    "eyebrow": "انگلیسی عمومی · معلومات کامل برنامه",
-    "title": "پنج سطح منظم؛ از آغاز تا مکالمهٔ بااعتماد.",
-    "intro": "برنامهٔ General English در تافل هوس دارای پنج سطح داخلی از Pre-Starter تا Prep Three است. این برنامه توسط دو استاد تدریس می‌شود و از مجموعهٔ کتاب‌های Got it! انتشارات Oxford University Press در کنار یک چپتر ویژهٔ Speaking استفاده می‌کند. تعیین سطح برای انتخاب صنف مناسب رایگان است.",
-    "facts": [
-      [
-        "۲ استاد",
-        "تدریس برنامهٔ انگلیسی عمومی"
-      ],
-      [
-        "۵ سطح",
-        "از Pre-Starter تا Prep Three"
-      ],
-      [
-        "۵۰۰ افغانی",
-        "فیس ماهانه"
-      ],
-      [
-        "رایگان",
-        "امتحان تعیین سطح"
-      ]
-    ],
-    "levelsTitle": "مسیر آموزشی و سطح‌های کورس",
-    "levelsIntro": "Pre-Starter یک دورهٔ یک‌ماههٔ مقدماتی است. Starter، Prep One، Prep Two و Prep Three هرکدام یک سمستر دوماهه هستند. با تعیین سطح رایگان، از صنف مناسب خود آغاز کنید.",
-    "stageDescs": [
-      "دورهٔ مقدماتی برای شاگردانی که می‌خواهند پیش از ورود به سمسترهای اصلی، بنیاد زبان انگلیسی خود را آماده سازند.",
-      "آغاز تقویت لغات روزمره، ساختارهای ابتدایی و ارتباط ساده به انگلیسی.",
-      "تقویت مهارت‌های پایه از راه شنیدن، خواندن و مکالمات کوتاه و رهنمایی‌شده.",
-      "گسترش توانایی استفادهٔ مستقل‌تر از انگلیسی در گفتگو و بیان موضوعات مرتبط.",
-      "تحکیم مهارت‌های انگلیسی عمومی برای ادامهٔ آموزش اکادمیک یا دوره‌های تخصصی."
-    ],
-    "foundation": "۱ ماه",
-    "semester": "۲ ماه / یک سمستر",
-    "pacing": "مدت دوره",
-    "tuition": "فیس دوره",
-    "monthlyRate": "۵۰۰ افغانی برای یک ماه",
-    "semesterRate": "۱٬۰۰۰ افغانی برای هر سمستر",
-    "twoTitle": "تدریس توسط دو استاد",
-    "twoText": "برنامهٔ انگلیسی عمومی با سهم‌گیری دو استاد تدریس می‌شود. تدریس درس‌های اصلی و تمرین‌های گفتاری در چارچوب برنامهٔ آموزشی هماهنگ می‌گردد. نام استادان و تقسیم اوقات دقیق صنف موجود را می‌توانید از بخش پذیرش دریافت کنید.",
-    "oxfordLabel": "کتاب‌های اصلی آموزشی",
-    "oxfordTitle": "معرفی تخصصی مجموعهٔ Got it! آکسفورد",
-    "oxfordIntro": "Got it! مجموعه‌ای چهارسطحی برای آموزش انگلیسی امریکایی است که توسط Oxford University Press نشر شده و در اصل برای زبان‌آموزان دورهٔ متوسطه تهیه گردیده است. این مجموعه بر استفادهٔ واقعی از زبان، فعالیت‌های ارتباطی و رشد مهارت‌های انگلیسی در متن‌های معنادار تمرکز دارد.",
-    "oxfordFeatures": [
-      "آموزش لغات و گرامر در متن و موقعیت، نه صرفاً حفظ‌کردن قواعد.",
-      "تمرین‌های مرتبط شنیدن (Listening)، صحبت‌کردن (Speaking)، خواندن (Reading) و نوشتن (Writing).",
-      "گفتگوها، کارهای دونفری و فعالیت‌های ارتباطی برای استفادهٔ عملی از انگلیسی.",
-      "مرور درس‌ها و خودارزیابی برای آگاهی شاگرد از پیشرفت آموزشی."
-    ],
-    "oxfordLevelsLabel": "سطح‌های کتاب‌های ناشر",
-    "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
-    "oxfordNote": "استاد مطابق سطح صنف، درس‌های مناسب Got it! را انتخاب می‌کند. برای معلومات دربارهٔ کتاب تمرین و منابع دیجیتلی با پذیرش تماس بگیرید.",
-    "speakingLabel": "چپتر اختصاصی Speaking",
-    "speakingTitle": "برای صحبت‌کردن، فرصت تمرین بیشتر.",
-    "speakingText": "در کنار درس‌های Got it! یک چپتر ویژهٔ Speaking در برنامه تدریس می‌شود. هدف این بخش، فراهم‌کردن تمرین بیشتر برای مکالمهٔ رهنمایی‌شده، تلفظ، پرسش و پاسخ و استفاده از لغات و گرامر در موقعیت‌های روزمره است.",
-    "feeLabel": "فیس و مدت شفاف",
-    "feeTitle": "تقسیم‌بندی سمسترها و فیس",
-    "feeIntro": "فیس تدریس ماهانه ۵۰۰ افغانی است. دورهٔ Pre-Starter یک ماه و فیس آن ۵۰۰ افغانی است. هرکدام از چهار سطح بعدی دو ماه دوام دارد و فیس هر سمستر ۱٬۰۰۰ افغانی بوده و به‌صورت سمستروار اخذ می‌شود.",
-    "colLevel": "سطح آموزشی",
-    "colDuration": "مدت",
-    "colFee": "فیس همان دوره",
-    "totalTitle": "مجموع مسیر پنج‌سطحی",
-    "totalDuration": "۹ ماه",
-    "totalFee": "۴٬۵۰۰ افغانی",
-    "totalNote": "فیس هر سطح جداگانه پرداخت می‌شود. برای کتاب‌ها، تقسیم اوقات و هزینه‌های احتمالی دیگر با پذیرش تماس بگیرید.",
-    "faqTitle": "پرسش‌های مهم پیش از ثبت‌نام",
-    "faqs": [
-      [
-        "آیا همه باید از Pre-Starter شروع کنند؟",
-        "تعیین سطح رایگان است و به انتخاب صنف مناسب کمک می‌کند. تعیین نهایی سطح با مسئولان آموزشی هماهنگ می‌شود."
-      ],
-      [
-        "آیا پنج سطح تافل هوس همان سطح‌های Oxford Got it! هستند؟",
-        "نخیر. پنج سطح، تقسیم‌بندی آموزشی خود مرکز است؛ مجموعهٔ Got it! چهار سطح کتابی دارد و پلان درسی مشخص می‌کند که کدام کتاب یا بخش در هر صنف تدریس شود."
-      ],
-      [
-        "آیا قیمت کتاب و دسترسی آنلاین شامل فیس است؟",
-        "مبلغ‌های بالا فیس تدریس را نشان می‌دهند. چاپ کتاب مورد استفاده، مواد آموزشی و هر هزینهٔ جداگانه را با پذیرش تأیید کنید."
-      ]
-    ],
-    "sourcesTitle": "مراجع معلومات کتاب‌ها",
-    "sourcesNote": "معلومات کتاب‌های Got it! بر اساس منابع کتاب‌شناسی و فهرست نشرات Oxford University Press تهیه شده است. استفاده از کتاب‌های Oxford به معنی تأیید رسمی یا اعتباردهی این ناشر به تافل هوس نیست.",
-    "cta": "درخواست تعیین سطح رایگان",
-    "ctaSub": "ایمیل ضروری نیست. برای نام استادان، تقسیم اوقات، کتاب مورد استفاده و ظرفیت صنف‌ها با پذیرش تماس بگیرید."
-  },
-  "ps": {
-    "eyebrow": "عمومي انګلیسي · د پروګرام بشپړ معلومات",
-    "title": "پنځه منظمې کچې؛ له بنسټ څخه تر ډاډمنې خبرې.",
-    "intro": "د تافل هوس General English پروګرام پنځه داخلي کچې لري: له Pre-Starter څخه تر Prep Three پورې. دا پروګرام د دوو استادانو له خوا تدریسېږي او د Oxford University Press د Got it! کتابونو ترڅنګ د Speaking ځانګړی څپرکی هم لري. د مناسب ټولګي د ټاکلو لپاره د سویې معلومول وړیا دي.",
-    "facts": [
-      [
-        "۲ استادان",
-        "د عمومي انګلیسي تدریس"
-      ],
-      [
-        "۵ کچې",
-        "له Pre-Starter تر Prep Three"
-      ],
-      [
-        "۵۰۰ افغانۍ",
-        "میاشتنی فیس"
-      ],
-      [
-        "وړیا",
-        "د سویې معلومول"
-      ]
-    ],
-    "levelsTitle": "د زده‌کړې پړاوونه",
-    "levelsIntro": "Pre-Starter یوه میاشتنی مقدماتي دوره ده. Starter، Prep One، Prep Two او Prep Three هر یو دوه میاشتنی سمستر دی. د وړیا سویې معلومولو له لارې خپل مناسب ټولګی وټاکئ.",
-    "stageDescs": [
-      "د هغو زده‌کوونکو لپاره مقدماتي دوره چې د اصلي سمسترونو له پیل مخکې د انګلیسي بنسټ پیاوړی کوي.",
-      "د ورځنیو لغتونو، اساسي جوړښتونو او ساده خبرو د زده‌کړې پیل.",
-      "د اورېدلو، لوستلو او لنډو لارښوول شویو خبرو له لارې د بنسټیزو مهارتونو پیاوړتیا.",
-      "په ورځنیو خبرو او د تړلو نظریو په بیان کې د خپلواکې انګلیسي پراختیا.",
-      "د عمومي انګلیسي مهارتونو ټینګښت او نورو اکاډمیکو یا تخصصي زده‌کړو ته چمتووالی."
-    ],
-    "foundation": "۱ میاشت",
-    "semester": "۲ میاشتې / یو سمستر",
-    "pacing": "موده",
-    "tuition": "فیس",
-    "monthlyRate": "۵۰۰ افغانۍ د یوې میاشتې",
-    "semesterRate": "۱٬۰۰۰ افغانۍ د هر سمستر",
-    "twoTitle": "د دوو استادانو له خوا تدریس",
-    "twoText": "د عمومي انګلیسي پروګرام په تدریس کې دوه استادان برخه اخلي. د اصلي درسونو او د خبرو تمرینونه د پروګرام له تدریسي پلان سره سم پرمخ وړل کېږي. د استادانو نومونه او د شته ټولګیو وختونه له پذیرش څخه تایید کړئ.",
-    "oxfordLabel": "اصلي درسي کتابونه",
-    "oxfordTitle": "د Oxford د Got it! کتابونو په اړه",
-    "oxfordIntro": "Got it! د امریکایي انګلیسي ژبې څلورکچیزه درسي لړۍ ده چې Oxford University Press خپره کړې او په اصل کې د منځني ښوونځي زده‌کوونکو لپاره چمتو شوې ده. دا لړۍ پر ګټورو خبرو، د ژبې عملي کارونې او مهارتونو تمرکز کوي.",
-    "oxfordFeatures": [
-      "د لغتونو او ګرامر زده‌کړه د معنا لرونکو متنونو او ورځنیو حالاتو له لارې.",
-      "د Listening، Speaking، Reading او Writing اړوند تمرینونه.",
-      "خبرې اترې، دوه‌کسیزې دندې او ارتباطي فعالیتونه.",
-      "د درسونو تکرار او ځان‌ارزونه د پرمختګ د معلومولو لپاره."
-    ],
-    "oxfordLevelsLabel": "د خپرندوی د کتابونو کچې",
-    "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
-    "oxfordNote": "استاد د ټولګي د سویې له مخې د Got it! مناسب درسونه ټاکي. د کتاب او ډیجیټلي سرچینو په اړه له ادارې معلومات واخلئ.",
-    "speakingLabel": "د Speaking ځانګړی څپرکی",
-    "speakingTitle": "د روانو خبرو لپاره ځانګړی تمرین.",
-    "speakingText": "د Got it! د درسونو ترڅنګ د Speaking ځانګړی څپرکی هم تدریسېږي. موخه یې د لارښوول شویو خبرو، تلفظ، پوښتنو او ځوابونو او په ورځنیو حالاتو کې د زده‌کړل شوو لغتونو او ګرامر د کارونې زیات تمرین دی.",
-    "feeLabel": "روښانه فیس او موده",
-    "feeTitle": "د سمسترونو موده او فیس",
-    "feeIntro": "میاشتنی تدریسي فیس ۵۰۰ افغانۍ دی. Pre-Starter یوه میاشت دوام کوي او فیس یې ۵۰۰ افغانۍ دی. څلور نورې کچې هره یوه دوه میاشتې دي او د هر سمستر فیس ۱٬۰۰۰ افغانۍ په سمستري ډول اخیستل کېږي.",
-    "colLevel": "درسي کچه",
-    "colDuration": "موده",
-    "colFee": "د دورې فیس",
-    "totalTitle": "د ټولو پنځو کچو مجموعه",
-    "totalDuration": "۹ میاشتې",
-    "totalFee": "۴٬۵۰۰ افغانۍ",
-    "totalNote": "د هرې کچې فیس جلا اخیستل کېږي. د مهالوېش، کتابونو او نورو احتمالي لګښتونو په اړه له ادارې معلومات واخلئ.",
-    "faqTitle": "تر نوم‌لیکنې مخکې مهمې پوښتنې",
-    "faqs": [
-      [
-        "آیا ټول زده‌کوونکي باید له Pre-Starter څخه پیل وکړي؟",
-        "د سویې معلومول وړیا دي او د مناسب ټولګي په ټاکلو کې مرسته کوي. وروستۍ ټاکنه د تعلیمي مسئولانو له خوا تاییدېږي."
-      ],
-      [
-        "آیا د تافل هوس پنځه کچې د Oxford Got it! له کچو سره یو شان دي؟",
-        "نه. د تافل هوس پنځه کچې د مرکز خپل تدریسي پړاوونه دي، خو Got it! څلور کتابي کچې لري. کتاب د تدریسي پلان له مخې ټاکل کېږي."
-      ],
-      [
-        "آیا کتاب او آنلاین لاسرسی په فیس کې شامل دی؟",
-        "پورته شمېرې یوازې تدریسي فیس ښيي. د اړوند چاپ، درسي موادو او احتمالي نورو لګښتونو معلومات له پذیرش څخه تایید کړئ."
-      ]
-    ],
-    "sourcesTitle": "د کتابونو باوري سرچینې",
-    "sourcesNote": "د Got it! د کتابونو معلومات د Oxford University Press د کتاب‌پېژندنې او خپرونو پر بنسټ دي. د Oxford له کتابونو ګټه اخیستل د دې معنا نه لري چې دغه خپرندوی تافل هوس ته رسمي تایید ورکړی دی.",
-    "cta": "د وړیا سویې معلومولو غوښتنه",
-    "ctaSub": "ایمیل ضروري نه دی. د استادانو، درسي وختونو، کتابونو او د ټولګیو د ظرفیت لپاره له پذیرش سره اړیکه ونیسئ."
-  }
+ "en": {
+  "eyebrow": "GENERAL ENGLISH · PROGRAM GUIDE",
+  "title": "Build a strong foundation in English.",
+  "intro": "The General English program at The TOEFL House offers five school-defined stages, from Pre-Starter to Prep Three. Two instructors deliver the program using selected lessons from Oxford University Press's Got it! series alongside a dedicated speaking component. A free placement assessment helps identify a suitable starting class.",
+  "facts": [
+   [
+    "2 instructors",
+    "Teaching the General English program"
+   ],
+   [
+    "5 stages",
+    "Pre-Starter to Prep Three"
+   ],
+   [
+    "500 AFN",
+    "Monthly tuition"
+   ],
+   [
+    "Free",
+    "Placement assessment"
+   ]
+  ],
+  "levelsTitle": "Five stages, clearly structured",
+  "levelsIntro": "Pre-Starter is a one-month foundation stage. Starter and Prep One, Two and Three each last two months. A free placement assessment helps determine your starting point.",
+  "stageDescs": [
+   "An introductory month for learners preparing to enter the regular English semesters.",
+   "Start developing everyday English, key vocabulary and simple communication.",
+   "Strengthen language foundations through guided listening, reading and short conversations.",
+   "Build more independent use of English for practical interaction and connected ideas.",
+   "Consolidate the General English foundation for further academic or specialized study."
+  ],
+  "foundation": "1 month",
+  "semester": "2 months / semester",
+  "pacing": "Stage duration",
+  "tuition": "Tuition",
+  "monthlyRate": "500 AFN per month",
+  "semesterRate": "1,000 AFN per semester",
+  "twoTitle": "Two instructors, coordinated teaching",
+  "twoText": "Two instructors teach the General English program, combining the core syllabus with structured speaking practice. The admissions team can confirm the teachers and timetable for your class.",
+  "oxfordLabel": "CORE COURSE BOOKS",
+  "oxfordTitle": "The Oxford Got it! textbook series",
+  "oxfordIntro": "Got it!, published by Oxford University Press, is a four-level American English course originally developed for secondary learners. Its structured activities support vocabulary, grammar, comprehension and communicative practice.",
+  "oxfordFeatures": [
+   "Vocabulary and grammar introduced in meaningful contexts rather than isolated lists.",
+   "Listening, speaking, reading and writing activities that reinforce each other.",
+   "Dialogues, pair-work and communicative tasks that help learners practise language.",
+   "Review and self-assessment activities designed to make progress visible."
+  ],
+  "oxfordLevelsLabel": "Publisher's book levels",
+  "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
+  "oxfordNote": "The school's five teaching stages are not presented as a direct one-to-one match with the publisher's four book levels. Ask admissions which edition and materials are used in your class.",
+  "speakingLabel": "SUPPLEMENTARY SPEAKING CHAPTER",
+  "speakingTitle": "Speaking practice built into the program",
+  "speakingText": "A dedicated speaking chapter complements Got it! lessons. Guided conversations, pronunciation practice, questions and answers, and everyday communication tasks give learners regular opportunities to use the language they study.",
+  "feeLabel": "CLEAR AND TRANSPARENT FEES",
+  "feeTitle": "Program duration and tuition",
+  "feeIntro": "Tuition is AFN 500 per month. Pre-Starter lasts one month (AFN 500). Each of the four following stages lasts two months (AFN 1,000 per stage). Confirm payment dates and any textbook charges with admissions.",
+  "colLevel": "Course stage",
+  "colDuration": "Duration",
+  "colFee": "Tuition due for that stage",
+  "totalTitle": "Complete five-stage pathway",
+  "totalDuration": "9 months",
+  "totalFee": "4,500 AFN",
+  "totalNote": "The five-stage pathway totals nine months and AFN 4,500 in tuition if completed consecutively. Confirm payment schedules, textbooks and any other costs with admissions.",
+  "faqTitle": "Questions before you enroll",
+  "faqs": [
+   [
+    "Does every learner have to start at Pre-Starter?",
+    "The placement assessment is free and helps admissions recommend an appropriate starting class. A final placement is confirmed by the academic team."
+   ],
+   [
+    "Are these five levels the same as Oxford's Got it! levels?",
+    "No. The TOEFL House names five teaching stages; Oxford's Got it! series names four book levels. The class teaching plan determines the book or sections used."
+   ],
+   [
+    "Is the book or online access included in tuition?",
+    "The figures above specify tuition only. Ask admissions to confirm the applicable book edition, materials and any separate charges."
+   ]
+  ],
+  "sourcesTitle": "Textbook information and references",
+  "sourcesNote": "Book details are based on Oxford University Press bibliographic and catalogue information. Teaching with a published Oxford textbook does not mean the institute is endorsed or accredited by Oxford University Press.",
+  "cta": "Request a free placement assessment",
+  "ctaSub": "No email address is required. Confirm current teachers, class times, learning materials and availability with admissions."
+ },
+ "fa": {
+  "eyebrow": "انگلیسی عمومی · رهنمای برنامه",
+  "title": "بنیاد زبان انگلیسی خود را گام‌به‌گام تقویت کنید.",
+  "intro": "برنامهٔ General English تافل هوس پنج لول آموزشی دارد: Pre-Starter، Starter و Prep One تا Prep Three. دو استاد این برنامه را با استفاده از درس‌های منتخب مجموعهٔ Got it! انتشارات Oxford University Press و بخش اختصاصی Speaking تدریس می‌کنند. تعیین سطح برای انتخاب صنف مناسب رایگان است.",
+  "facts": [
+   [
+    "۲ استاد",
+    "در تدریس برنامهٔ انگلیسی عمومی"
+   ],
+   [
+    "۵ لول",
+    "از Pre-Starter تا Prep Three"
+   ],
+   [
+    "۵۰۰ افغانی",
+    "فیس ماهانه"
+   ],
+   [
+    "رایگان",
+    "تعیین سطح"
+   ]
+  ],
+  "levelsTitle": "پنج لول با ساختار مشخص",
+  "levelsIntro": "Pre-Starter یک لول مقدماتی یک‌ماهه است. Starter و سه لول Prep One تا Prep Three هرکدام دو ماه دوام می‌کنند. تعیین سطح رایگان به انتخاب لول مناسب کمک می‌کند.",
+  "stageDescs": [
+   "دورهٔ مقدماتی برای شاگردانی که می‌خواهند پیش از ورود به سمسترهای اصلی، بنیاد زبان انگلیسی خود را آماده سازند.",
+   "آغاز تقویت لغات روزمره، ساختارهای ابتدایی و ارتباط ساده به انگلیسی.",
+   "تقویت مهارت‌های پایه از راه شنیدن، خواندن و مکالمات کوتاه و رهنمایی‌شده.",
+   "گسترش توانایی استفادهٔ مستقل‌تر از انگلیسی در گفتگو و بیان موضوعات مرتبط.",
+   "تحکیم مهارت‌های انگلیسی عمومی برای ادامهٔ آموزش اکادمیک یا دوره‌های تخصصی."
+  ],
+  "foundation": "۱ ماه",
+  "semester": "۲ ماه / یک سمستر",
+  "pacing": "مدت دوره",
+  "tuition": "فیس دوره",
+  "monthlyRate": "۵۰۰ افغانی برای یک ماه",
+  "semesterRate": "۱٬۰۰۰ افغانی برای هر سمستر",
+  "twoTitle": "تدریس هماهنگ توسط دو استاد",
+  "twoText": "دو استاد در تدریس انگلیسی عمومی سهم دارند و درس‌های اصلی را با تمرین‌های منظم مکالمه پیوند می‌دهند. نام استادان و تقسیم اوقات صنف مورد نظر را بخش پذیرش تأیید می‌کند.",
+  "oxfordLabel": "کتاب‌های اصلی آموزشی",
+  "oxfordTitle": "آشنایی با مجموعه‌کتاب Got it! آکسفورد",
+  "oxfordIntro": "Got it! مجموعهٔ چهارسطحی آموزش انگلیسی امریکایی از Oxford University Press است که در اصل برای زبان‌آموزان دورهٔ متوسطه طراحی شده است. فعالیت‌های آن بر واژگان، گرامر، درک مطلب و کاربرد ارتباطی زبان تمرکز دارند.",
+  "oxfordFeatures": [
+   "آموزش لغات و گرامر در متن و موقعیت، نه صرفاً حفظ‌کردن قواعد.",
+   "تمرین‌های مرتبط شنیدن (Listening)، صحبت‌کردن (Speaking)، خواندن (Reading) و نوشتن (Writing).",
+   "گفتگوها، کارهای دونفری و فعالیت‌های ارتباطی برای استفادهٔ عملی از انگلیسی.",
+   "مرور درس‌ها و خودارزیابی برای آگاهی شاگرد از پیشرفت آموزشی."
+  ],
+  "oxfordLevelsLabel": "سطح‌های کتاب‌های ناشر",
+  "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
+  "oxfordNote": "پنج لول داخلی تافل هوس لزوماً با چهار سطح کتاب‌های ناشر تطابق یک‌به‌یک ندارند. نام کتاب، شمارهٔ چاپ و مواد درسی صنف خود را از پذیرش بپرسید.",
+  "speakingLabel": "چپتر اختصاصی Speaking",
+  "speakingTitle": "تمرین مکالمه، بخشی ثابت از برنامه",
+  "speakingText": "در کنار درس‌های Got it!، یک بخش اختصاصی Speaking نیز تدریس می‌شود. مکالمه‌های رهنمایی‌شده، تمرین تلفظ، پرسش و پاسخ و گفت‌وگو دربارهٔ موضوعات روزمره، فرصت استفادهٔ عملی از آموخته‌ها را فراهم می‌کنند.",
+  "feeLabel": "فیس و مدت شفاف",
+  "feeTitle": "مدت لول‌ها و فیس آموزشی",
+  "feeIntro": "فیس ماهانه ۵۰۰ افغانی است. Pre-Starter یک ماه دوام دارد و فیس آن ۵۰۰ افغانی است. هرکدام از چهار لول بعدی دو ماه دوام می‌کنند و مجموع فیس هر لول ۱٬۰۰۰ افغانی می‌شود. زمان پرداخت و قیمت کتاب‌ها را با پذیرش تأیید کنید.",
+  "colLevel": "سطح آموزشی",
+  "colDuration": "مدت",
+  "colFee": "فیس همان دوره",
+  "totalTitle": "مجموع دورهٔ پنج‌لولی",
+  "totalDuration": "۹ ماه",
+  "totalFee": "۴٬۵۰۰ افغانی",
+  "totalNote": "اگر پنج لول را پیهم سپری کنید، مجموع دوره نُه ماه و فیس تدریس ۴٬۵۰۰ افغانی می‌شود. تقسیم پرداخت، قیمت کتاب‌ها و مصارف احتمالی دیگر را با پذیرش مشخص سازید.",
+  "faqTitle": "پرسش‌های مهم پیش از ثبت‌نام",
+  "faqs": [
+   [
+    "آیا همه باید از Pre-Starter شروع کنند؟",
+    "تعیین سطح رایگان است و به انتخاب صنف مناسب کمک می‌کند. تعیین نهایی سطح با مسئولان آموزشی هماهنگ می‌شود."
+   ],
+   [
+    "آیا پنج سطح تافل هوس همان سطح‌های Oxford Got it! هستند؟",
+    "نخیر. پنج سطح، تقسیم‌بندی آموزشی خود مرکز است؛ مجموعهٔ Got it! چهار سطح کتابی دارد و پلان درسی مشخص می‌کند که کدام کتاب یا بخش در هر صنف تدریس شود."
+   ],
+   [
+    "آیا قیمت کتاب و دسترسی آنلاین شامل فیس است؟",
+    "مبلغ‌های بالا فیس تدریس را نشان می‌دهند. چاپ کتاب مورد استفاده، مواد آموزشی و هر هزینهٔ جداگانه را با پذیرش تأیید کنید."
+   ]
+  ],
+  "sourcesTitle": "مراجع معلومات کتاب‌ها",
+  "sourcesNote": "معلومات کتاب‌های Got it! بر اساس منابع کتاب‌شناسی و فهرست نشرات Oxford University Press تهیه شده است. استفاده از کتاب‌های Oxford به معنی تأیید رسمی یا اعتباردهی این ناشر به تافل هوس نیست.",
+  "cta": "درخواست تعیین سطح رایگان",
+  "ctaSub": "ایمیل ضروری نیست. دربارهٔ استادان، تقسیم اوقات، کتاب‌های درسی و ظرفیت صنف‌ها از پذیرش معلومات بگیرید."
+ },
+ "ps": {
+  "eyebrow": "عمومي انګلیسي · د پروګرام لارښود",
+  "title": "د انګلیسي ژبې بنسټ په منظم ډول پیاوړی کړئ.",
+  "intro": "د تافل هوس د General English پروګرام پنځه درسي کچې لري: Pre-Starter، Starter او له Prep One څخه تر Prep Three پورې. دوه ښوونکي د Oxford University Press د Got it! له ټاکل شوو درسونو او د خبرو له ځانګړې برخې څخه په ګټې اخیستنې تدریس کوي. د مناسبې کچې د ټاکلو لپاره د سویې ارزونه وړیا ده.",
+  "facts": [
+   [
+    "۲ ښوونکي",
+    "د عمومي انګلیسي تدریس"
+   ],
+   [
+    "۵ کچې",
+    "له Pre-Starter څخه تر Prep Three پورې"
+   ],
+   [
+    "۵۰۰ افغانۍ",
+    "میاشتنی فیس"
+   ],
+   [
+    "وړیا",
+    "د سویې ارزونه"
+   ]
+  ],
+  "levelsTitle": "پنځه کچې، روښانه درسي بهیر",
+  "levelsIntro": "Pre-Starter یوه میاشت دوام کوي. Starter او د Prep One، Prep Two او Prep Three کچې هره یوه دوه میاشتې دي. د سویې وړیا ارزونه د مناسبې کچې په ټاکلو کې مرسته کوي.",
+  "stageDescs": [
+   "د هغو زده‌کوونکو لپاره مقدماتي دوره چې د اصلي سمسترونو له پیل مخکې د انګلیسي بنسټ پیاوړی کوي.",
+   "د ورځنیو لغتونو، اساسي جوړښتونو او ساده خبرو د زده‌کړې پیل.",
+   "د اورېدلو، لوستلو او لنډو لارښوول شویو خبرو له لارې د بنسټیزو مهارتونو پیاوړتیا.",
+   "په ورځنیو خبرو او د تړلو نظریو په بیان کې د خپلواکې انګلیسي پراختیا.",
+   "د عمومي انګلیسي مهارتونو ټینګښت او نورو اکاډمیکو یا تخصصي زده‌کړو ته چمتووالی."
+  ],
+  "foundation": "۱ میاشت",
+  "semester": "۲ میاشتې / یو سمستر",
+  "pacing": "موده",
+  "tuition": "فیس",
+  "monthlyRate": "۵۰۰ افغانۍ د یوې میاشتې",
+  "semesterRate": "۱٬۰۰۰ افغانۍ د هر سمستر",
+  "twoTitle": "د دوو ښوونکو همغږی تدریس",
+  "twoText": "د عمومي انګلیسي پروګرام دوه ښوونکي اصلي درسونه او د خبرو تمرینونه په همغږۍ تدریسوي. د خپل ټولګي د ښوونکو نومونه او مهالوېش له نوم‌لیکنې څانګې څخه تایید کړئ.",
+  "oxfordLabel": "اصلي درسي کتابونه",
+  "oxfordTitle": "د Oxford د Got it! کتابونو پېژندنه",
+  "oxfordIntro": "Got it! د Oxford University Press د امریکایي انګلیسي څلورکچیزه درسي لړۍ ده چې په اصل کې د منځني ښوونځي زده‌کوونکو لپاره جوړه شوې ده. په دې لړۍ کې لغتونه، ګرامر، د مطلب درک او د ژبې عملي کارول تمرین کېږي.",
+  "oxfordFeatures": [
+   "د لغتونو او ګرامر زده‌کړه د معنا لرونکو متنونو او ورځنیو حالاتو له لارې.",
+   "د Listening، Speaking، Reading او Writing اړوند تمرینونه.",
+   "خبرې اترې، دوه‌کسیزې دندې او ارتباطي فعالیتونه.",
+   "د درسونو تکرار او ځان‌ارزونه د پرمختګ د معلومولو لپاره."
+  ],
+  "oxfordLevelsLabel": "د خپرندوی د کتابونو کچې",
+  "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
+  "oxfordNote": "د تافل هوس پنځه درسي کچې د خپرندوی له څلورو کتابي کچو سره لازماً یو په یو نه برابرېږي. د خپل ټولګي د کتاب چاپ او درسي مواد له ادارې څخه معلوم کړئ.",
+  "speakingLabel": "د Speaking ځانګړی څپرکی",
+  "speakingTitle": "د خبرو تمرین، د پروګرام یوه اساسي برخه",
+  "speakingText": "د Got it! د درسونو ترڅنګ د Speaking ځانګړې برخه هم تدریسېږي. لارښوول شوې خبرې، د تلفظ تمرین، پوښتنې او ځوابونه او ورځني مکالمې د زده کړې ژبې د عملي کارولو فرصتونه برابروي.",
+  "feeLabel": "روښانه فیس او موده",
+  "feeTitle": "د کچو موده او درسي فیس",
+  "feeIntro": "میاشتنی فیس ۵۰۰ افغانۍ دی. Pre-Starter یوه میاشت دوام کوي او فیس یې ۵۰۰ افغانۍ دی. نورې څلور کچې هره یوه دوه میاشتې دي او د هرې کچې ټول فیس ۱٬۰۰۰ افغانۍ کېږي. د پیسو ورکولو وختونه او د کتابونو بیې له ادارې سره تایید کړئ.",
+  "colLevel": "درسي کچه",
+  "colDuration": "موده",
+  "colFee": "د دورې فیس",
+  "totalTitle": "د پنځو کچو ټولیز بهیر",
+  "totalDuration": "۹ میاشتې",
+  "totalFee": "۴٬۵۰۰ افغانۍ",
+  "totalNote": "که پنځه کچې پرله‌پسې بشپړې کړئ، ټول بهیر نهه میاشتې او ټول درسي فیس ۴٬۵۰۰ افغانۍ کېږي. د پیسو ورکولو مهال، کتابونو او نورو احتمالي لګښتونو په اړه له ادارې معلومات واخلئ.",
+  "faqTitle": "تر نوم‌لیکنې مخکې مهمې پوښتنې",
+  "faqs": [
+   [
+    "آیا ټول زده‌کوونکي باید له Pre-Starter څخه پیل وکړي؟",
+    "د سویې معلومول وړیا دي او د مناسب ټولګي په ټاکلو کې مرسته کوي. وروستۍ ټاکنه د تعلیمي مسئولانو له خوا تاییدېږي."
+   ],
+   [
+    "آیا د تافل هوس پنځه کچې د Oxford Got it! له کچو سره یو شان دي؟",
+    "نه. د تافل هوس پنځه کچې د مرکز خپل تدریسي پړاوونه دي، خو Got it! څلور کتابي کچې لري. کتاب د تدریسي پلان له مخې ټاکل کېږي."
+   ],
+   [
+    "آیا کتاب او آنلاین لاسرسی په فیس کې شامل دی؟",
+    "پورته شمېرې یوازې تدریسي فیس ښيي. د اړوند چاپ، درسي موادو او احتمالي نورو لګښتونو معلومات له پذیرش څخه تایید کړئ."
+   ]
+  ],
+  "sourcesTitle": "د کتابونو باوري سرچینې",
+  "sourcesNote": "د Got it! د کتابونو معلومات د Oxford University Press د کتاب‌پېژندنې او خپرونو پر بنسټ دي. د Oxford له کتابونو ګټه اخیستل د دې معنا نه لري چې دغه خپرندوی تافل هوس ته رسمي تایید ورکړی دی.",
+  "cta": "د سویې د وړیا ارزونې غوښتنه",
+  "ctaSub": "ایمیل اړین نه دی. د ښوونکو، مهالوېش، درسي کتابونو او شته ځایونو په اړه له نوم‌لیکنې څانګې سره اړیکه ونیسئ."
+ }
 };
 const V2_GE_STAGE_IDS=["Pre-Starter","Starter","Prep One","Prep Two","Prep Three"];
 function v2GeneralEnglish(locale){

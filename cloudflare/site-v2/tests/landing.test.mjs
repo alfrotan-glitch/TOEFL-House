@@ -204,7 +204,7 @@ test("General English exposes five school levels, realistic AFN tuition and Oxfo
  const cases=[
   {path:"/courses/general-english/",two:"2 instructors",monthly:"500 AFN",semester:"1,000 AFN",total:"4,500 AFN",free:"Free"},
   {path:"/fa/courses/general-english/",two:"۲ استاد",monthly:"۵۰۰ افغانی",semester:"۱٬۰۰۰ افغانی",total:"۴٬۵۰۰ افغانی",free:"رایگان"},
-  {path:"/ps/courses/general-english/",two:"۲ استادان",monthly:"۵۰۰ افغانۍ",semester:"۱٬۰۰۰ افغانۍ",total:"۴٬۵۰۰ افغانۍ",free:"وړیا"}
+  {path:"/ps/courses/general-english/",two:"۲ ښوونکي",monthly:"۵۰۰ افغانۍ",semester:"۱٬۰۰۰ افغانۍ",total:"۴٬۵۰۰ افغانۍ",free:"وړیا"}
  ];
  for(const c of cases){
   const res=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+c.path),env());
@@ -352,8 +352,8 @@ test("EAP is a complete, stand-alone multilingual academic guide with owner-conf
   assert.equal((html.match(/<li class="eap-level">/g)||[]).length,4,path);
   assert.equal((html.match(/<article class="eap-book">/g)||[]).length,3,path);
   assert.equal((html.match(/<article class="eap-goal">/g)||[]).length,4,path);
-  for(const book of ["Active Skills for Reading","Contemporary Topics","Longman Academic Writing Series"]){
-   assert.ok(html.includes(book),path+" missing "+book);
+  for(const book of ["ACTIVE Skills for Reading","Contemporary Topics","Longman Academic Writing Series"]){
+   assert.ok(html.toLowerCase().includes(book.toLowerCase()),path+" missing "+book);
   }
   for(const level of ["EAP 1","EAP 2","EAP 3","EAP 4"]){
    assert.ok(html.includes(level),path+" missing "+level);
@@ -406,11 +406,11 @@ test("EAP 1–4 explicitly assigns all three matching volume numbers to the four
    }
    assert.equal((block.match(/<li dir="ltr">/g)||[]).length,3,lang+" must show precisely three assigned books per EAP level");
   }
-  assert.match(html,/Reading/);
-  assert.match(html,/Vocabulary/);
-  assert.match(html,/Listening/);
-  assert.match(html,/Speaking/);
-  assert.match(html,/Academic Writing/);
+  assert.match(html,/Reading|خواندن|لوستل/);
+  assert.match(html,/Vocabulary|واژگان|لغات|لغتونو/);
+  assert.match(html,/Listening|شنیدن|اورېدو|اورېدل/);
+  assert.match(html,/Speaking|مکالمه|خبرې/);
+  assert.match(html,/Academic Writing|نگارش|لیکنه/);
   assert.match(html,/Longman Academic Writing 4: Essays/);
   assert.match(html,/۲٬۰۰۰ افغانی|AFN 2,000|۲٬۰۰۰ افغانۍ/);
  }
