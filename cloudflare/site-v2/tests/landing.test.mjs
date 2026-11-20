@@ -362,7 +362,7 @@ test("EAP is a complete, stand-alone multilingual academic guide with owner-conf
   assert.ok(html.includes(semester),path+" two-month level fee missing");
   assert.match(html,/Cengage/);
   assert.match(html,/Pearson/);
-  assert.match(html,new RegExp('href="'+path.replace("courses/academic-english/","admissions/")+"\\?program=academic-english"'));
+   assert.ok(html.includes('href="'+path.replace("courses/academic-english/","admissions/")+'?program=academic-english"'),path+" EAP admissions CTA missing");
   assert.doesNotMatch(html,/خانه موفقیت|EAP 1 uses Active Skills for Reading 1|EAP 4 uses Contemporary Topics 4/);
  }
 });
