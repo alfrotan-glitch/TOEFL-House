@@ -21,7 +21,7 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     return {
      lang:document.documentElement.lang,
      title:document.querySelector(".eap-hero-copy h1")?.innerText,
-     levels:levels.map(x=>({heading:x.querySelector("h3")?.textContent,books:[...x.querySelectorAll(".eap-assigned-books li")].map(n=>n.textContent)})),
+     levels:levels.map(x=>({heading:x.querySelector("h3")?.textContent,books:[...x.querySelectorAll(".eap-assigned-books li")].map(n=>n.textContent),fourthNote:x.querySelector(".eap-fourth-note")?.textContent||""})),
      books:document.querySelectorAll(".eap-book").length,
      goals:document.querySelectorAll(".eap-goal").length,
      faqs:document.querySelectorAll(".eap-faq-list details").length,
@@ -47,10 +47,13 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
      assert.ok(d.levels[i-1].books.some(x=>x.includes(series+" "+i)),path+" missing "+series+" "+i);
     }
     // Publisher's Contemporary Topics 4th edition lists Books 1–3.
-    // EAP 4 therefore names the approved school syllabus assignment without
-    // inventing a nonexistent 4th-edition Book 4 or ISBN.
+    // EAP 4 therefore must disclose that its listening book/material requires
+    // academic-department confirmation, not invent a fourth-edition Book 4.
     if(i<=3)assert.ok(d.levels[i-1].books.some(x=>x.includes("Contemporary Topics "+i)),path+" missing Contemporary Topics "+i);
-    else assert.ok(d.levels[i-1].books.some(x=>x.includes("Contemporary Topics")&&x.includes("EAP 4")),path+" EAP 4 selection unclear");
+    else {
+     assert.ok(d.levels[i-1].books.some(x=>x.includes("Contemporary Topics")&&!x.includes("Contemporary Topics 4")),path+" invented Contemporary Topics 4");
+     assert.ok(d.levels[i-1].fourthNote.includes("EAP 4")&&d.levels[i-1].fourthNote.trim().length>50,path+" EAP 4 selection needs an explicit academic-department note");
+    }
    }
    assert.ok(d.fees.includes("2,000")||d.fees.includes("۲٬۰۰۰"));
    const key=lang==="fa-AF"?"fa":lang==="ps-AF"?"ps":"en";
