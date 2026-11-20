@@ -3,15 +3,15 @@
  * AFN 2000/level. Exact textbook volume numbers 1–4 are owner-confirmed for matching EAP 1–4; edition years and book prices remain unconfirmed.
  * Series descriptions verified against Cengage (Active Skills for Reading)
  * and Pearson (Contemporary Topics, Longman Academic Writing).
- * Do not imply four school levels map 1:1 to publisher volume numbers.
+ * The school's exact level-to-book pairing is confirmed; no publisher edition is assumed.
  */
 const V2_EAP={
  "en": {
   "badge": "ENGLISH FOR ACADEMIC PURPOSES · EAP",
-  "title": "English for university.",
-  "accent": "Skills for what comes next.",
-  "intro": "English for Academic Purposes (EAP) prepares learners for academic reading, lecture listening, speaking and university-style writing. The TOEFL House offers four two-month levels taught by three instructors at every level. The book numbers match the school levels exactly: EAP 1 uses Book 1 of each series, EAP 2 uses Book 2, EAP 3 uses Book 3 and EAP 4 uses Book 4.",
-  "heroNote": "Free placement assessment helps you choose your starting level. Class shifts and teaching arrangements are confirmed with admissions.",
+  "title": "Academic English for university study.",
+  "accent": "Read critically. Communicate clearly.",
+  "intro": "English for Academic Purposes (EAP) develops the reading, listening, speaking and writing skills needed for academic study. The TOEFL House offers four two-month levels. Each level is taught by three instructors and uses three core textbooks whose numbers match the course level.",
+  "heroNote": "A free placement assessment helps identify your starting level. Confirm available class times and teaching assignments with admissions.",
   "facts": [
    [
     "4 levels",
@@ -30,37 +30,37 @@ const V2_EAP={
     "Three core textbook series per level"
    ]
   ],
-  "whoTitle": "Built for your academic goals",
-  "whoText": "A practical pathway for university students, people preparing for academic study, scholarship applicants and professionals who need to read, understand and communicate in more formal English. This course develops academic language skills; it is not a promise of university admission, a scholarship or a particular test score.",
+  "whoTitle": "Who is EAP designed for?",
+  "whoText": "EAP is designed for university students, prospective students, scholarship applicants and professionals who need to understand academic English and communicate ideas clearly. It builds relevant language skills; university admission, scholarships and examination results are not guaranteed.",
   "outcomesLabel": "YOUR LEARNING GOALS",
-  "outcomesTitle": "Learn to understand, question and explain.",
-  "outcomesIntro": "Reading, listening and writing develop together. Through guided activities, feedback and practice, you work on the abilities needed to follow and contribute to academic learning.",
+  "outcomesTitle": "Understand evidence. Express ideas. Write with purpose.",
+  "outcomesIntro": "Reading, lecture listening, discussion and academic writing are taught as connected skills. Guided practice and instructor feedback help you apply what you learn.",
   "outcomes": [
    [
-    "Read with purpose",
-    "Find the main idea, recognise supporting evidence, understand vocabulary in context, distinguish arguments and summarise readings."
+    "Academic reading and vocabulary",
+    "Identify main ideas and supporting evidence, interpret vocabulary in context, compare viewpoints and summarise academic texts."
    ],
    [
-    "Follow lectures",
-    "Understand lecture organisation, identify essential points, take useful notes and use those notes to explain ideas."
+    "Lecture listening and note-taking",
+    "Recognise lecture structure, distinguish key points from examples and take notes that support accurate summaries."
    ],
    [
-    "Write with structure",
-    "Build clear paragraphs, organise academic essays, connect ideas, revise language and support points with relevant evidence."
+    "Academic writing",
+    "Develop focused paragraphs and structured essays, support claims with evidence and revise for clarity, coherence and accuracy."
    ],
    [
-    "Discuss ideas",
-    "Ask meaningful questions, explain opinions, respond to classmates and present information with increasing clarity."
+    "Academic speaking and discussion",
+    "Ask relevant questions, explain ideas, respond to different viewpoints and present information in a logical sequence."
    ]
   ],
   "pathLabel": "THE FOUR-LEVEL PATH",
-  "pathTitle": "A clear progression across four levels.",
-  "pathIntro": "Each level takes two months with three instructors and three same-numbered textbooks. The reading and vocabulary, listening and speaking, and academic writing strands become progressively more demanding across EAP 1–4.",
+  "pathTitle": "Four levels. A structured academic progression.",
+  "pathIntro": "Each level lasts two months and combines reading and vocabulary, listening and speaking, and academic writing. Three instructors teach each level, using Book 1 of all three series in EAP 1, Book 2 in EAP 2, and so on through EAP 4.",
   "levels": [
    {
     "title": "EAP 1",
-    "subtitle": "Building the foundation",
-    "desc": "Begin using academic English confidently through supported reading, structured listening and organised paragraph writing.",
+    "subtitle": "Foundations of academic English",
+    "desc": "Establish essential reading, lecture-listening and paragraph-writing habits with guided practice.",
     "skills": [
      "Recognise main ideas and key details in short academic readings.",
      "Listen for the central message and practise simple note-taking.",
@@ -74,8 +74,8 @@ const V2_EAP={
    },
    {
     "title": "EAP 2",
-    "subtitle": "Connecting information",
-    "desc": "Strengthen comprehension and explain information from longer readings and more detailed lectures.",
+    "subtitle": "Understanding and connecting ideas",
+    "desc": "Work with longer readings and lectures while developing clearer paragraphs, summaries and explanations.",
     "skills": [
      "Use context to understand unfamiliar vocabulary and text organisation.",
      "Develop clearer lecture notes and short oral summaries.",
@@ -89,8 +89,8 @@ const V2_EAP={
    },
    {
     "title": "EAP 3",
-    "subtitle": "Analysing and responding",
-    "desc": "Practise evaluating claims, comparing ideas and communicating a position in a more formal academic style.",
+    "subtitle": "Analysis and academic argument",
+    "desc": "Compare evidence and perspectives, participate in academic discussions and develop multi-paragraph writing.",
     "skills": [
      "Compare perspectives, evidence and reasoning in readings.",
      "Follow extended lectures, organise notes and contribute to discussions.",
@@ -104,8 +104,8 @@ const V2_EAP={
    },
    {
     "title": "EAP 4",
-    "subtitle": "Working more independently",
-    "desc": "Integrate reading, lecture notes, discussion and writing in tasks relevant to higher education.",
+    "subtitle": "Integrated academic communication",
+    "desc": "Synthesize information from reading and listening and communicate it through structured presentations and essays.",
     "skills": [
      "Combine and summarise ideas drawn from more than one source.",
      "Explain a topic with organised notes and an academic presentation.",
@@ -119,14 +119,14 @@ const V2_EAP={
    }
   ],
   "booksLabel": "THREE CORE TEXTBOOK SERIES",
-  "booksTitle": "Three books. Three essential academic skills.",
-  "booksIntro": "Each EAP level includes the same-numbered book from all three series: ACTIVE Skills for Reading for Reading & Vocabulary; Contemporary Topics for Listening & Speaking, including academic lectures, discussions and note-taking; and Longman Academic Writing for structured academic writing. All three Book 1 titles are used in EAP 1, all three Book 2 titles in EAP 2, and so on up to Book 4 in EAP 4.",
+  "booksTitle": "Three complementary textbooks. One integrated pathway.",
+  "booksIntro": "Every level uses three textbooks with matching numbers: ACTIVE Skills for Reading develops reading strategies and vocabulary; Contemporary Topics supports academic listening, lecture note-taking and discussion; and Longman Academic Writing develops writing from sentences and paragraphs to essays. The books used progress from volume 1 in EAP 1 to volume 4 in EAP 4.",
   "books": [
    {
-    "title": "Active Skills for Reading",
+    "title": "ACTIVE Skills for Reading",
     "publisher": "National Geographic Learning / Cengage · Neil J. Anderson",
     "role": "Reading & Vocabulary",
-    "intro": "Develops strategic reading rather than simply translating every sentence. The ACTIVE approach helps learners use prior knowledge, build vocabulary, think about meaning and monitor comprehension.",
+    "intro": "Neil J. Anderson's ACTIVE approach teaches readers to activate prior knowledge, develop vocabulary, question meaning and monitor comprehension rather than rely on word-for-word translation.",
     "points": [
      "Find the central idea, key details and structure of a text.",
      "Use context clues and purposeful reading strategies.",
@@ -136,8 +136,8 @@ const V2_EAP={
    {
     "title": "Contemporary Topics",
     "publisher": "Pearson · Academic Listening & Note-Taking",
-    "role": "Listening & Speaking, lecture notes and discussion",
-    "intro": "Built around lecture-style academic material. Learners practise the listening and study strategies needed to follow an explanation, capture its important points and discuss information afterward.",
+    "role": "Academic Listening, Note-taking & Discussion",
+    "intro": "Pearson's lecture-based materials build the listening and study skills needed to follow academic presentations, identify important information, take purposeful notes and discuss what has been heard.",
     "points": [
      "Listen for topic, organisation, details and supporting examples.",
      "Take structured lecture notes and review them.",
@@ -148,7 +148,7 @@ const V2_EAP={
     "title": "Longman Academic Writing Series",
     "publisher": "Pearson · Academic writing",
     "role": "Academic Writing",
-    "intro": "Teaches academic writing step by step, moving from controlled composition toward more extended academic texts. It develops organisation, language accuracy and revision habits.",
+    "intro": "The Longman Academic Writing Series develops the writing process, sentence accuracy, paragraph organisation and essay structure through guided drafting, feedback and revision.",
     "points": [
      "Plan a piece of writing before drafting.",
      "Organise paragraphs and essays with connected ideas.",
@@ -157,13 +157,13 @@ const V2_EAP={
    }
   ],
   "staffLabel": "TEACHING APPROACH",
-  "staffTitle": "Three instructors at every level.",
-  "staffText": "Every EAP level is taught by three instructors and uses three complementary academic skill strands: Reading & Vocabulary through ACTIVE Skills for Reading; Listening & Speaking through Contemporary Topics; and Academic Writing through Longman Academic Writing. Lectures, note-taking, discussion, vocabulary practice, drafting and feedback reinforce one another. Ask admissions to confirm teaching assignments and class times.",
+  "staffTitle": "Three instructors. Complementary areas of expertise.",
+  "staffText": "Three instructors teach each EAP level across its three curriculum strands: Reading & Vocabulary (ACTIVE Skills for Reading), Listening & Speaking (Contemporary Topics), and Academic Writing (Longman Academic Writing). Reading tasks, lecture notes, discussion and written assignments reinforce one another. Admissions can confirm the instructors and timetable for each class.",
   "feeLabel": "STRAIGHTFORWARD TUITION",
-  "feeTitle": "Clear fees. A focused academic pathway.",
+  "feeTitle": "Transparent tuition for each two-month level.",
   "feeMonth": "Monthly tuition",
   "feeTerm": "One EAP level · two months",
-  "feeNote": "The four-level pathway is eight months when taken consecutively. Course fees cover tuition as quoted above; book prices and any additional charges should be confirmed with admissions before payment. The free placement assessment is separate from paid classes.",
+  "feeNote": "Tuition is AFN 1,000 per month or AFN 2,000 for a two-month level. Completing all four levels consecutively takes eight months. Confirm textbook costs and any other charges with admissions before paying. The placement assessment is free; classes are not.",
   "faqLabel": "COMMON QUESTIONS",
   "faqTitle": "Before you enrol",
   "faq": [
@@ -177,11 +177,11 @@ const V2_EAP={
    ],
    [
     "Will I study all three books in each level?",
-    "Yes. Book numbers match course level numbers. EAP 1 uses ACTIVE Skills for Reading 1, Contemporary Topics 1 and Longman Academic Writing 1. EAP 2 uses all three Book 2 titles; EAP 3 all three Book 3 titles; EAP 4 all three Book 4 titles. Ask admissions to confirm the precise edition."
+    "Yes. The book numbers correspond to the EAP level: EAP 1 uses Book 1 from all three series, EAP 2 uses Book 2, EAP 3 uses Book 3 and EAP 4 uses Book 4. Please confirm the available edition with admissions."
    ],
    [
     "Does AFN 2,000 include the books?",
-    "AFN 2,000 is the tuition for one two-month level (AFN 1,000 per month). Please confirm textbook charges separately with admissions."
+    "AFN 2,000 is the tuition for one two-month level (AFN 1,000 per month). Ask admissions to confirm the cost and provision of the textbooks before paying."
    ],
    [
     "Are class times or instructors already fixed?",
@@ -193,12 +193,12 @@ const V2_EAP={
    ]
   ],
   "ctaLabel": "YOUR NEXT STEP",
-  "ctaTitle": "Start with the right level.",
-  "ctaText": "Ask about available EAP shifts, the three books and a free placement assessment.",
+  "ctaTitle": "Find the academic English level that fits you.",
+  "ctaText": "Ask admissions about placement, class availability, the three textbooks and your next EAP intake.",
   "cta": "Request a free placement assessment",
   "secondary": "Ask about the EAP program",
   "other": "See all programs",
-  "levelBookLabel": "The three books taught in this level",
+  "levelBookLabel": "Textbooks assigned to this level",
   "writingTitles": [
    "Sentences to Paragraphs",
    "Paragraphs",
@@ -208,10 +208,10 @@ const V2_EAP={
  },
  "fa": {
   "badge": "انگلیسی اکادمیک · EAP",
-  "title": "انگلیسی را برای پوهنتون",
-  "accent": "و پیشرفت علمی بیاموزید.",
-  "intro": "EAP (English for Academic Purposes) برنامهٔ انگلیسی اکادمیک برای تقویت Reading و Vocabulary، Listening و Speaking، و نگارش علمی است. تافل هوس چهار لول دوماهه دارد که در هر لول سه استاد تدریس می‌کنند. شمارهٔ کتاب‌ها دقیقاً با شمارهٔ لول کورس برابر است: در EAP 1 هر سه کتاب شمارهٔ ۱، در EAP 2 هر سه کتاب شمارهٔ ۲، در EAP 3 کتاب‌های شمارهٔ ۳ و در EAP 4 کتاب‌های شمارهٔ ۴ تدریس می‌شوند.",
-  "heroNote": "با تعیین سطح رایگان می‌توانید سطح مناسب آغاز را پیدا کنید. تقسیم اوقات، استادان و ظرفیت موجود را از پذیرش بپرسید.",
+  "title": "انگلیسی اکادمیک برای پوهنتون.",
+  "accent": "مهارت‌هایی برای درک، تحلیل و نگارش علمی.",
+  "intro": "برنامهٔ English for Academic Purposes (EAP) مهارت‌های خواندن متن‌های علمی، شنیدن لکچر، بحث اکادمیک و نگارش منظم را تقویت می‌کند. EAP در تافل هوس چهار لول دارد؛ هر لول دو ماه دوام می‌کند و سه استاد در تدریس آن سهم دارند. در هر لول، سه کتاب تدریس می‌شود که شمارهٔ آن‌ها با شمارهٔ لول برابر است.",
+  "heroNote": "تعیین سطح رایگان برای انتخاب لول مناسب کمک‌تان می‌کند. تقسیم اوقات، استادان و ظرفیت صنف‌ها را با بخش پذیرش تأیید کنید.",
   "facts": [
    [
     "۴ لول",
@@ -219,51 +219,51 @@ const V2_EAP={
    ],
    [
     "۲ ماه",
-    "هر لول؛ مجموعاً ۸ ماه"
+    "مدت هر لول؛ مجموع دوره ۸ ماه"
    ],
    [
     "۳ استاد",
-    "در تدریس هر لول"
+    "در هر لول"
    ],
    [
-    "۳ کتاب",
-    "سه مجموعه‌کتاب در هر لول"
+    "۳ کتاب درسی",
+    "با شمارهٔ مطابق به لول"
    ]
   ],
-  "whoTitle": "EAP برای چه کسانی مناسب است؟",
-  "whoText": "برای محصلان پوهنتون، داوطلبان بورسیه، کسانی که قصد ادامهٔ تحصیل دارند و افرادی که برای مطالعه، نوشتن یا ارائهٔ مطالب علمی به انگلیسی اکادمیک ضرورت دارند. هدف برنامه تقویت مهارت است؛ پذیرش پوهنتون، گرفتن بورسیه یا نمرهٔ معین در امتحان تضمین نمی‌شود.",
-  "outcomesLabel": "مهارت‌های کلیدی",
-  "outcomesTitle": "فقط متن نخوانید؛ مطلب را بفهمید و از آن استفاده کنید.",
-  "outcomesIntro": "در EAP مهارت‌های خواندن، شنیدن، نوشتن و بحث علمی در کنار هم رشد می‌کنند. شاگرد با تمرین منظم و رهنمایی استاد یاد می‌گیرد معلومات را دریافت، تحلیل و به شکل منظم بیان کند.",
+  "whoTitle": "برنامهٔ EAP برای چه کسانی مناسب است؟",
+  "whoText": "این برنامه برای محصلان پوهنتون، داوطلبان بورسیه، علاقه‌مندان ادامهٔ تحصیل و کسانی مناسب است که در محیط علمی به خواندن، شنیدن، نوشتن و ارائهٔ مطالب به زبان انگلیسی ضرورت دارند. EAP مهارت‌های زبانی را تقویت می‌کند؛ اما پذیرش پوهنتون، دریافت بورسیه یا نمرهٔ مشخص در امتحان را تضمین نمی‌کند.",
+  "outcomesLabel": "مهارت‌های مورد تمرکز",
+  "outcomesTitle": "مطالب علمی را دقیق بخوانید، تحلیل کنید و بیان نمایید.",
+  "outcomesIntro": "خواندن، شنیدن لکچر، بحث و نگارش اکادمیک به‌صورت پیوسته آموزش داده می‌شوند. تمرین‌های هدفمند و بازخورد استادان، زمینهٔ استفادهٔ عملی از این مهارت‌ها را فراهم می‌سازند.",
   "outcomes": [
    [
-    "خواندن و درک متن علمی",
-    "پیداکردن مفکورهٔ اصلی، تشخیص نکات مهم و دلایل، فهم لغات در متن و خلاصه‌سازی مطالب اکادمیک."
+    "خواندن متن و توسعهٔ واژگان",
+    "تشخیص مفکورهٔ اصلی و دلایل حمایوی، دریافت معنای لغات از متن، مقایسهٔ دیدگاه‌ها و خلاصه‌نویسی مطالب علمی."
    ],
    [
-    "شنیدن لکچر و نوت‌برداری",
-    "درک موضوع لکچر، تشخیص نکات اساسی، نوت‌برداری منظم و بازگوکردن مطالب به زبان خود."
+    "درک لکچر و نوت‌برداری",
+    "شناخت ساختار لکچر، تفکیک نکات اساسی از مثال‌ها و تهیهٔ نوت‌های منظم برای خلاصه‌سازی دقیق."
    ],
    [
     "نگارش اکادمیک",
-    "ساختن پاراگراف منظم، ترتیب مقاله، پیوند منطقی مفکوره‌ها، ویرایش متن و استفاده از دلایل مناسب."
+    "نوشتن پاراگراف‌ها و مقاله‌های دارای ساختار روشن، پشتیبانی از ادعاها با دلایل و بازنگری متن از نظر انسجام، وضاحت و درستی زبان."
    ],
    [
-    "بحث و ارائهٔ علمی",
-    "پرسیدن سؤال‌های دقیق، بیان دیدگاه، پاسخ‌دادن به نظریات دیگران و ارائهٔ معلومات به شکل روشن."
+    "مکالمه و ارائهٔ علمی",
+    "طرح پرسش‌های مرتبط، توضیح منظم مفکوره‌ها، پاسخ به دیدگاه‌های متفاوت و ارائهٔ روشن معلومات."
    ]
   ],
-  "pathLabel": "مسیر چهار لول EAP",
-  "pathTitle": "از مهارت‌های بنیادی تا کارهای اکادمیک پیشرفته‌تر.",
-  "pathIntro": "هر لول دو ماه دوام می‌کند و سه استاد در تدریس آن سهم دارند. سه بخش آموزشی شامل خواندن و لغات، شنیدن و مکالمه، و نگارش علمی است. در چهار لول، تمرین‌ها از مهارت‌های بنیادی به سمت مطالعه، بحث و نوشتن متن‌های پیچیده‌تر پیش می‌روند.",
+  "pathLabel": "ساختار چهار لول EAP",
+  "pathTitle": "چهار لول؛ یک مسیر منظم برای پیشرفت اکادمیک.",
+  "pathIntro": "هر لول دو ماه دوام می‌کند و توسط سه استاد تدریس می‌شود. آموزش در سه بخش خواندن و لغات، شنیدن و مکالمه، و نگارش اکادمیک پیش می‌رود. در EAP 1 سه کتاب شمارهٔ ۱، در EAP 2 کتاب‌های شمارهٔ ۲، در EAP 3 کتاب‌های شمارهٔ ۳ و در EAP 4 کتاب‌های شمارهٔ ۴ تدریس می‌شوند.",
   "levels": [
    {
     "title": "EAP 1",
     "subtitle": "بنیاد مهارت‌های اکادمیک",
-    "desc": "آشنایی با شیوهٔ خواندن هدفمند، شنیدن مطالب درسی و نوشتن پاراگراف‌های ساده و منظم.",
+    "desc": "آشنایی با خواندن هدفمند، شنیدن لکچر و ساختار پاراگراف در تمرین‌های رهنمایی‌شده.",
     "skills": [
-     "تشخیص مفکورهٔ اصلی و جزئیات مهم در متن‌های کوتاه.",
-     "تمرین شنیدن لکچرهای ساده و ثبت نوت‌های اساسی.",
+     "تشخیص مفکورهٔ اصلی و جزئیات اساسی در متن‌های کوتاه.",
+     "شنیدن لکچرهای ساده و ثبت نکات مهم.",
      "نوشتن پاراگراف با جملهٔ موضوعی و جملات حمایوی."
     ],
     "textbooks": [
@@ -274,12 +274,12 @@ const V2_EAP={
    },
    {
     "title": "EAP 2",
-    "subtitle": "درک و پیوند معلومات",
-    "desc": "تقویت توانایی درک متن‌های طولانی‌تر، نوت‌برداری دقیق‌تر و توضیح مفکوره‌ها با مثال.",
+    "subtitle": "درک و پیوند مفکوره‌ها",
+    "desc": "تقویت درک متن‌های طولانی‌تر، خلاصه‌سازی لکچر و نگارش پاراگراف‌های منسجم.",
     "skills": [
-     "شناخت ساختار متن و معنای لغات از روی قرینه.",
-     "خلاصه‌سازی لکچر و تنظیم نوت‌های منظم.",
-     "نوشتن پاراگراف‌های مرتبط و استدلال با مثال."
+     "تشخیص ساختار متن و دریافت معنای واژگان از قرینه.",
+     "تنظیم نوت‌ها و ارائهٔ خلاصهٔ روشن از لکچر.",
+     "نوشتن پاراگراف‌های مرتبط با مثال‌ها و دلایل مناسب."
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 2",
@@ -289,12 +289,12 @@ const V2_EAP={
    },
    {
     "title": "EAP 3",
-    "subtitle": "تحلیل و استدلال علمی",
-    "desc": "تمرین مقایسهٔ دیدگاه‌ها، بررسی دلایل و نوشتن متن‌های چندپاراگرافی با ساختار روشن.",
+    "subtitle": "تحلیل و استدلال اکادمیک",
+    "desc": "مقایسهٔ دیدگاه‌ها، ارزیابی دلایل و نگارش متن‌های چندپاراگرافی با ساختار منطقی.",
     "skills": [
-     "مقایسهٔ نظریات و ارزیابی دلایل در متن‌های اکادمیک.",
-     "فهم لکچرهای مفصل‌تر و اشتراک فعال در بحث علمی.",
-     "طرح‌ریزی و اصلاح نوشته‌های منظم و استدلالی."
+     "مقایسهٔ دیدگاه‌ها و بررسی دلایل در متن‌های علمی.",
+     "درک لکچرهای مفصل‌تر و سهم‌گیری در مباحثه.",
+     "طرح‌ریزی، نوشتن و اصلاح متن‌های استدلالی."
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 3",
@@ -304,12 +304,12 @@ const V2_EAP={
    },
    {
     "title": "EAP 4",
-    "subtitle": "کار مستقل‌تر اکادمیک",
-    "desc": "ترکیب معلومات از خواندن، شنیدن و بحث برای انجام تمرین‌های نزدیک‌تر به فضای تحصیلات عالی.",
+    "subtitle": "کاربرد یکپارچهٔ مهارت‌های اکادمیک",
+    "desc": "ترکیب معلومات از متن و لکچر برای بحث، ارائه و نگارش مقاله‌های منظم.",
     "skills": [
-     "خلاصه‌سازی و پیوند معلومات از بیش از یک منبع.",
-     "ارائهٔ یک موضوع با نوت‌های منظم و توضیح روشن.",
-     "تهیه و بازنگری متن طولانی‌تر با توجه به انسجام و دلایل."
+     "خلاصه‌سازی و پیوند معلومات از چند منبع.",
+     "ارائهٔ یک موضوع با استفاده از نوت‌های منظم.",
+     "نگارش و بازنگری مقاله با توجه به انسجام و دلایل."
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 4",
@@ -318,87 +318,87 @@ const V2_EAP={
     ]
    }
   ],
-  "booksLabel": "سه مجموعه‌کتاب اصلی",
-  "booksTitle": "سه کتاب؛ سه مهارت اساسی برای موفقیت در درس.",
-  "booksIntro": "در هر لول EAP سه کتاب هم‌شماره تدریس می‌شود. یکی برای تقویت خواندن و لغات، یکی برای مهارت شنیدن و صحبت‌کردن، و دیگری برای نگارش اکادمیک است. شمارهٔ هر کتاب دقیقاً با شمارهٔ لول کورس برابر است؛ از کتاب‌های شمارهٔ ۱ در EAP 1 تا کتاب‌های شمارهٔ ۴ در EAP 4.",
+  "booksLabel": "سه مجموعه‌کتاب درسی",
+  "booksTitle": "سه کتاب مکمل؛ سه بخش اساسی آموزش اکادمیک.",
+  "booksIntro": "در هر لول، سه کتاب با شمارهٔ برابر به همان لول تدریس می‌شود: ACTIVE Skills for Reading برای خواندن و تقویت واژگان؛ Contemporary Topics برای شنیدن لکچر، نوت‌برداری و بحث؛ و Longman Academic Writing برای نگارش جمله، پاراگراف و مقاله. به این ترتیب، کتاب‌های شمارهٔ ۱ تا ۴ به‌ترتیب در EAP 1 تا EAP 4 استفاده می‌شوند.",
   "books": [
    {
-    "title": "Active Skills for Reading",
+    "title": "ACTIVE Skills for Reading",
     "publisher": "National Geographic Learning / Cengage · Neil J. Anderson",
-    "role": "خواندن و لغات اکادمیک",
-    "intro": "این مجموعه به شاگرد می‌آموزد چگونه متن را با هدف بخواند، به جای ترجمهٔ کلمه‌به‌کلمه معنا را دریابد و فهم خود را بررسی کند. روش ACTIVE بر دانش قبلی، لغات، معنا و روان‌خوانی تمرکز دارد.",
+    "role": "خواندن و تقویت واژگان",
+    "intro": "این مجموعه با روش ACTIVE اثر نیل جِی اندرسن، خواندن هدفمند را آموزش می‌دهد. شاگرد می‌آموزد از معلومات قبلی و قرینهٔ متن کمک بگیرد، واژگان خود را گسترش دهد و میزان درک مطلب را بررسی کند.",
     "points": [
-     "یافتن مفکورهٔ اصلی، نکات مهم و ساختار متن.",
-     "آموختن لغات از قرینه و استفاده از روش‌های مؤثر خواندن.",
-     "تقویت سرعت خواندن همراه با درک درست مطلب."
+     "شناخت مفکورهٔ اصلی، جزئیات مهم و ساختار متن.",
+     "دریافت معنای لغات از قرینه و کاربرد روش‌های خواندن.",
+     "تقویت روان‌خوانی همراه با درک دقیق مطلب."
     ]
    },
    {
     "title": "Contemporary Topics",
     "publisher": "Pearson · Academic Listening & Note-Taking",
-    "role": "مهارت شنیدن، مکالمه و مباحثه",
-    "intro": "محتوای این مجموعه بر لکچرها و موضوعات مختلف علمی استوار است. شاگرد تمرین می‌کند هنگام شنیدن توضیحات درسی، معلومات مهم را تشخیص دهد و آن‌ها را برای خلاصه‌سازی یا بحث ثبت کند.",
+    "role": "شنیدن لکچر، نوت‌برداری و مباحثه",
+    "intro": "این مجموعهٔ Pearson بر محتوای لکچرهای اکادمیک استوار است و مهارت‌های شنیدن دقیق، تشخیص نکات اساسی، نوت‌برداری و گفت‌وگو دربارهٔ مطالب شنیده‌شده را تقویت می‌کند.",
     "points": [
-     "شناخت موضوع، ترتیب و نکات کلیدی لکچر.",
-     "نوت‌برداری مرحله‌به‌مرحله و مرور مطالب شنیده‌شده.",
-     "تقویت لغات اکادمیک و بحث دربارهٔ موضوع لکچر."
+     "تشخیص موضوع، ترتیب و دلایل حمایوی لکچر.",
+     "تهیه و مرور نوت‌های منظم از مطالب شنیده‌شده.",
+     "تقویت واژگان علمی و سهم‌گیری در بحث‌های صنفی."
     ]
    },
    {
     "title": "Longman Academic Writing Series",
     "publisher": "Pearson · Academic Writing",
     "role": "نگارش اکادمیک و مقاله‌نویسی",
-    "intro": "این مجموعه نگارش علمی را به شکل تدریجی آموزش می‌دهد؛ از ساختار جمله و پاراگراف تا تنظیم مقاله‌های اکادمیک. شاگرد با پلان‌سازی، نوشتن نسخهٔ اول و اصلاح متن آشنا می‌شود.",
+    "intro": "این مجموعهٔ Pearson نگارش را به‌شکل تدریجی، از جمله و پاراگراف تا مقالهٔ منظم، آموزش می‌دهد و بر طرح‌ریزی، ساختار متن، درستی گرامر و بازنگری نوشته تمرکز دارد.",
     "points": [
-     "پلان‌سازی پیش از نوشتن و انتخاب مفکورهٔ اصلی.",
-     "ترتیب پاراگراف و مقاله با آغاز، توضیح و نتیجهٔ منظم.",
-     "اصلاح گرامر، لغات، ارتباط جملات و انسجام نوشته."
+     "طرح‌ریزی موضوع و تنظیم مفکوره‌های اصلی.",
+     "نوشتن پاراگراف و مقاله با ساختار منطقی.",
+     "اصلاح جمله‌بندی، واژگان، گرامر و انسجام متن."
     ]
    }
   ],
   "staffLabel": "شیوهٔ تدریس",
-  "staffTitle": "در هر لول، سه استاد تدریس می‌کنند.",
-  "staffText": "در هر لول EAP سه استاد تدریس می‌کنند و آموزش بر سه بخش استوار است: Reading و Vocabulary با ACTIVE Skills for Reading؛ Listening و Speaking، شنیدن لکچر و مباحثه با Contemporary Topics؛ و نگارش اکادمیک با Longman Academic Writing. تمرین نوت‌برداری، لغات، بحث علمی، نوشتن و اصلاح متن در کنار هم پیش می‌روند. نام استادان و وقت صنف‌ها را پذیرش تأیید می‌کند.",
-  "feeLabel": "فیس واضح و مشخص",
-  "feeTitle": "فیس هر ماه ۱٬۰۰۰ افغانی؛ هر لول ۲٬۰۰۰ افغانی.",
-  "feeMonth": "فیس یک ماه",
+  "staffTitle": "در تدریس هر لول، سه استاد سهم دارند.",
+  "staffText": "نصاب EAP سه بخش مکمل دارد: Reading & Vocabulary با ACTIVE Skills for Reading؛ Listening & Speaking با Contemporary Topics؛ و Academic Writing با Longman Academic Writing. سه استاد در تدریس هر لول سهم دارند و فعالیت‌های خواندن، شنیدن، نوت‌برداری، بحث و نوشتن یکدیگر را تقویت می‌کنند. نام استادان و تقسیم اوقات هر صنف را بخش پذیرش تأیید می‌کند.",
+  "feeLabel": "فیس مشخص و شفاف",
+  "feeTitle": "فیس ماهانه ۱٬۰۰۰ افغانی؛ هر لول دوماهه ۲٬۰۰۰ افغانی.",
+  "feeMonth": "فیس ماهانه",
   "feeTerm": "فیس یک لول دوماهه",
-  "feeNote": "تکمیل چهار لول به ترتیب، هشت ماه زمان می‌گیرد. فیس اعلام‌شده مربوط آموزش است؛ دربارهٔ قیمت کتاب‌ها و سایر مصارف احتمالی پیش از پرداخت از پذیرش معلومات بگیرید. تعیین سطح رایگان می‌باشد و فیس صنف از آن جداست.",
+  "feeNote": "فیس هر ماه ۱٬۰۰۰ افغانی و فیس یک لول دوماهه ۲٬۰۰۰ افغانی است. تکمیل چهار لول به‌صورت پیهم، هشت ماه زمان می‌گیرد. قیمت کتاب‌ها و هرگونه مصرف اضافی را پیش از پرداخت با بخش پذیرش مشخص سازید. تعیین سطح رایگان است؛ صنف‌های آموزشی فیس دارند.",
   "faqLabel": "پرسش‌های متداول",
-  "faqTitle": "پیش از ثبت‌نام بدانید",
+  "faqTitle": "پاسخ به پرسش‌های مهم",
   "faq": [
    [
-    "آیا باید حتماً از EAP 1 آغاز کنم؟",
-    "ضروری نیست. از طریق تعیین سطح رایگان، تیم پذیرش برای انتخاب لول مناسب رهنمایی‌تان می‌کند."
+    "آیا باید حتماً از EAP 1 شروع کنم؟",
+    "خیر. تعیین سطح رایگان به شما کمک می‌کند تا با رهنمایی بخش پذیرش، لول مناسب خود را انتخاب کنید."
    ],
    [
-    "چهار لول EAP چقدر وقت می‌گیرد؟",
-    "هر لول دو ماه است. اگر EAP 1 تا EAP 4 را پیهم بخوانید، مجموعاً هشت ماه می‌شود."
+    "تکمیل چهار لول EAP چقدر زمان می‌گیرد؟",
+    "هر لول دو ماه دوام می‌کند. اگر چهار لول را پیهم سپری کنید، مجموع دوره هشت ماه خواهد بود."
    ],
    [
-    "آیا هر سه کتاب در هر لول تدریس می‌شود؟",
-    "بلی. شمارهٔ هر کتاب با لول کورس برابر است. در EAP 1 کتاب‌های ACTIVE Skills for Reading 1، Contemporary Topics 1 و Longman Academic Writing 1 تدریس می‌شوند. در EAP 2 هر سه کتاب شمارهٔ ۲، در EAP 3 شمارهٔ ۳ و در EAP 4 شمارهٔ ۴ تدریس می‌شوند. شمارهٔ چاپ را از پذیرش تأیید کنید."
+    "آیا در هر لول هر سه کتاب تدریس می‌شود؟",
+    "بلی. در EAP 1 کتاب‌های ACTIVE Skills for Reading 1، Contemporary Topics 1 و Longman Academic Writing 1 تدریس می‌شوند. در EAP 2، EAP 3 و EAP 4 نیز به‌ترتیب کتاب‌های شمارهٔ ۲، ۳ و ۴ همین مجموعه‌ها استفاده می‌شوند. چاپ دقیق کتاب‌ها را از پذیرش تأیید کنید."
    ],
    [
-    "آیا فیس ۲٬۰۰۰ افغانی شامل کتاب‌ها هم می‌شود؟",
-    "مبلغ ۲٬۰۰۰ افغانی فیس تدریس یک لول دوماهه است (۱٬۰۰۰ افغانی در ماه). قیمت و شرایط تهیهٔ کتاب‌ها را جداگانه با پذیرش روشن کنید."
+    "آیا فیس ۲٬۰۰۰ افغانی شامل قیمت کتاب‌ها نیز است؟",
+    "مبلغ ۲٬۰۰۰ افغانی فیس تدریس یک لول دوماهه است؛ یعنی ۱٬۰۰۰ افغانی در ماه. قیمت و شیوهٔ تهیهٔ کتاب‌ها را پیش از پرداخت با بخش پذیرش مشخص سازید."
    ],
    [
-    "سه استاد در کدام تایم تدریس می‌کنند؟",
-    "در هر لول سه استاد تدریس می‌کنند. نام استادان، شیفت‌ها و ظرفیت فعلی را از بخش پذیرش بپرسید."
+    "تقسیم اوقات و استادان هر لول چگونه تعیین می‌شوند؟",
+    "در هر لول سه استاد تدریس می‌کنند. تقسیم اوقات، نام استادان و ظرفیت صنف‌های موجود را بخش پذیرش تأیید می‌کند."
    ],
    [
-    "آیا EAP همان آمادگی TOEFL است؟",
-    "خیر. EAP برای مهارت‌های خواندن، شنیدن، نگارش و ارتباطات اکادمیک طراحی شده است؛ کورس ویژهٔ آمادگی TOEFL برنامه‌ای جداگانه است."
+    "آیا EAP همان کورس آمادگی TOEFL است؟",
+    "خیر. EAP بر مهارت‌های خواندن، شنیدن، بحث و نگارش اکادمیک تمرکز دارد. آمادگی تخصصی امتحان TOEFL یک برنامهٔ جداگانه است."
    ]
   ],
-  "ctaLabel": "قدم بعدی شما",
-  "ctaTitle": "از سطح مناسب آغاز کنید.",
-  "ctaText": "برای معلومات دربارهٔ لول‌های موجود، سه کتاب، تقسیم اوقات و تعیین سطح رایگان با پذیرش در تماس شوید.",
+  "ctaLabel": "برای آغاز",
+  "ctaTitle": "از لول مناسب خود آغاز کنید.",
+  "ctaText": "برای تعیین سطح رایگان، دریافت تقسیم اوقات و معلومات دربارهٔ استادان و کتاب‌های EAP با بخش پذیرش تماس بگیرید.",
   "cta": "درخواست تعیین سطح رایگان",
-  "secondary": "مشوره دربارهٔ EAP",
+  "secondary": "مشوره با پذیرش دربارهٔ EAP",
   "other": "دیدن تمام برنامه‌ها",
-  "levelBookLabel": "سه کتابی که در همین لول تدریس می‌شوند",
+  "levelBookLabel": "سه کتاب درسی همین لول",
   "writingTitles": [
    "Sentences to Paragraphs",
    "Paragraphs",
@@ -408,63 +408,63 @@ const V2_EAP={
  },
  "ps": {
   "badge": "اکاډمیکه انګلیسي · EAP",
-  "title": "د پوهنتون لپاره انګلیسي،",
-  "accent": "ستاسو د زده‌کړو لپاره نوې وړتیا.",
-  "intro": "EAP د پوهنتون لپاره د Reading او Vocabulary، Listening او Speaking او اکاډمیکې لیکنې پروګرام دی. تافل هوس څلور دوه میاشتني لولونه لري. په هر لول کې درې ښوونکي تدریس کوي او د درې کتابي لړیو شمېره له لول سره برابره ده: EAP 1 کې Book 1، EAP 2 کې Book 2، EAP 3 کې Book 3 او EAP 4 کې Book 4.",
-  "heroNote": "د وړیا سویې معلومولو له لارې خپل مناسب پیل ومومئ. د ټولګي وختونه، ښوونکي او شته ځایونه له ادارې سره تایید کړئ.",
+  "title": "د پوهنتون لپاره اکاډمیکه انګلیسي.",
+  "accent": "په دقت ولولئ، واورئ او ولیکئ.",
+  "intro": "د English for Academic Purposes (EAP) پروګرام د علمي متنونو د لوستلو، لکچرونو د اورېدو، اکاډمیکو بحثونو او منظمې لیکنې مهارتونه پیاوړي کوي. په تافل هوس کې EAP څلور کچې لري. هره کچه دوه میاشتې دوام کوي، درې ښوونکي یې تدریس کوي او درې کتابونه پکې کارول کېږي چې شمېرې یې د کورس له کچې سره برابرې دي.",
+  "heroNote": "د وړیا سویې ارزونه د مناسبې کچې په ټاکلو کې مرسته کوي. د ټولګیو وختونه، ښوونکي او شته ځایونه له نوم‌لیکنې څانګې سره تایید کړئ.",
   "facts": [
    [
-    "۴ لولونه",
-    "له EAP 1 تر EAP 4"
+    "۴ کچې",
+    "له EAP 1 څخه تر EAP 4 پورې"
    ],
    [
     "۲ میاشتې",
-    "هر لول؛ په ترتیب ۸ میاشتې"
+    "هره کچه؛ ټولټال ۸ میاشتې"
    ],
    [
     "۳ ښوونکي",
-    "په هر لول کې"
+    "د هرې کچې د تدریس لپاره"
    ],
    [
-    "۳ کتابونه",
-    "درې کتابي لړۍ په هر لول کې"
+    "۳ درسي کتابونه",
+    "شمېرې یې له کچې سره برابرې دي"
    ]
   ],
   "whoTitle": "EAP د چا لپاره مناسب دی؟",
-  "whoText": "د پوهنتون محصلینو، د بورس غوښتونکو، د لوړو زده‌کړو لپاره چمتو کېدونکو او هغو کسانو لپاره چې علمي متنونه لولي یا په انګلیسي لیکنه او وړاندې کول غواړي. دا پروګرام د مهارتونو د پیاوړتیا لپاره دی؛ د پوهنتون منل کېدل، بورس یا ځانګړې ازموینې نمرې نه تضمینوي.",
-  "outcomesLabel": "بنسټیز مهارتونه",
-  "outcomesTitle": "معلومات ولولئ، درک یې کړئ او په ښه ډول یې بیان کړئ.",
-  "outcomesIntro": "لوستل، اورېدل، لیکنه او علمي بحث یو ځای تمرین کېږي څو زده‌کوونکی وکولای شي اکاډمیک معلومات تنظیم او روښانه کړي.",
+  "whoText": "دا پروګرام د پوهنتون محصلینو، د بورسونو غوښتونکو، د لوړو زده‌کړو لپاره چمتو کېدونکو او هغو کسانو لپاره مناسب دی چې په انګلیسي علمي مطالب لولي، اوري، لیکي یا وړاندې کوي. EAP ژبني مهارتونه پیاوړي کوي، خو د پوهنتون داخله، بورس یا د ازموینې ځانګړې نمره نه تضمینوي.",
+  "outcomesLabel": "د زده‌کړې اساسي مهارتونه",
+  "outcomesTitle": "علمي مطالب په دقت درک او په روښانه ډول بیان کړئ.",
+  "outcomesIntro": "لوستل، د لکچر اورېدل، اکاډمیک بحث او لیکنه په ګډه تدریسېږي. هدفمنده تمرینونه او د ښوونکو لارښوونې د دغو مهارتونو په عملي کارولو کې مرسته کوي.",
   "outcomes": [
    [
-    "اکاډمیک لوستل",
-    "د متن اصلي مفکوره، مهم جزئیات او دلایل پېژندل، له متن څخه د لغتونو معنا اټکلول او لنډیز لیکل."
+    "اکاډمیک لوستل او لغتونه",
+    "د متن اصلي مفکوره او ملاتړي دلایل پېژندل، د لغتونو معنا له سیاق څخه معلومول، د نظرونو پرتله کول او د علمي متن لنډیز لیکل."
    ],
    [
-    "د لکچر اورېدل او یادښت",
-    "د درس اصلي ټکي پېژندل، منظم یادښت اخیستل او مطلب په خپلو الفاظو تشریح کول."
+    "د لکچر اورېدل او یادښت اخیستل",
+    "د لکچر جوړښت درک کول، مهم ټکي له بېلګو بېلول او د سم لنډیز لپاره منظم یادښتونه اخیستل."
    ],
    [
     "اکاډمیکه لیکنه",
-    "منظم پاراګرافونه او مقالې جوړول، مفکورې سره نښلول، د دلایلو کارول او د متن اصلاح."
+    "د روښانه جوړښت لرونکي پاراګرافونه او مقالې لیکل، د دلایلو کارول او د متن روڼتیا، انسجام او ژبنی دقت ښه کول."
    ],
    [
-    "علمي بحث او وړاندې کول",
-    "پوښتنې کول، نظر بیانول، د نورو نظریاتو ته ځواب ویل او معلومات په روښانه توګه وړاندې کول."
+    "علمي خبرې او وړاندې کول",
+    "اړوندې پوښتنې کول، خپل نظر په منظم ډول څرګندول، نورو نظرونو ته ځواب ویل او معلومات روښانه وړاندې کول."
    ]
   ],
-  "pathLabel": "د EAP څلور لولونه",
-  "pathTitle": "له بنسټیزو مهارتونو تر خپلواک اکاډمیک کار.",
-  "pathIntro": "هر لول دوه میاشتې دی او درې ښوونکي پکې تدریس کوي. په هر لول کې د Reading او Vocabulary، Listening او Speaking او Academic Writing لپاره درې هم‌شمېره کتابونه کارول کېږي.",
+  "pathLabel": "د EAP څلور کچې",
+  "pathTitle": "څلور کچې؛ د اکاډمیک پرمختګ منظم بهیر.",
+  "pathIntro": "هره کچه دوه میاشتې دوام کوي او درې ښوونکي یې تدریس کوي. درې درسي برخې د لوستلو او لغتونو، اورېدو او خبرو، او اکاډمیکې لیکنې مهارتونه رانغاړي. په EAP 1 کې د درې واړو لړیو لومړي کتابونه، په EAP 2 کې دویم، په EAP 3 کې درېیم او په EAP 4 کې څلورم کتابونه تدریسېږي.",
   "levels": [
    {
     "title": "EAP 1",
     "subtitle": "د اکاډمیکو مهارتونو بنسټ",
-    "desc": "هدفمند لوستل، د ساده لکچر اورېدل او منظم لنډ پاراګرافونه لیکل.",
+    "desc": "د هدفمند لوستلو، ساده لکچر اورېدو او د پاراګراف لیکلو لومړني مهارتونه.",
     "skills": [
-     "د متن اصلي نظر او مهم جزئیات پېژندل.",
-     "له لنډو لکچرونو څخه اساسي یادښت اخیستل.",
-     "د اصلي جملې او ملاتړو جملو لرونکی پاراګراف لیکل."
+     "د لنډ متن اصلي مفکوره او مهم جزئیات پېژندل.",
+     "د لنډو لکچرونو له اورېدو څخه اساسي یادښتونه اخیستل.",
+     "د موضوعي جملې او ملاتړو جملو لرونکی پاراګراف لیکل."
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 1",
@@ -474,12 +474,12 @@ const V2_EAP={
    },
    {
     "title": "EAP 2",
-    "subtitle": "معلومات نښلول",
-    "desc": "د اوږدو متنونو درک، د لکچر منظم لنډیز او د نظریاتو تشریح.",
+    "subtitle": "د مفکورو درک او تړاو",
+    "desc": "د اوږدو متنونو درک، د لکچر لنډیز او د تړلو پاراګرافونو لیکل.",
     "skills": [
-     "د متن جوړښت او د لغتونو معنا درک کول.",
-     "د لکچر ټکي منظمول او لنډیز جوړول.",
-     "له بېلګو سره تړلي پاراګرافونه لیکل."
+     "د متن جوړښت او د لغتونو معنا له سیاق څخه معلومول.",
+     "د لکچر مهم ټکي تنظیمول او روښانه لنډیز وړاندې کول.",
+     "د مناسبو دلایلو او بېلګو په مرسته پاراګرافونه لیکل."
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 2",
@@ -489,12 +489,12 @@ const V2_EAP={
    },
    {
     "title": "EAP 3",
-    "subtitle": "علمي شننه او استدلال",
-    "desc": "د بېلابېلو نظرونو پرتله او منظم علمي لیکنه.",
+    "subtitle": "اکاډمیکه شننه او استدلال",
+    "desc": "د بېلابېلو نظرونو پرتله، د دلایلو ارزونه او منظمې لیکنې.",
     "skills": [
-     "په متن کې د نظریاتو او دلایلو پرتله کول.",
-     "د اوږدو لکچرونو اورېدل او په بحث کې ګډون.",
-     "د څو پاراګرافونو لیکنې پلان او اصلاح."
+     "په علمي متنونو کې د نظرونو او شواهدو پرتله کول.",
+     "د اوږدو لکچرونو درک او په بحث کې ګډون.",
+     "د څو پاراګرافونو لرونکې استدلالي لیکنې پلان او سمون."
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 3",
@@ -504,12 +504,12 @@ const V2_EAP={
    },
    {
     "title": "EAP 4",
-    "subtitle": "خپلواک اکاډمیک کار",
-    "desc": "له لوستلو، اورېدلو او بحث څخه د معلوماتو یوځای کول.",
+    "subtitle": "د اکاډمیکو مهارتونو ګډ کارول",
+    "desc": "له متنونو او لکچرونو څخه د معلوماتو یوځای کول او د مقالو او وړاندې کولو چمتو کول.",
     "skills": [
-     "له څو سرچینو د معلوماتو لنډیز او یوځای کول.",
-     "د منظم یادښت په مرسته د موضوع وړاندې کول.",
-     "د اوږدې اکاډمیکې لیکنې جوړول او بیاکتنه."
+     "له څو سرچینو څخه معلومات راټولول او لنډیزول.",
+     "د منظم یادښت په مرسته موضوع وړاندې کول.",
+     "د مقالې لیکل او د انسجام او دلایلو له پلوه یې بیاکتنه."
     ],
     "textbooks": [
      "ACTIVE Skills for Reading 4",
@@ -518,87 +518,87 @@ const V2_EAP={
     ]
    }
   ],
-  "booksLabel": "درې اصلي کتابي لړۍ",
-  "booksTitle": "درې کتابونه، درې مهم اکاډمیک مهارتونه.",
-  "booksIntro": "په هر EAP لول کې درې هم‌شمېره کتابونه کارول کېږي: یو د لوستلو او لغتونو لپاره، یو د اورېدو او خبرو لپاره او درېیم د اکاډمیکې لیکنې لپاره. په EAP 1 کې د Book 1 له لړیو څخه کار اخېستل کېږي او تر EAP 4 پورې دا شمېره ۴ ته رسېږي.",
+  "booksLabel": "درې اساسي درسي لړۍ",
+  "booksTitle": "درې بشپړوونکي کتابونه؛ د اکاډمیکې ژبې درې برخې.",
+  "booksIntro": "په هره کچه کې د درې واړو لړیو هم‌شمېره کتابونه کارول کېږي: ACTIVE Skills for Reading د لوستلو او لغتونو لپاره، Contemporary Topics د لکچر اورېدو، یادښت اخیستلو او بحث لپاره، او Longman Academic Writing د جملو، پاراګرافونو او مقالو د لیکلو لپاره. د کتابونو شمېرې له EAP 1 څخه تر EAP 4 پورې د کورس له کچو سره سمون لري.",
   "books": [
    {
-    "title": "Active Skills for Reading",
+    "title": "ACTIVE Skills for Reading",
     "publisher": "National Geographic Learning / Cengage · Neil J. Anderson",
-    "role": "لوستل او اکاډمیک لغتونه",
-    "intro": "دا لړۍ د متن هدفمند لوستل، له قرینې د لغتونو معنا پوهېدل او د مطلب درک ارزول روزي. د ACTIVE تګلاره د مخکېنۍ پوهې، لغتونو او روان لوستلو پر کارولو ټینګار کوي.",
+    "role": "لوستل او د لغتونو پیاوړتیا",
+    "intro": "دا لړۍ د نیل جي انډرسن د ACTIVE تګلارې له مخې هدفمند لوستل روزي. زده‌کوونکی له خپلې پخوانۍ پوهې او د متن له سیاق څخه ګټه اخلي، لغتونه زده کوي او د مطلب درک ارزوي.",
     "points": [
-     "د متن اصلي مفکوره او جوړښت پېژندل.",
-     "له قرینې لغتونه زده کول او د لوستلو لارې کارول.",
-     "د سرعت او درک یوځای پیاوړي کول."
+     "د متن اصلي مفکوره، جزئیات او جوړښت پېژندل.",
+     "د لغتونو معنا له سیاق څخه معلومول او د لوستلو تګلارې کارول.",
+     "د لوستلو روانتیا او د مطلب درک پیاوړي کول."
     ]
    },
    {
     "title": "Contemporary Topics",
     "publisher": "Pearson · Academic Listening & Note-Taking",
-    "role": "اورېدل، خبرې او علمي بحث",
-    "intro": "دا لړۍ د پوهنتون په څېر لکچرونو او علمي موضوعاتو ولاړه ده. زده‌کوونکي مهم ټکي اوري، منظم یادښتونه اخلي او بیا موضوع تشریح کوي.",
+    "role": "د لکچر اورېدل، یادښت اخیستل او بحث",
+    "intro": "د Pearson دغه لړۍ د اکاډمیکو لکچرونو پر بنسټ د اورېدو، مهمو ټکو د پېژندلو، منظم یادښت اخیستلو او د اورېدلو معلوماتو د بحث مهارتونه پیاوړي کوي.",
     "points": [
-     "د لکچر موضوع او اساسي جزئیات پېژندل.",
-     "د لکچر یادښتونه تنظیمول او ارزول.",
-     "علمي لغتونه او د موضوع بحث تمرینول."
+     "د لکچر موضوع، جوړښت او ملاتړي دلیلونه پېژندل.",
+     "د مهمو معلوماتو منظم یادښتونه اخیستل او بیاکتل.",
+     "د علمي لغتونو کارول او په ټولګیز بحث کې ګډون."
     ]
    },
    {
     "title": "Longman Academic Writing Series",
     "publisher": "Pearson · Academic Writing",
-    "role": "اکاډمیکه لیکنه",
-    "intro": "دا لړۍ اکاډمیکه لیکنه له جملو او پاراګرافونو تر منظمو مقالو پورې په تدریجي ډول روزي؛ د پلان جوړولو، لیکلو او بیاکتنې پر پړاوونو تمرکز کوي.",
+    "role": "اکاډمیکه لیکنه او مقاله‌لیکنه",
+    "intro": "د Pearson دا لړۍ له جملې او پاراګراف څخه تر منظمې مقالې پورې د لیکنې پړاوونه تدریسوي او پر پلان جوړولو، ژبني دقت، د متن جوړښت او بیاکتنې تمرکز کوي.",
     "points": [
-     "له لیکلو مخکې د مفکورې او پلان جوړول.",
-     "په منظم ډول پاراګراف او مقاله لیکل.",
-     "ګرامر، لغتونه او د متن انسجام اصلاح کول."
+     "د لیکلو لپاره د موضوع او مفکورو تنظیمول.",
+     "د روښانه جوړښت لرونکي پاراګرافونه او مقالې لیکل.",
+     "د ګرامر، لغتونو، جملو او د متن د انسجام سمون."
     ]
    }
   ],
   "staffLabel": "د تدریس بڼه",
-  "staffTitle": "په هر لول کې درې ښوونکي تدریس کوي.",
-  "staffText": "په هر EAP لول کې درې ښوونکي تدریس کوي. ACTIVE Skills for Reading د Reading او Vocabulary، Contemporary Topics د Listening او Speaking او علمي بحث، او Longman Academic Writing د لیکنې مهارتونه روزي. د ښوونکو نومونه او مهالوېش له ادارې تایید کړئ.",
-  "feeLabel": "روښانه فیس",
-  "feeTitle": "هره میاشت ۱٬۰۰۰ افغانۍ؛ هر لول ۲٬۰۰۰ افغانۍ.",
-  "feeMonth": "د یوې میاشتې فیس",
-  "feeTerm": "د یوه دوه میاشتني لول فیس",
-  "feeNote": "څلور لولونه په ترتیب اته میاشتې وخت نیسي. پورته فیس د تدریس لپاره دی؛ د کتابونو بیه او نور احتمالي لګښتونه له ادارې وپوښتئ. د سویې معلومول وړیا دي او د کورس فیس جلا دی.",
-  "faqLabel": "ډېرې پوښتنې",
-  "faqTitle": "له نوم‌لیکنې مخکې",
+  "staffTitle": "د هرې کچې تدریس درې ښوونکي کوي.",
+  "staffText": "د EAP نصاب درې اړوندې برخې لري: د ACTIVE Skills for Reading له لارې لوستل او لغتونه؛ د Contemporary Topics له لارې اورېدل، خبرې او بحث؛ او د Longman Academic Writing له لارې اکاډمیکه لیکنه. درې ښوونکي د هرې کچې په تدریس کې برخه لري. د ښوونکو نومونه او مهالوېش له نوم‌لیکنې څانګې سره تایید کړئ.",
+  "feeLabel": "روښانه درسي فیس",
+  "feeTitle": "میاشتنی فیس ۱٬۰۰۰ افغانۍ؛ د هرې کچې فیس ۲٬۰۰۰ افغانۍ.",
+  "feeMonth": "میاشتنی فیس",
+  "feeTerm": "د دوه میاشتنې کچې فیس",
+  "feeNote": "میاشتنی فیس ۱٬۰۰۰ افغانۍ او د هرې دوه میاشتنې کچې فیس ۲٬۰۰۰ افغانۍ دی. څلور کچې پرله‌پسې اته میاشتې وخت نیسي. د کتابونو بیه او نور احتمالي لګښتونه له پیسو ورکولو مخکې له نوم‌لیکنې څانګې سره روښانه کړئ. د سویې ارزونه وړیا ده؛ درسي ټولګي فیس لري.",
+  "faqLabel": "عامې پوښتنې",
+  "faqTitle": "تر نوم‌لیکنې مخکې مهم معلومات",
   "faq": [
    [
-    "ایا باید له EAP 1 څخه پیل وکړم؟",
-    "نه تل. د وړیا سویې معلومولو له لارې د مناسب لول په ټاکلو کې مرسته ترلاسه کولی شئ."
+    "ایا اړینه ده چې له EAP 1 څخه پیل وکړم؟",
+    "نه. د سویې وړیا ارزونه او د ادارې لارښوونه د مناسبې کچې په ټاکلو کې مرسته کوي."
    ],
    [
-    "ټول څلور لولونه څومره وخت نیسي؟",
-    "هر لول دوه میاشتې دی؛ په ترتیب ټول اته میاشتې کېږي."
+    "د څلورو کچو بشپړول څومره وخت نیسي؟",
+    "هره کچه دوه میاشتې دوام کوي. څلور کچې پرله‌پسې په اتو میاشتو کې بشپړېږي."
    ],
    [
-    "ایا په هر لول کې درې کتابونه کارول کېږي؟",
-    "هو. د کتاب شمېره د کورس له لول سره برابره ده. په EAP 1 کې د ټولو دریو کتابي لړیو Book 1، په EAP 2 کې Book 2، په EAP 3 کې Book 3 او په EAP 4 کې Book 4 تدریس کېږي. د چاپ دقیق معلومات له ادارې واخلئ."
+    "ایا په هره کچه کې درې کتابونه تدریسېږي؟",
+    "هو. په EAP 1 کې ACTIVE Skills for Reading 1، Contemporary Topics 1 او Longman Academic Writing 1 تدریسېږي. په EAP 2، EAP 3 او EAP 4 کې په ترتیب د همدې دریو لړیو دویم، درېیم او څلورم کتابونه کارول کېږي. د کتابونو دقیق چاپ له ادارې وپوښتئ."
    ],
    [
-    "ایا د ۲٬۰۰۰ افغانیو فیس کتابونه هم رانغاړي؟",
-    "۲٬۰۰۰ افغانۍ د یوه دوه میاشتني لول تدریسي فیس دی. د کتابونو بیه له ادارې جلا تایید کړئ."
+    "ایا د ۲٬۰۰۰ افغانیو فیس د کتابونو بیه هم رانغاړي؟",
+    "۲٬۰۰۰ افغانۍ د یوې دوه میاشتنې کچې د تدریس فیس دی؛ یعنې ۱٬۰۰۰ افغانۍ په میاشت کې. د کتابونو بیه او د ترلاسه کولو څرنګوالی له پیسو ورکولو مخکې له ادارې سره تایید کړئ."
    ],
    [
-    "د دریو ښوونکو نومونه او وختونه څه دي؟",
-    "په هر لول کې درې ښوونکي تدریس کوي. د شته ټولګي ښوونکي او مهالوېش له ادارې وپوښتئ."
+    "د هرې کچې ښوونکي او وختونه څنګه معلوم کړم؟",
+    "د هرې کچې تدریس درې ښوونکي کوي. د شته ټولګیو مهالوېش او د ښوونکو نومونه له نوم‌لیکنې څانګې سره تایید کړئ."
    ],
    [
-    "ایا EAP د TOEFL چمتووالی دی؟",
-    "نه. EAP اکاډمیک لوستل، اورېدل، لیکنه او خبرې روزي. ځانګړی TOEFL Preparation یو جلا پروګرام دی."
+    "ایا EAP د TOEFL د ازموینې چمتووالی دی؟",
+    "نه. EAP اکاډمیک لوستل، اورېدل، خبرې او لیکنه پیاوړي کوي. د TOEFL ازموینې لپاره ځانګړی چمتووالی بېل پروګرام دی."
    ]
   ],
   "ctaLabel": "راتلونکی ګام",
-  "ctaTitle": "له مناسب لول څخه پیل وکړئ.",
-  "ctaText": "د EAP لولونو، دریو کتابونو، وختونو او د وړیا سویې معلومولو لپاره له ادارې سره اړیکه ونیسئ.",
-  "cta": "د وړیا سویې معلومولو غوښتنه",
-  "secondary": "د EAP په اړه پوښتنه",
+  "ctaTitle": "له خپلې مناسبې کچې پیل وکړئ.",
+  "ctaText": "د EAP د کچو، کتابونو، ښوونکو، مهالوېش او د سویې د وړیا ارزونې په اړه له نوم‌لیکنې څانګې سره اړیکه ونیسئ.",
+  "cta": "د سویې د وړیا ارزونې غوښتنه",
+  "secondary": "د EAP په اړه له ادارې سره مشوره",
   "other": "ټول پروګرامونه وګورئ",
-  "levelBookLabel": "د همدې لول درې درسي کتابونه",
+  "levelBookLabel": "د همدې کچې درې درسي کتابونه",
   "writingTitles": [
    "Sentences to Paragraphs",
    "Paragraphs",
