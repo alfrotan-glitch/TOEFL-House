@@ -421,3 +421,32 @@ test("EAP four levels retain three series while distinguishing publisher edition
   assert.match(html,/۲٬۰۰۰ افغانی|AFN 2,000|۲٬۰۰۰ افغانۍ/);
  }
 });
+
+test("Published read-only API restores the exact public CMS contract in all languages",async()=>{
+ const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),env());
+ assert.equal(response.status,200);
+ assert.match(response.headers.get("Content-Type"),/application\/json/);
+ assert.match(response.headers.get("X-Robots-Tag"),/noindex/);
+ const publicContent=await response.json();
+ assert.deepEqual(Object.keys(publicContent).sort(),["locales","media","timetable","revision","psRevision","updatedAt","cmsStatus"].sort());
+ assert.equal(publicContent.cmsStatus,"connected");
+ assert.equal(publicContent.revision,40);
+ assert.equal(publicContent.psRevision,40);
+ for(const l of ["en","fa","ps"])assert.equal(publicContent.locales[l].programs.length,7);
+ assert.deepEqual(publicContent.locales.en.programs.map(p=>p.id),allIds);
+ const head=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content",{method:"HEAD"}),env());
+ assert.equal(head.status,200);
+ assert.equal(await head.text(),"");
+});
+test("Public CMS endpoint rejects protected fields and never leaks drafts",async()=>{
+ const unsafe={...main,locales:{...main.locales,en:{...main.locales.en, password_hash:"secret-do-not-publish"}}};
+ const bad=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),env(unsafe,ps));
+ assert.equal(bad.status,503);
+ assert.ok(!(await bad.text()).includes("secret-do-not-publish"));
+ const missing=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),{});
+ assert.equal(missing.status,503);
+ const before=JSON.stringify(main)+JSON.stringify(ps);
+ const normal=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),env());
+ assert.equal(normal.status,200);
+ assert.equal(JSON.stringify(main)+JSON.stringify(ps),before,"GET may not mutate CMS fixtures");
+});
