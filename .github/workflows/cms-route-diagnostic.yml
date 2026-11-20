@@ -1,0 +1,35 @@
+name: Diagnose public CMS route on Pages hosts
+on:
+  push:
+    branches: [diagnose-canonical-cms-api-20261120]
+permissions:
+  contents: read
+jobs:
+  cms-route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compare canonical, immutable production, preview and pinned upstream routes
+        run: |
+          node --input-type=module <<'JS'
+          const hosts=[
+            "https://the-toefl-house.pages.dev",
+            "https://66bb3146.the-toefl-house.pages.dev",
+            "https://fa830d7d.the-toefl-house.pages.dev",
+            "https://0c14f299.the-toefl-house.pages.dev"
+          ];
+          const paths=["/api/content","/api/content?audit=nov20-2026","/"];
+          for(const host of hosts){
+            for(const path of paths){
+              try{
+                const r=await fetch(host+path,{signal:AbortSignal.timeout(16000),headers:{"Accept":"application/json","Cache-Control":"no-cache"}});
+                const t=await r.text();
+                let detail={};
+                if(path.startsWith("/api/content")&&r.ok){try{const v=JSON.parse(t);detail={cmsStatus:v.cmsStatus,revision:v.revision,psRevision:v.psRevision,localeCount:Object.keys(v.locales||{}).length}}catch(e){detail={badJSON:true}}}
+                else if(path.startsWith("/api/content"))detail={errorBody:t.slice(0,90)};
+                else detail={v2:t.includes('/__th/v2/site.css')};
+                console.log(JSON.stringify({host,path,status:r.status,cache:r.headers.get("cf-cache-status"),type:r.headers.get("content-type"),ray:r.headers.get("cf-ray"),server:r.headers.get("server"),...detail}));
+              }catch(e){console.log(JSON.stringify({host,path,error:String(e).slice(0,180)}));}
+            }
+          }
+          JS
