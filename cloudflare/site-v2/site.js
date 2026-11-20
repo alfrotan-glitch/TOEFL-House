@@ -14,14 +14,21 @@ try{
   sessionStorage.setItem("th_campaign",JSON.stringify({source:safeSource||"website",campaign:safeCampaign||"site_cta"}));
  }
 }catch(_){}
+// Only migrate documented retired homepage anchors. Unknown fragments may
+// belong to campaigns, third-party links or future content: do not hijack them.
 var known="";
 if(location.hash){try{known=decodeURIComponent(location.hash.slice(1));}catch(_){known="";}}
-var legacy=/(?:^|\/)(?:fa|ps)?\/?tools\/?$/.test(location.pathname);
-if(known&&!legacy&&!document.getElementById(known)){
-  var current=location.pathname;
-  var lang=current.indexOf("/fa/")===0?"/fa/":current.indexOf("/ps/")===0?"/ps/":"/";
-  location.replace(lang+"tools/"+location.hash);
-  return;
+var isHome=["/","/fa/","/ps/"].includes(location.pathname);
+if(isHome&&known&&!document.getElementById(known)){
+  var lang=location.pathname;
+  if(known==="start"||known==="advisor"){
+    location.replace(lang+"admissions/");
+    return;
+  }
+  if(known==="th-pathways"){
+    location.replace(lang+"#programs");
+    return;
+  }
 }
 var menu=document.querySelector(".mobile-menu");
 if(menu){
