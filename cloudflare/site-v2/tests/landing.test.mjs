@@ -468,3 +468,18 @@ test("Language selector labels and textbook pronunciation are accessible in all 
   assert.match(eapHtml,/<h3 dir="ltr" lang="en">ACTIVE Skills for Reading/);
  }
 });
+
+test("Public pages expose canonical branded social previews in EN, Dari and Pashto",async()=>{
+ for(const root of ["/","/fa/","/ps/"]){
+  for(const route of ["","courses/academic-english/","admissions/"]){
+   const path=root+route,source="https://the-toefl-house.pages.dev"+path;
+   const res=await worker.fetch(new Request(source),env());
+   assert.equal(res.status,200,path);
+   const html=await res.text();
+   assert.ok(html.includes('<meta name="twitter:card" content="summary_large_image">'),path+" needs large preview card");
+   assert.ok(html.includes('<meta property="og:site_name" content="The TOEFL House">'),path+" missing brand metadata");
+   assert.match(html,/<meta property="og:image:alt" content="[^"]+">/);
+   assert.ok(html.includes('<meta property="og:url" content="'+source+'">'),path+" missing canonical share URL");
+  }
+ }
+});
