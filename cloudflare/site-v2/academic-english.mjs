@@ -1,16 +1,10 @@
-/* EAP academic program guide: Owner-confirmed 4 levels, 2 months per level,
- * three instructors and three textbook SERIES each level, tuition AFN 1000/month,
- * AFN 2000/level. Exact textbook volume numbers 1–4 are owner-confirmed for matching EAP 1–4; edition years and book prices remain unconfirmed.
- * Series descriptions verified against Cengage (Active Skills for Reading)
- * and Pearson (Contemporary Topics, Longman Academic Writing).
- * The school's exact level-to-book pairing is confirmed; no publisher edition is assumed.
- */
+/* EAP school structure: 4 two-month levels, 3 instructors and 3 textbook series per level, AFN 1,000 monthly. Publisher checks, Nov 2026: ACTIVE Skills for Reading 3e (Cengage), Contemporary Topics 4e books 1–3 only (Pearson), Longman Academic Writing refreshed digital-resource release (Pearson). Never invent Contemporary Topics Book 4; ask academic department for EAP 4 assigned ISBN. */
 const V2_EAP={
  "en": {
   "badge": "ENGLISH FOR ACADEMIC PURPOSES · EAP",
   "title": "Academic English for university study.",
   "accent": "Read critically. Communicate clearly.",
-  "intro": "English for Academic Purposes (EAP) develops the reading, listening, speaking and writing skills needed for academic study. The TOEFL House offers four two-month levels. Each level is taught by three instructors and uses three core textbooks whose numbers match the course level.",
+  "intro": "English for Academic Purposes (EAP) develops academic reading, lecture listening, discussion and writing. The TOEFL House offers four two-month levels. Three instructors teach each level using three core textbook series; edition numbers are distinct from volume numbers.",
   "heroNote": "A free placement assessment helps identify your starting level. Confirm available class times and teaching assignments with admissions.",
   "facts": [
    [
@@ -27,7 +21,7 @@ const V2_EAP={
    ],
    [
     "3 books",
-    "Three core textbook series per level"
+    "Three core textbook series"
    ]
   ],
   "whoTitle": "Who is EAP designed for?",
@@ -55,7 +49,7 @@ const V2_EAP={
   ],
   "pathLabel": "THE FOUR-LEVEL PATH",
   "pathTitle": "Four levels. A structured academic progression.",
-  "pathIntro": "Each level lasts two months and combines reading and vocabulary, listening and speaking, and academic writing. Three instructors teach each level, using Book 1 of all three series in EAP 1, Book 2 in EAP 2, and so on through EAP 4.",
+  "pathIntro": "Each level lasts two months and combines academic reading, lecture listening, discussion and writing. ACTIVE Skills for Reading and Longman Academic Writing progress from Books 1–4. Pearson's Contemporary Topics Fourth Edition has Books 1–3; materials for EAP 4 are determined by the school's academic curriculum.",
   "levels": [
    {
     "title": "EAP 1",
@@ -67,9 +61,9 @@ const V2_EAP={
      "Write focused paragraphs with a topic sentence and supporting ideas."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 1",
-     "Contemporary Topics 1",
-     "Longman Academic Writing 1: Sentences to Paragraphs"
+     "ACTIVE Skills for Reading 1 · Third Edition",
+     "Contemporary Topics 1 · Fourth Edition",
+     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release"
     ]
    },
    {
@@ -82,9 +76,9 @@ const V2_EAP={
      "Write connected paragraphs and develop arguments with examples."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 2",
-     "Contemporary Topics 2",
-     "Longman Academic Writing 2: Paragraphs"
+     "ACTIVE Skills for Reading 2 · Third Edition",
+     "Contemporary Topics 2 · Fourth Edition",
+     "Longman Academic Writing 2: Paragraphs · Updated release"
     ]
    },
    {
@@ -97,9 +91,9 @@ const V2_EAP={
      "Plan and revise organised multi-paragraph academic writing."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 3",
-     "Contemporary Topics 3",
-     "Longman Academic Writing 3: Paragraphs to Essays"
+     "ACTIVE Skills for Reading 3 · Third Edition",
+     "Contemporary Topics 3 · Fourth Edition",
+     "Longman Academic Writing 3: Paragraphs to Essays · Updated release"
     ]
    },
    {
@@ -112,19 +106,19 @@ const V2_EAP={
      "Draft, improve and review an extended academic text with attention to clarity and evidence."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 4",
-     "Contemporary Topics 4",
-     "Longman Academic Writing 4: Essays"
+     "ACTIVE Skills for Reading 4 · Third Edition",
+     "Contemporary Topics · Fourth Edition (EAP 4 materials per school syllabus)",
+     "Longman Academic Writing 4: Essays · Updated release"
     ]
    }
   ],
   "booksLabel": "THREE CORE TEXTBOOK SERIES",
   "booksTitle": "Three complementary textbooks. One integrated pathway.",
-  "booksIntro": "Every level uses three textbooks with matching numbers: ACTIVE Skills for Reading develops reading strategies and vocabulary; Contemporary Topics supports academic listening, lecture note-taking and discussion; and Longman Academic Writing develops writing from sentences and paragraphs to essays. The books used progress from volume 1 in EAP 1 to volume 4 in EAP 4.",
+  "booksIntro": "Three textbook series support every EAP level: ACTIVE Skills for Reading (Third Edition), Contemporary Topics (Fourth Edition) and the refreshed Longman Academic Writing Series. Book numbers should not be confused with edition numbers.",
   "books": [
    {
     "title": "ACTIVE Skills for Reading",
-    "publisher": "National Geographic Learning / Cengage · Neil J. Anderson",
+    "publisher": "Cengage / National Geographic Learning · Third Edition",
     "role": "Reading & Vocabulary",
     "intro": "Neil J. Anderson's ACTIVE approach teaches readers to activate prior knowledge, develop vocabulary, question meaning and monitor comprehension rather than rely on word-for-word translation.",
     "points": [
@@ -135,7 +129,7 @@ const V2_EAP={
    },
    {
     "title": "Contemporary Topics",
-    "publisher": "Pearson · Academic Listening & Note-Taking",
+    "publisher": "Pearson · Fourth Edition · Books 1–3",
     "role": "Academic Listening, Note-taking & Discussion",
     "intro": "Pearson's lecture-based materials build the listening and study skills needed to follow academic presentations, identify important information, take purposeful notes and discuss what has been heard.",
     "points": [
@@ -146,7 +140,7 @@ const V2_EAP={
    },
    {
     "title": "Longman Academic Writing Series",
-    "publisher": "Pearson · Academic writing",
+    "publisher": "Pearson · Refreshed release with digital resources",
     "role": "Academic Writing",
     "intro": "The Longman Academic Writing Series develops the writing process, sentence accuracy, paragraph organisation and essay structure through guided drafting, feedback and revision.",
     "points": [
@@ -177,7 +171,7 @@ const V2_EAP={
    ],
    [
     "Will I study all three books in each level?",
-    "Yes. The book numbers correspond to the EAP level: EAP 1 uses Book 1 from all three series, EAP 2 uses Book 2, EAP 3 uses Book 3 and EAP 4 uses Book 4. Please confirm the available edition with admissions."
+    "Yes. Each level includes all three series. ACTIVE Skills for Reading and Longman Academic Writing use Books 1–4. Contemporary Topics Fourth Edition has Books 1–3; the EAP 4 selection is confirmed by the school's academic department."
    ],
    [
     "Does AFN 2,000 include the books?",
@@ -208,26 +202,26 @@ const V2_EAP={
  },
  "fa": {
   "badge": "انگلیسی اکادمیک · EAP",
-  "title": "انگلیسی اکادمیک برای پوهنتون.",
-  "accent": "مهارت‌هایی برای درک، تحلیل و نگارش علمی.",
-  "intro": "برنامهٔ English for Academic Purposes (EAP) مهارت‌های خواندن متن‌های علمی، شنیدن لکچر، بحث اکادمیک و نگارش منظم را تقویت می‌کند. EAP در تافل هوس چهار لول دارد؛ هر لول دو ماه دوام می‌کند و سه استاد در تدریس آن سهم دارند. در هر لول، سه کتاب تدریس می‌شود که شمارهٔ آن‌ها با شمارهٔ لول برابر است.",
-  "heroNote": "تعیین سطح رایگان برای انتخاب لول مناسب کمک‌تان می‌کند. تقسیم اوقات، استادان و ظرفیت صنف‌ها را با بخش پذیرش تأیید کنید.",
+  "title": "انگلیسی اکادمیک؛ آمادگی برای تحصیل در پوهنتون.",
+  "accent": "بخوانید، تحلیل کنید و روشن بنویسید.",
+  "intro": "برنامهٔ انگلیسی برای اهداف اکادمیک (EAP) مهارت‌های خواندن متون علمی، شنیدن لکچر، بحث و نگارش اکادمیک را تقویت می‌کند. در تافل هوس این برنامه چهار سطح دارد؛ هر سطح دو ماه دوام می‌کند و سه استاد با استفاده از سه مجموعهٔ درسی آن را تدریس می‌کنند.",
+  "heroNote": "تعیین سطح رایگان برای انتخاب سطح مناسب کمک‌تان می‌کند. تقسیم اوقات، استادان و ظرفیت صنف‌ها را با بخش پذیرش تأیید کنید.",
   "facts": [
    [
-    "۴ لول",
+    "۴ سطح",
     "از EAP 1 تا EAP 4"
    ],
    [
     "۲ ماه",
-    "مدت هر لول؛ مجموع دوره ۸ ماه"
+    "مدت هر سطح؛ مجموع دوره ۸ ماه"
    ],
    [
     "۳ استاد",
-    "در هر لول"
+    "در هر سطح"
    ],
    [
     "۳ کتاب درسی",
-    "با شمارهٔ مطابق به لول"
+    "سه مجموعهٔ اصلی درسی"
    ]
   ],
   "whoTitle": "برنامهٔ EAP برای چه کسانی مناسب است؟",
@@ -238,7 +232,7 @@ const V2_EAP={
   "outcomes": [
    [
     "خواندن متن و توسعهٔ واژگان",
-    "تشخیص مفکورهٔ اصلی و دلایل حمایوی، دریافت معنای لغات از متن، مقایسهٔ دیدگاه‌ها و خلاصه‌نویسی مطالب علمی."
+    "تشخیص اندیشهٔ اصلی و شواهد پشتیبان، درک معنای لغات از متن، مقایسهٔ دیدگاه‌ها و خلاصه‌نویسی مطالب علمی."
    ],
    [
     "درک لکچر و نوت‌برداری",
@@ -250,41 +244,41 @@ const V2_EAP={
    ],
    [
     "مکالمه و ارائهٔ علمی",
-    "طرح پرسش‌های مرتبط، توضیح منظم مفکوره‌ها، پاسخ به دیدگاه‌های متفاوت و ارائهٔ روشن معلومات."
+    "طرح پرسش‌های مرتبط، توضیح منظم اندیشه‌ها، پاسخ به دیدگاه‌های متفاوت و ارائهٔ روشن معلومات."
    ]
   ],
-  "pathLabel": "ساختار چهار لول EAP",
-  "pathTitle": "چهار لول؛ یک مسیر منظم برای پیشرفت اکادمیک.",
-  "pathIntro": "هر لول دو ماه دوام می‌کند و توسط سه استاد تدریس می‌شود. آموزش در سه بخش خواندن و لغات، شنیدن و مکالمه، و نگارش اکادمیک پیش می‌رود. در EAP 1 سه کتاب شمارهٔ ۱، در EAP 2 کتاب‌های شمارهٔ ۲، در EAP 3 کتاب‌های شمارهٔ ۳ و در EAP 4 کتاب‌های شمارهٔ ۴ تدریس می‌شوند.",
+  "pathLabel": "ساختار چهار سطح EAP",
+  "pathTitle": "چهار سطح؛ یک مسیر منظم برای پیشرفت اکادمیک.",
+  "pathIntro": "هر سطح دو ماه دوام می‌کند و سه استاد در تدریس آن سهم دارند. برنامه شامل خواندن و واژگان، شنیدن و مکالمه، و نگارش اکادمیک است. کتاب‌های ACTIVE Skills for Reading و Longman Academic Writing از شمارهٔ ۱ تا ۴ پیش می‌روند. برای Contemporary Topics از ویرایش چهارم ناشر استفاده می‌شود که کتاب‌های شمارهٔ ۱ تا ۳ دارد؛ کتاب مورد استفاده در سطح چهارم بر اساس نصاب مرکز مشخص می‌شود.",
   "levels": [
    {
     "title": "EAP 1",
     "subtitle": "بنیاد مهارت‌های اکادمیک",
     "desc": "آشنایی با خواندن هدفمند، شنیدن لکچر و ساختار پاراگراف در تمرین‌های رهنمایی‌شده.",
     "skills": [
-     "تشخیص مفکورهٔ اصلی و جزئیات اساسی در متن‌های کوتاه.",
+     "تشخیص اندیشهٔ اصلی و جزئیات اساسی در متن‌های کوتاه.",
      "شنیدن لکچرهای ساده و ثبت نکات مهم.",
-     "نوشتن پاراگراف با جملهٔ موضوعی و جملات حمایوی."
+     "نوشتن پاراگراف با جملهٔ موضوعی و جمله‌های پشتیبان."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 1",
-     "Contemporary Topics 1",
-     "Longman Academic Writing 1: Sentences to Paragraphs"
+     "ACTIVE Skills for Reading 1 · Third Edition",
+     "Contemporary Topics 1 · Fourth Edition",
+     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release"
     ]
    },
    {
     "title": "EAP 2",
-    "subtitle": "درک و پیوند مفکوره‌ها",
+    "subtitle": "درک و پیوند اندیشه‌ها",
     "desc": "تقویت درک متن‌های طولانی‌تر، خلاصه‌سازی لکچر و نگارش پاراگراف‌های منسجم.",
     "skills": [
-     "تشخیص ساختار متن و دریافت معنای واژگان از قرینه.",
+     "تشخیص ساختار متن و درک معنای واژگان از قرینه.",
      "تنظیم نوت‌ها و ارائهٔ خلاصهٔ روشن از لکچر.",
      "نوشتن پاراگراف‌های مرتبط با مثال‌ها و دلایل مناسب."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 2",
-     "Contemporary Topics 2",
-     "Longman Academic Writing 2: Paragraphs"
+     "ACTIVE Skills for Reading 2 · Third Edition",
+     "Contemporary Topics 2 · Fourth Edition",
+     "Longman Academic Writing 2: Paragraphs · Updated release"
     ]
    },
    {
@@ -297,9 +291,9 @@ const V2_EAP={
      "طرح‌ریزی، نوشتن و اصلاح متن‌های استدلالی."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 3",
-     "Contemporary Topics 3",
-     "Longman Academic Writing 3: Paragraphs to Essays"
+     "ACTIVE Skills for Reading 3 · Third Edition",
+     "Contemporary Topics 3 · Fourth Edition",
+     "Longman Academic Writing 3: Paragraphs to Essays · Updated release"
     ]
    },
    {
@@ -312,93 +306,93 @@ const V2_EAP={
      "نگارش و بازنگری مقاله با توجه به انسجام و دلایل."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 4",
-     "Contemporary Topics 4",
-     "Longman Academic Writing 4: Essays"
+     "ACTIVE Skills for Reading 4 · Third Edition",
+     "Contemporary Topics · Fourth Edition (EAP 4 materials per school syllabus)",
+     "Longman Academic Writing 4: Essays · Updated release"
     ]
    }
   ],
   "booksLabel": "سه مجموعه‌کتاب درسی",
-  "booksTitle": "سه کتاب مکمل؛ سه بخش اساسی آموزش اکادمیک.",
-  "booksIntro": "در هر لول، سه کتاب با شمارهٔ برابر به همان لول تدریس می‌شود: ACTIVE Skills for Reading برای خواندن و تقویت واژگان؛ Contemporary Topics برای شنیدن لکچر، نوت‌برداری و بحث؛ و Longman Academic Writing برای نگارش جمله، پاراگراف و مقاله. به این ترتیب، کتاب‌های شمارهٔ ۱ تا ۴ به‌ترتیب در EAP 1 تا EAP 4 استفاده می‌شوند.",
+  "booksTitle": "سه مجموعهٔ درسی؛ سه مهارت مکمل.",
+  "booksIntro": "در هر سطح، سه مجموعهٔ درسی استفاده می‌شود: ACTIVE Skills for Reading (ویرایش سوم) برای خواندن و واژگان؛ Contemporary Topics (ویرایش چهارم) برای شنیدن لکچر، نوت‌برداری و بحث؛ و Longman Academic Writing (نسخهٔ به‌روزشدهٔ ناشر) برای نگارش اکادمیک. شمارهٔ ویرایش را نباید با شمارهٔ کتاب اشتباه گرفت.",
   "books": [
    {
     "title": "ACTIVE Skills for Reading",
-    "publisher": "National Geographic Learning / Cengage · Neil J. Anderson",
+    "publisher": "Cengage / National Geographic Learning · Third Edition",
     "role": "خواندن و تقویت واژگان",
-    "intro": "این مجموعه با روش ACTIVE اثر نیل جِی اندرسن، خواندن هدفمند را آموزش می‌دهد. شاگرد می‌آموزد از معلومات قبلی و قرینهٔ متن کمک بگیرد، واژگان خود را گسترش دهد و میزان درک مطلب را بررسی کند.",
+    "intro": "ویرایش سوم این مجموعه، نوشتهٔ Neil J. Anderson، درک مطلب و گسترش واژگان را با روش‌های هدفمند خواندن تقویت می‌کند. زبان‌آموز می‌آموزد از معلومات قبلی و قرینهٔ متن استفاده کند و میزان درک خود را بسنجد.",
     "points": [
-     "شناخت مفکورهٔ اصلی، جزئیات مهم و ساختار متن.",
-     "دریافت معنای لغات از قرینه و کاربرد روش‌های خواندن.",
+     "شناخت اندیشهٔ اصلی، جزئیات مهم و ساختار متن.",
+     "درک معنای لغات از قرینه و کاربرد روش‌های خواندن.",
      "تقویت روان‌خوانی همراه با درک دقیق مطلب."
     ]
    },
    {
     "title": "Contemporary Topics",
-    "publisher": "Pearson · Academic Listening & Note-Taking",
+    "publisher": "Pearson · Fourth Edition · Books 1–3",
     "role": "شنیدن لکچر، نوت‌برداری و مباحثه",
-    "intro": "این مجموعهٔ Pearson بر محتوای لکچرهای اکادمیک استوار است و مهارت‌های شنیدن دقیق، تشخیص نکات اساسی، نوت‌برداری و گفت‌وگو دربارهٔ مطالب شنیده‌شده را تقویت می‌کند.",
+    "intro": "ویرایش چهارم Contemporary Topics بر لکچرهای علمی، نوت‌برداری و مباحثه تمرکز دارد. ناشر کتاب‌های شمارهٔ ۱ تا ۳ را در این ویرایش عرضه کرده است؛ «ویرایش چهارم» به معنای «کتاب چهارم» نیست.",
     "points": [
-     "تشخیص موضوع، ترتیب و دلایل حمایوی لکچر.",
+     "تشخیص موضوع، ترتیب و شواهد پشتیبان لکچر.",
      "تهیه و مرور نوت‌های منظم از مطالب شنیده‌شده.",
      "تقویت واژگان علمی و سهم‌گیری در بحث‌های صنفی."
     ]
    },
    {
     "title": "Longman Academic Writing Series",
-    "publisher": "Pearson · Academic Writing",
+    "publisher": "Pearson · Refreshed release with digital resources",
     "role": "نگارش اکادمیک و مقاله‌نویسی",
-    "intro": "این مجموعهٔ Pearson نگارش را به‌شکل تدریجی، از جمله و پاراگراف تا مقالهٔ منظم، آموزش می‌دهد و بر طرح‌ریزی، ساختار متن، درستی گرامر و بازنگری نوشته تمرکز دارد.",
+    "intro": "مجموعهٔ Longman Academic Writing، در نسخهٔ به‌روزشده با منابع دیجیتالی، نگارش را از جمله و پاراگراف تا مقالهٔ علمی آموزش می‌دهد. استفاده از امکانات دیجیتالی به نسخه و دسترسی صنف بستگی دارد.",
     "points": [
-     "طرح‌ریزی موضوع و تنظیم مفکوره‌های اصلی.",
+     "طرح‌ریزی موضوع و تنظیم اندیشه‌های اصلی.",
      "نوشتن پاراگراف و مقاله با ساختار منطقی.",
      "اصلاح جمله‌بندی، واژگان، گرامر و انسجام متن."
     ]
    }
   ],
   "staffLabel": "شیوهٔ تدریس",
-  "staffTitle": "در تدریس هر لول، سه استاد سهم دارند.",
-  "staffText": "نصاب EAP سه بخش مکمل دارد: Reading & Vocabulary با ACTIVE Skills for Reading؛ Listening & Speaking با Contemporary Topics؛ و Academic Writing با Longman Academic Writing. سه استاد در تدریس هر لول سهم دارند و فعالیت‌های خواندن، شنیدن، نوت‌برداری، بحث و نوشتن یکدیگر را تقویت می‌کنند. نام استادان و تقسیم اوقات هر صنف را بخش پذیرش تأیید می‌کند.",
+  "staffTitle": "در تدریس هر سطح، سه استاد سهم دارند.",
+  "staffText": "نصاب EAP سه بخش مکمل دارد: Reading & Vocabulary با ACTIVE Skills for Reading؛ Listening & Speaking با Contemporary Topics؛ و Academic Writing با Longman Academic Writing. سه استاد در تدریس هر سطح سهم دارند و فعالیت‌های خواندن، شنیدن، نوت‌برداری، بحث و نوشتن یکدیگر را تقویت می‌کنند. نام استادان و تقسیم اوقات هر صنف را بخش پذیرش تأیید می‌کند.",
   "feeLabel": "فیس مشخص و شفاف",
-  "feeTitle": "فیس ماهانه ۱٬۰۰۰ افغانی؛ هر لول دوماهه ۲٬۰۰۰ افغانی.",
+  "feeTitle": "فیس ماهانه ۱٬۰۰۰ افغانی؛ هر سطح دوماهه ۲٬۰۰۰ افغانی.",
   "feeMonth": "فیس ماهانه",
-  "feeTerm": "فیس یک لول دوماهه",
-  "feeNote": "فیس هر ماه ۱٬۰۰۰ افغانی و فیس یک لول دوماهه ۲٬۰۰۰ افغانی است. تکمیل چهار لول به‌صورت پیهم، هشت ماه زمان می‌گیرد. قیمت کتاب‌ها و هرگونه مصرف اضافی را پیش از پرداخت با بخش پذیرش مشخص سازید. تعیین سطح رایگان است؛ صنف‌های آموزشی فیس دارند.",
+  "feeTerm": "فیس یک سطح دوماهه",
+  "feeNote": "فیس هر ماه ۱٬۰۰۰ افغانی و فیس یک سطح دوماهه ۲٬۰۰۰ افغانی است. تکمیل چهار سطح به‌صورت پیهم، هشت ماه زمان می‌گیرد. قیمت کتاب‌ها و هرگونه مصرف اضافی را پیش از پرداخت با بخش پذیرش مشخص سازید. تعیین سطح رایگان است؛ صنف‌های آموزشی فیس دارند.",
   "faqLabel": "پرسش‌های متداول",
   "faqTitle": "پاسخ به پرسش‌های مهم",
   "faq": [
    [
     "آیا باید حتماً از EAP 1 شروع کنم؟",
-    "خیر. تعیین سطح رایگان به شما کمک می‌کند تا با رهنمایی بخش پذیرش، لول مناسب خود را انتخاب کنید."
+    "نخیر. تعیین سطح رایگان به شما کمک می‌کند تا با رهنمایی بخش پذیرش، سطح مناسب خود را انتخاب کنید."
    ],
    [
-    "تکمیل چهار لول EAP چقدر زمان می‌گیرد؟",
-    "هر لول دو ماه دوام می‌کند. اگر چهار لول را پیهم سپری کنید، مجموع دوره هشت ماه خواهد بود."
+    "تکمیل چهار سطح EAP چقدر زمان می‌گیرد؟",
+    "هر سطح دو ماه دوام می‌کند. اگر چهار سطح را پیهم سپری کنید، مجموع دوره هشت ماه خواهد بود."
    ],
    [
-    "آیا در هر لول هر سه کتاب تدریس می‌شود؟",
-    "بلی. در EAP 1 کتاب‌های ACTIVE Skills for Reading 1، Contemporary Topics 1 و Longman Academic Writing 1 تدریس می‌شوند. در EAP 2، EAP 3 و EAP 4 نیز به‌ترتیب کتاب‌های شمارهٔ ۲، ۳ و ۴ همین مجموعه‌ها استفاده می‌شوند. چاپ دقیق کتاب‌ها را از پذیرش تأیید کنید."
+    "آیا در هر سطح هر سه کتاب تدریس می‌شود؟",
+    "بلی. در هر سطح از هر سه مجموعهٔ درسی استفاده می‌شود. ACTIVE Skills for Reading و Longman Academic Writing مطابق کتاب‌های ۱ تا ۴ پیش می‌روند. Contemporary Topics در ویرایش چهارم کتاب‌های ۱ تا ۳ دارد؛ کتاب و مواد درسی سطح چهارم را بخش آموزشی تافل هوس مشخص می‌کند."
    ],
    [
     "آیا فیس ۲٬۰۰۰ افغانی شامل قیمت کتاب‌ها نیز است؟",
-    "مبلغ ۲٬۰۰۰ افغانی فیس تدریس یک لول دوماهه است؛ یعنی ۱٬۰۰۰ افغانی در ماه. قیمت و شیوهٔ تهیهٔ کتاب‌ها را پیش از پرداخت با بخش پذیرش مشخص سازید."
+    "مبلغ ۲٬۰۰۰ افغانی فیس تدریس یک سطح دوماهه است؛ یعنی ۱٬۰۰۰ افغانی در ماه. قیمت و شیوهٔ تهیهٔ کتاب‌ها را پیش از پرداخت با بخش پذیرش مشخص سازید."
    ],
    [
-    "تقسیم اوقات و استادان هر لول چگونه تعیین می‌شوند؟",
-    "در هر لول سه استاد تدریس می‌کنند. تقسیم اوقات، نام استادان و ظرفیت صنف‌های موجود را بخش پذیرش تأیید می‌کند."
+    "تقسیم اوقات و استادان هر سطح چگونه تعیین می‌شوند؟",
+    "در هر سطح سه استاد تدریس می‌کنند. تقسیم اوقات، نام استادان و ظرفیت صنف‌های موجود را بخش پذیرش تأیید می‌کند."
    ],
    [
     "آیا EAP همان کورس آمادگی TOEFL است؟",
-    "خیر. EAP بر مهارت‌های خواندن، شنیدن، بحث و نگارش اکادمیک تمرکز دارد. آمادگی تخصصی امتحان TOEFL یک برنامهٔ جداگانه است."
+    "نخیر. EAP بر مهارت‌های خواندن، شنیدن، بحث و نگارش اکادمیک تمرکز دارد. آمادگی تخصصی امتحان TOEFL یک برنامهٔ جداگانه است."
    ]
   ],
   "ctaLabel": "برای آغاز",
-  "ctaTitle": "از لول مناسب خود آغاز کنید.",
+  "ctaTitle": "از سطح مناسب خود آغاز کنید.",
   "ctaText": "برای تعیین سطح رایگان، دریافت تقسیم اوقات و معلومات دربارهٔ استادان و کتاب‌های EAP با بخش پذیرش تماس بگیرید.",
   "cta": "درخواست تعیین سطح رایگان",
   "secondary": "مشوره با پذیرش دربارهٔ EAP",
   "other": "دیدن تمام برنامه‌ها",
-  "levelBookLabel": "سه کتاب درسی همین لول",
+  "levelBookLabel": "سه کتاب درسی همین سطح",
   "writingTitles": [
    "Sentences to Paragraphs",
    "Paragraphs",
@@ -410,7 +404,7 @@ const V2_EAP={
   "badge": "اکاډمیکه انګلیسي · EAP",
   "title": "د پوهنتون لپاره اکاډمیکه انګلیسي.",
   "accent": "په دقت ولولئ، واورئ او ولیکئ.",
-  "intro": "د English for Academic Purposes (EAP) پروګرام د علمي متنونو د لوستلو، لکچرونو د اورېدو، اکاډمیکو بحثونو او منظمې لیکنې مهارتونه پیاوړي کوي. په تافل هوس کې EAP څلور کچې لري. هره کچه دوه میاشتې دوام کوي، درې ښوونکي یې تدریس کوي او درې کتابونه پکې کارول کېږي چې شمېرې یې د کورس له کچې سره برابرې دي.",
+  "intro": "د English for Academic Purposes (EAP) پروګرام علمي لوستل، د لکچر اورېدل، بحث او لیکنه پیاوړي کوي. په تافل هوس کې څلور دوه میاشتني کچې شته؛ په هره کچه درې ښوونکي د درې کتابي لړیو له لارې درس ورکوي. د کتاب شمېره او د چاپ شمېره توپیر لري.",
   "heroNote": "د وړیا سویې ارزونه د مناسبې کچې په ټاکلو کې مرسته کوي. د ټولګیو وختونه، ښوونکي او شته ځایونه له نوم‌لیکنې څانګې سره تایید کړئ.",
   "facts": [
    [
@@ -427,7 +421,7 @@ const V2_EAP={
    ],
    [
     "۳ درسي کتابونه",
-    "شمېرې یې له کچې سره برابرې دي"
+    "د درې درسي کتابي لړیو څخه"
    ]
   ],
   "whoTitle": "EAP د چا لپاره مناسب دی؟",
@@ -455,7 +449,7 @@ const V2_EAP={
   ],
   "pathLabel": "د EAP څلور کچې",
   "pathTitle": "څلور کچې؛ د اکاډمیک پرمختګ منظم بهیر.",
-  "pathIntro": "هره کچه دوه میاشتې دوام کوي او درې ښوونکي یې تدریس کوي. درې درسي برخې د لوستلو او لغتونو، اورېدو او خبرو، او اکاډمیکې لیکنې مهارتونه رانغاړي. په EAP 1 کې د درې واړو لړیو لومړي کتابونه، په EAP 2 کې دویم، په EAP 3 کې درېیم او په EAP 4 کې څلورم کتابونه تدریسېږي.",
+  "pathIntro": "هره کچه دوه میاشتې دوام کوي او درې ښوونکي یې تدریس کوي. د ACTIVE Skills for Reading او Longman Academic Writing کتابونه له لومړي تر څلورم پورې دي. د Contemporary Topics څلورمه چاپي بڼه یوازې لومړی، دویم او درېیم کتابونه لري؛ د EAP 4 اړوند مواد د مرکز د نصاب له مخې ټاکل کېږي.",
   "levels": [
    {
     "title": "EAP 1",
@@ -467,9 +461,9 @@ const V2_EAP={
      "د موضوعي جملې او ملاتړو جملو لرونکی پاراګراف لیکل."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 1",
-     "Contemporary Topics 1",
-     "Longman Academic Writing 1: Sentences to Paragraphs"
+     "ACTIVE Skills for Reading 1 · Third Edition",
+     "Contemporary Topics 1 · Fourth Edition",
+     "Longman Academic Writing 1: Sentences to Paragraphs · Updated release"
     ]
    },
    {
@@ -482,9 +476,9 @@ const V2_EAP={
      "د مناسبو دلایلو او بېلګو په مرسته پاراګرافونه لیکل."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 2",
-     "Contemporary Topics 2",
-     "Longman Academic Writing 2: Paragraphs"
+     "ACTIVE Skills for Reading 2 · Third Edition",
+     "Contemporary Topics 2 · Fourth Edition",
+     "Longman Academic Writing 2: Paragraphs · Updated release"
     ]
    },
    {
@@ -497,9 +491,9 @@ const V2_EAP={
      "د څو پاراګرافونو لرونکې استدلالي لیکنې پلان او سمون."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 3",
-     "Contemporary Topics 3",
-     "Longman Academic Writing 3: Paragraphs to Essays"
+     "ACTIVE Skills for Reading 3 · Third Edition",
+     "Contemporary Topics 3 · Fourth Edition",
+     "Longman Academic Writing 3: Paragraphs to Essays · Updated release"
     ]
    },
    {
@@ -512,19 +506,19 @@ const V2_EAP={
      "د مقالې لیکل او د انسجام او دلایلو له پلوه یې بیاکتنه."
     ],
     "textbooks": [
-     "ACTIVE Skills for Reading 4",
-     "Contemporary Topics 4",
-     "Longman Academic Writing 4: Essays"
+     "ACTIVE Skills for Reading 4 · Third Edition",
+     "Contemporary Topics · Fourth Edition (EAP 4 materials per school syllabus)",
+     "Longman Academic Writing 4: Essays · Updated release"
     ]
    }
   ],
   "booksLabel": "درې اساسي درسي لړۍ",
   "booksTitle": "درې بشپړوونکي کتابونه؛ د اکاډمیکې ژبې درې برخې.",
-  "booksIntro": "په هره کچه کې د درې واړو لړیو هم‌شمېره کتابونه کارول کېږي: ACTIVE Skills for Reading د لوستلو او لغتونو لپاره، Contemporary Topics د لکچر اورېدو، یادښت اخیستلو او بحث لپاره، او Longman Academic Writing د جملو، پاراګرافونو او مقالو د لیکلو لپاره. د کتابونو شمېرې له EAP 1 څخه تر EAP 4 پورې د کورس له کچو سره سمون لري.",
+  "booksIntro": "په هره کچه درې درسي لړۍ کارول کېږي: ACTIVE Skills for Reading (درېیمه چاپي بڼه)، Contemporary Topics (څلورمه چاپي بڼه) او د Longman Academic Writing تازه شوې لړۍ. د چاپ شمېره د کتاب له شمېرې سره مه ګډوئ.",
   "books": [
    {
     "title": "ACTIVE Skills for Reading",
-    "publisher": "National Geographic Learning / Cengage · Neil J. Anderson",
+    "publisher": "Cengage / National Geographic Learning · Third Edition",
     "role": "لوستل او د لغتونو پیاوړتیا",
     "intro": "دا لړۍ د نیل جي انډرسن د ACTIVE تګلارې له مخې هدفمند لوستل روزي. زده‌کوونکی له خپلې پخوانۍ پوهې او د متن له سیاق څخه ګټه اخلي، لغتونه زده کوي او د مطلب درک ارزوي.",
     "points": [
@@ -535,7 +529,7 @@ const V2_EAP={
    },
    {
     "title": "Contemporary Topics",
-    "publisher": "Pearson · Academic Listening & Note-Taking",
+    "publisher": "Pearson · Fourth Edition · Books 1–3",
     "role": "د لکچر اورېدل، یادښت اخیستل او بحث",
     "intro": "د Pearson دغه لړۍ د اکاډمیکو لکچرونو پر بنسټ د اورېدو، مهمو ټکو د پېژندلو، منظم یادښت اخیستلو او د اورېدلو معلوماتو د بحث مهارتونه پیاوړي کوي.",
     "points": [
@@ -546,7 +540,7 @@ const V2_EAP={
    },
    {
     "title": "Longman Academic Writing Series",
-    "publisher": "Pearson · Academic Writing",
+    "publisher": "Pearson · Refreshed release with digital resources",
     "role": "اکاډمیکه لیکنه او مقاله‌لیکنه",
     "intro": "د Pearson دا لړۍ له جملې او پاراګراف څخه تر منظمې مقالې پورې د لیکنې پړاوونه تدریسوي او پر پلان جوړولو، ژبني دقت، د متن جوړښت او بیاکتنې تمرکز کوي.",
     "points": [
@@ -577,7 +571,7 @@ const V2_EAP={
    ],
    [
     "ایا په هره کچه کې درې کتابونه تدریسېږي؟",
-    "هو. په EAP 1 کې ACTIVE Skills for Reading 1، Contemporary Topics 1 او Longman Academic Writing 1 تدریسېږي. په EAP 2، EAP 3 او EAP 4 کې په ترتیب د همدې دریو لړیو دویم، درېیم او څلورم کتابونه کارول کېږي. د کتابونو دقیق چاپ له ادارې وپوښتئ."
+    "هو. په هره کچه درې درسي لړۍ کارول کېږي. د ACTIVE Skills for Reading او Longman Academic Writing کتابونه له ۱ تر ۴ پورې دي؛ د Contemporary Topics څلورمه چاپي بڼه یوازې ۱ تر ۳ کتابونه لري. د EAP 4 اړوند کتاب د نصاب له مخې ټاکل کېږي."
    ],
    [
     "ایا د ۲٬۰۰۰ افغانیو فیس د کتابونو بیه هم رانغاړي؟",
@@ -610,8 +604,8 @@ const V2_EAP={
 
 function v2AcademicEnglishPage(locale,cms){
  const c=V2_EAP[locale],site=V2_COPY[locale],p=v2Prefix(locale),route=p+"courses/academic-english/";
- const title=locale==="en"?"Academic English (EAP) in Kabul | Four Levels & Tuition | The TOEFL House":locale==="fa"?"انگلیسی اکادمیک EAP در کابل | چهار لول، سه کتاب و فیس | تافل هوس":"اکاډمیکه انګلیسي EAP | څلور لولونه او فیس | تافل هوس";
- const desc=locale==="en"?"EAP 1–4 at The TOEFL House: four two-month levels; three instructors, three textbook series per level. AFN 1,000/month, AFN 2,000/level. Free assessment.":locale==="fa"?"EAP تافل هوس: چهار لول دوماهه، سه استاد و سه کتاب در هر لول. فیس ماهانه ۱٬۰۰۰ و هر لول ۲٬۰۰۰ افغانی؛ تعیین سطح رایگان.":"EAP د تافل هوس څلور دوه میاشتني لولونه، په هر لول کې درې ښوونکي او درې کتابونه. میاشتنی فیس ۱٬۰۰۰ او د هر لول فیس ۲٬۰۰۰ افغانۍ.";
+ const title=locale==="en"?"Academic English (EAP) in Kabul | Four Levels & Tuition | The TOEFL House":locale==="fa"?"انگلیسی اکادمیک EAP در کابل | چهار سطح، سه مجموعهٔ درسی و فیس | تافل هوس":"اکاډمیکه انګلیسي EAP | څلور لولونه او فیس | تافل هوس";
+ const desc=locale==="en"?"EAP 1–4 at The TOEFL House: four two-month levels; three instructors, three textbook series per level. AFN 1,000/month, AFN 2,000/level. Free assessment.":locale==="fa"?"EAP تافل هوس: چهار سطح دوماهه، سه استاد و سه مجموعهٔ درسی در هر سطح. فیس ماهانه ۱٬۰۰۰ افغانی؛ تعیین سطح رایگان.":"EAP د تافل هوس څلور دوه میاشتني کچې، په هره کچه درې ښوونکي او درې درسي لړۍ لري. میاشتنی فیس ۱٬۰۰۰ او د هرې کچې فیس ۲٬۰۰۰ افغانۍ.";
  const schema=[{"@context":"https://schema.org","@type":"Course","name":"English for Academic Purposes (EAP)","description":desc,"courseCode":"EAP","educationalLevel":"EAP 1–EAP 4","provider":{"@type":"EducationalOrganization","name":"The TOEFL House","url":V2_ORIGIN+"/"},"url":V2_ORIGIN+route},{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"The TOEFL House","item":V2_ORIGIN+p},{"@type":"ListItem","position":2,"name":"English for Academic Purposes","item":V2_ORIGIN+route}]}];
  const heading=v2SubpageHead(locale,route,title,desc,schema),apply=p+"admissions/?program=academic-english";
  const feeMonth=locale==="en"?"AFN 1,000":locale==="fa"?"۱٬۰۰۰ افغانی":"۱٬۰۰۰ افغانۍ";
