@@ -746,3 +746,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
  .editorial-guides .growth-article>p:first-child{font-size:18px}
  .editorial-guides .growth-cta{padding:24px 20px}
 }
+
+/* Entire program tile is a tap target; the single link keeps keyboard semantics. */
+.course-card{position:relative}
+.course-bottom a::after{content:"";position:absolute;inset:0}
