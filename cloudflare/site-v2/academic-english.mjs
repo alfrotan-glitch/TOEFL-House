@@ -49,7 +49,7 @@ const V2_EAP={
   ],
   "pathLabel": "THE FOUR-LEVEL PATH",
   "pathTitle": "Four levels. A structured academic progression.",
-  "pathIntro": "Each level lasts two months and combines academic reading, lecture listening, discussion and writing. ACTIVE Skills for Reading and Longman Academic Writing progress from Books 1–4. Pearson's Contemporary Topics Fourth Edition has Books 1–3; materials for EAP 4 are determined by the school's academic curriculum.",
+  "pathIntro": "Each level lasts two months and teaches reading, listening, discussion and writing. ACTIVE and Longman use Books 1–4. Contemporary Topics Fourth Edition offers Books 1–3; the school assigns EAP 4 materials.",
   "levels": [
    {
     "title": "EAP 1",
@@ -114,7 +114,7 @@ const V2_EAP={
   ],
   "booksLabel": "THREE CORE TEXTBOOK SERIES",
   "booksTitle": "Three complementary textbooks. One integrated pathway.",
-  "booksIntro": "Three textbook series support every EAP level: ACTIVE Skills for Reading (Third Edition), Contemporary Topics (Fourth Edition) and the refreshed Longman Academic Writing Series. Book numbers should not be confused with edition numbers.",
+  "booksIntro": "Three series: ACTIVE Skills for Reading (Third Edition), Contemporary Topics (Fourth Edition), and updated Longman Academic Writing. Edition and book numbers are different.",
   "books": [
    {
     "title": "ACTIVE Skills for Reading",
@@ -249,7 +249,7 @@ const V2_EAP={
   ],
   "pathLabel": "ساختار چهار سطح EAP",
   "pathTitle": "چهار سطح؛ یک مسیر منظم برای پیشرفت اکادمیک.",
-  "pathIntro": "هر سطح دو ماه دوام می‌کند و سه استاد در تدریس آن سهم دارند. برنامه شامل خواندن و واژگان، شنیدن و مکالمه، و نگارش اکادمیک است. کتاب‌های ACTIVE Skills for Reading و Longman Academic Writing از شمارهٔ ۱ تا ۴ پیش می‌روند. برای Contemporary Topics از ویرایش چهارم ناشر استفاده می‌شود که کتاب‌های شمارهٔ ۱ تا ۳ دارد؛ کتاب مورد استفاده در سطح چهارم بر اساس نصاب مرکز مشخص می‌شود.",
+  "pathIntro": "هر سطح دو ماه دوام می‌کند و سه استاد دارد. ACTIVE Skills for Reading و Longman Academic Writing از کتاب ۱ تا ۴ پیش می‌روند. Contemporary Topics در ویرایش چهارم فقط کتاب‌های ۱ تا ۳ دارد؛ مواد سطح چهارم را بخش آموزشی مشخص می‌کند.",
   "levels": [
    {
     "title": "EAP 1",
@@ -314,7 +314,7 @@ const V2_EAP={
   ],
   "booksLabel": "سه مجموعه‌کتاب درسی",
   "booksTitle": "سه مجموعهٔ درسی؛ سه مهارت مکمل.",
-  "booksIntro": "در هر سطح، سه مجموعهٔ درسی استفاده می‌شود: ACTIVE Skills for Reading (ویرایش سوم) برای خواندن و واژگان؛ Contemporary Topics (ویرایش چهارم) برای شنیدن لکچر، نوت‌برداری و بحث؛ و Longman Academic Writing (نسخهٔ به‌روزشدهٔ ناشر) برای نگارش اکادمیک. شمارهٔ ویرایش را نباید با شمارهٔ کتاب اشتباه گرفت.",
+  "booksIntro": "سه مجموعهٔ درسی استفاده می‌شود: ACTIVE Skills for Reading (ویرایش سوم) برای خواندن و واژگان؛ Contemporary Topics (ویرایش چهارم) برای شنیدن و بحث؛ و Longman Academic Writing (نسخهٔ به‌روزشده) برای نگارش. شمارهٔ کتاب و شمارهٔ ویرایش متفاوت‌اند.",
   "books": [
    {
     "title": "ACTIVE Skills for Reading",
@@ -371,7 +371,7 @@ const V2_EAP={
    ],
    [
     "آیا در هر سطح هر سه کتاب تدریس می‌شود؟",
-    "بلی. در هر سطح از هر سه مجموعهٔ درسی استفاده می‌شود. ACTIVE Skills for Reading و Longman Academic Writing مطابق کتاب‌های ۱ تا ۴ پیش می‌روند. Contemporary Topics در ویرایش چهارم کتاب‌های ۱ تا ۳ دارد؛ کتاب و مواد درسی سطح چهارم را بخش آموزشی تافل هوس مشخص می‌کند."
+    "بلی. هر سطح از سه مجموعه استفاده می‌کند. شمارهٔ کتاب‌های ACTIVE Skills for Reading و Longman Academic Writing از ۱ تا ۴ است. Contemporary Topics در ویرایش چهارم فقط سه کتاب دارد؛ مواد EAP 4 را بخش آموزشی تعیین می‌کند."
    ],
    [
     "آیا فیس ۲٬۰۰۰ افغانی شامل قیمت کتاب‌ها نیز است؟",
@@ -449,7 +449,7 @@ const V2_EAP={
   ],
   "pathLabel": "د EAP څلور کچې",
   "pathTitle": "څلور کچې؛ د اکاډمیک پرمختګ منظم بهیر.",
-  "pathIntro": "هره کچه دوه میاشتې دوام کوي او درې ښوونکي یې تدریس کوي. د ACTIVE Skills for Reading او Longman Academic Writing کتابونه له لومړي تر څلورم پورې دي. د Contemporary Topics څلورمه چاپي بڼه یوازې لومړی، دویم او درېیم کتابونه لري؛ د EAP 4 اړوند مواد د مرکز د نصاب له مخې ټاکل کېږي.",
+  "pathIntro": "هره کچه دوه میاشتې او درې ښوونکي لري. د ACTIVE او Longman کتابونه له ۱ تر ۴ پورې دي. د Contemporary Topics څلورمه چاپي بڼه یوازې کتابونه ۱ تر ۳ لري؛ د EAP 4 مواد د مرکز نصاب ټاکي.",
   "levels": [
    {
     "title": "EAP 1",
@@ -514,7 +514,7 @@ const V2_EAP={
   ],
   "booksLabel": "درې اساسي درسي لړۍ",
   "booksTitle": "درې بشپړوونکي کتابونه؛ د اکاډمیکې ژبې درې برخې.",
-  "booksIntro": "په هره کچه درې درسي لړۍ کارول کېږي: ACTIVE Skills for Reading (درېیمه چاپي بڼه)، Contemporary Topics (څلورمه چاپي بڼه) او د Longman Academic Writing تازه شوې لړۍ. د چاپ شمېره د کتاب له شمېرې سره مه ګډوئ.",
+  "booksIntro": "درې درسي لړۍ: ACTIVE Skills for Reading (درېیم چاپ)، Contemporary Topics (څلورم چاپ)، او تازه شوی Longman Academic Writing. د چاپ او کتاب شمېره توپیر لري.",
   "books": [
    {
     "title": "ACTIVE Skills for Reading",
