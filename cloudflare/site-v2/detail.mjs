@@ -34,7 +34,7 @@ function v2CoursePage(locale,cms,id){
  const geSeo={
   en:{title:"General English in Kabul | Got it! & Speaking | The TOEFL House",description:"Five General English stages with two instructors, Oxford Got it! textbooks and a dedicated Speaking chapter. AFN 500 per month; free placement."},
   fa:{title:"انگلیسی عمومی در کابل | پنج سطح و کتاب‌های Got it! | تافل هوس",description:"برنامهٔ General English تافل هوس: پنج سطح، دو استاد، کتاب‌های Got it!، بخش ویژهٔ مکالمه (Speaking) و فیس ماهانه ۵۰۰ افغانی. تعیین سطح رایگان."},
-  ps:{title:"عمومي انګلیسي | پنځه کچې، Got it! او Speaking | تافل هوس",description:"د تافل هوس General English پروګرام: پنځه کچې، دوه استادان، د Got it! کتابونه او د Speaking ځانګړی څپرکی. میاشتنی فیس ۵۰۰ افغانۍ او د سویې معلومول وړیا."}
+  ps:{title:"عمومي انګلیسي | پنځه کچې، Got it! او Speaking | تافل هوس",description:"د تافل هوس General English پروګرام: پنځه کچې، دوه ښوونکي، د Got it! کتابونه او د Speaking ځانګړی څپرکی. میاشتنی فیس ۵۰۰ افغانۍ او د سویې معلومول وړیا."}
  };
  const meta=id==="general-english"?geSeo[locale]:null;
  const head=v2SubpageHead(locale,route,meta?meta.title:title+" | The TOEFL House · Kabul",meta?meta.description:program.summary||title,structured);
