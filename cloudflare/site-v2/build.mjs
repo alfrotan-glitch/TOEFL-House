@@ -10,7 +10,7 @@ const generalEnglish=await readFile(join(here,"general-english.mjs"),"utf8");
 const academicEnglishSource=await readFile(join(here,"academic-english.mjs"),"utf8");
 // Keep the three-language editorial source readable in Git, but compact its
 // static JSON data in the deployed Worker to stay below the safe Pages budget.
-const eapDataPattern=/const V2_EAP=(\\{[\\s\\S]*?\\n\\});/;
+const eapDataPattern=/const V2_EAP=(\{[\s\S]*?\n\});/;
 if(!eapDataPattern.test(academicEnglishSource))throw Error("EAP data shape changed; refusing unsafe build");
 const academicEnglish=academicEnglishSource.replace(eapDataPattern,(_,json)=>"const V2_EAP="+JSON.stringify(JSON.parse(json))+";");
 const css=await readFile(join(here,"site.css"),"utf8");
