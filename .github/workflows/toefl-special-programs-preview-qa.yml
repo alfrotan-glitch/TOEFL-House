@@ -9,7 +9,7 @@ on:
       preview_url:
         description: 'Read-only Cloudflare Pages preview URL to verify'
         required: false
-        default: 'https://4235e5bd.the-toefl-house.pages.dev'
+        default: 'https://c4a0365c.the-toefl-house.pages.dev'
 
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 14
     env:
-      TH_SPECIAL_PREVIEW: ${{ inputs.preview_url || 'https://4235e5bd.the-toefl-house.pages.dev' }}
+      TH_SPECIAL_PREVIEW: ${{ inputs.preview_url || 'https://c4a0365c.the-toefl-house.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
