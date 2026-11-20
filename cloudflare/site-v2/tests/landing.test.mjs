@@ -483,3 +483,29 @@ test("Public pages expose canonical branded social previews in EN, Dari and Pash
   }
  }
 });
+
+test("Known retired anchors use current admissions, while unknown fragments never hijack visitors",async()=>{
+ const {runInNewContext}=await import("node:vm");
+ const client=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.js"),env());
+ const source=await client.text();
+ function visit(pathname,hash,hasTarget=false){
+  const redirects=[];
+  const location={pathname,hash,search:"",replace(value){redirects.push(value)}};
+  const menu={querySelectorAll(){return []},open:false,contains(){return true}};
+  const document={
+   querySelector(selector){return selector===".mobile-menu"?menu:null},
+   getElementById(id){return hasTarget&&id===hash.slice(1)?{}:null},
+   addEventListener(){}
+  };
+  runInNewContext(source,{location,document,URLSearchParams,decodeURIComponent,sessionStorage:{setItem(){},getItem(){return null}}});
+  return redirects;
+ }
+ for(const root of ["/","/fa/","/ps/"]){
+  assert.deepEqual(visit(root,"#start"),[root+"admissions/"],root+" should restore admissions");
+  assert.deepEqual(visit(root,"#advisor"),[root+"admissions/"],root+" should restore advisor");
+  assert.deepEqual(visit(root,"#th-pathways"),[root+"#programs"],root+" should restore program list");
+  assert.deepEqual(visit(root,"#new-campaign"),[],root+" unknown anchor must remain");
+  assert.deepEqual(visit(root,"#start",true),[],root+" existing section must remain");
+  assert.deepEqual(visit(root+"courses/academic-english/","#start"),[],root+" subpage fragment must remain");
+ }
+});
