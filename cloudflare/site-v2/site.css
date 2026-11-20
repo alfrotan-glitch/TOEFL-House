@@ -712,7 +712,7 @@ html[dir=rtl] .guide-hero h1{font-size:clamp(35px,4.5vw,57px);letter-spacing:0;l
 .editorial-guides .growth-card{display:flex;flex-direction:column;gap:14px;background:#fff;border:1px solid #e6e8e4;border-radius:16px;padding:33px 28px;box-shadow:0 14px 40px #12313d0b;min-height:305px;transition:border-color .2s,transform .2s,box-shadow .2s}
 .editorial-guides .growth-card:hover,.editorial-guides .growth-card:focus-visible{border-color:#ac2945;box-shadow:0 18px 55px #12313d16;transform:translateY(-3px)}
 .editorial-guides .growth-card small{color:#a0213f;font-size:13px;font-weight:800;line-height:1.5}
-.editorial-guides .growth-card strong{color:#15333d;font-size:22px;line-height:1.55}
+.editorial-guides .growth-card h2{color:#15333d;font-size:22px;line-height:1.55;margin:0;font-weight:800}
 .editorial-guides .growth-card p{font-size:16px;line-height:1.85;color:#405961;margin:0 0 14px}
 .editorial-guides .growth-card .growth-arrow{margin-top:auto;font-size:15px;font-weight:800;color:#a8213c;min-height:44px;display:flex;align-items:center}
 .editorial-guides .growth-article{max-width:850px;margin:0 auto;color:#304a54;font-size:17px;line-height:2}
@@ -741,7 +741,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
  .guide-body{padding:42px 0 70px}
  .editorial-guides .growth-card-grid{grid-template-columns:1fr}
  .editorial-guides .growth-card{min-height:0;padding:26px 23px}
- .editorial-guides .growth-card strong{font-size:21px}
+ .editorial-guides .growth-card h2{font-size:21px}
  .editorial-guides .growth-article,.editorial-guides .growth-article p,.editorial-guides .growth-article li{font-size:16px;line-height:1.95}
  .editorial-guides .growth-article>p:first-child{font-size:18px}
  .editorial-guides .growth-cta{padding:24px 20px}
