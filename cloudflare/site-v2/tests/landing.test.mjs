@@ -577,7 +577,7 @@ test("TOEFL 2026 course describes all current ETS tasks, four months, and 1–6 
   assert.doesNotMatch(html,/"price":"2000"/,root+" must not invent TOEFL Preparation tuition");
   assert.ok(html.includes('href="'+root+'admissions/?program=toefl-preparation"'));
   assert.ok(html.includes('<meta property="og:url" content="'+url+'">'));
-  assert.equal((html.match(/<details/g)||[]).length,5,"must answer five current exam questions");
+  assert.equal((html.match(/class="eap-faq-plus"/g)||[]).length,5,"must answer five current exam questions");
  }
 });
 
