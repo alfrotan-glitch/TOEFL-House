@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      TH_EAP_URL: ${{ inputs.target_url || 'https://d627d7c2.the-toefl-house.pages.dev' }}
+      TH_EAP_URL: ${{ inputs.target_url || 'https://7e6c3612.the-toefl-house.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
