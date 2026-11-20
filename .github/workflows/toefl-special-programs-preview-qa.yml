@@ -1,0 +1,39 @@
+name: TOEFL House — Special Speaking & TOEFL preview browser acceptance
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/toefl-special-programs-preview-qa.yml'
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: 'Read-only Cloudflare Pages preview URL to verify'
+        required: false
+        default: 'https://4235e5bd.the-toefl-house.pages.dev'
+
+permissions:
+  contents: read
+
+jobs:
+  preview-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      TH_SPECIAL_PREVIEW: ${{ inputs.preview_url || 'https://4235e5bd.the-toefl-house.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated browser and accessibility tester
+        run: npm install --prefix /tmp/toefl-special-preview --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Audit two programs, three languages, mobile and desktop, CMS and previous tools
+        run: node cloudflare/site-v2/special-programs-preview-acceptance.cjs
+      - name: Preserve screenshot proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: special-programs-preview-screenshots
+          path: /tmp/toefl-special-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 14
