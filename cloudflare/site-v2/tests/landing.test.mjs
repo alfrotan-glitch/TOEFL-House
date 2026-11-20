@@ -406,10 +406,14 @@ test("EAP four levels retain three series while distinguishing publisher edition
    }
    assert.ok(block.includes("Third Edition"),lang+" needs Cengage verified third edition");
    assert.ok(block.includes("Updated release"),lang+" needs Longman updated release");
+   assert.ok(block.includes(["2nd Edition","3rd Edition","4th Edition","5th Edition"][i-1]),lang+" must show current Longman edition for EAP "+i);
    assert.ok(block.includes("Contemporary Topics"),lang+" needs Contemporary Topics series");
    assert.ok(block.includes("Fourth Edition"),lang+" needs Pearson fourth edition");
    if(i<=3)assert.ok(block.includes("Contemporary Topics "+i),lang+" Pearson published books 1 to 3");
-   else assert.ok(!block.includes("Contemporary Topics 4"),lang+" must not invent a publisher book 4");
+   else {
+    assert.ok(!block.includes("Contemporary Topics 4"),lang+" must not invent a publisher book 4");
+    assert.ok(block.includes('class="eap-fourth-note"'),lang+" must explain EAP4 book selection in the page language");
+   }
    assert.equal((block.match(/<li dir="ltr">/g)||[]).length,3,lang+" must show precisely three assigned books per EAP level");
   }
   assert.match(html,/Reading|خواندن|لوستل/);
