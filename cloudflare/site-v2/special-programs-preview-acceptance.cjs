@@ -1,11 +1,12 @@
-/* Safe read-only acceptance for the 2026-11-20 special-programme preview.
+/* Safe read-only acceptance for the 2026-11-20 special-programme release.
  * Never submits forms, sends WhatsApp messages or modifies CMS data.
  */
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const {chromium}=require("/tmp/toefl-special-preview/node_modules/playwright-core");
 const axe=require("/tmp/toefl-special-preview/node_modules/axe-core");
-const base=(process.env.TH_SPECIAL_PREVIEW||"https://4235e5bd.the-toefl-house.pages.dev").replace(/\/$/,"");
+const base=(process.env.TH_SPECIAL_PREVIEW||"https://the-toefl-house.pages.dev").replace(/\/$/,"");
+const isPreview=new URL(base).hostname!=="the-toefl-house.pages.dev";
 const languages=[["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","ps-AF","rtl"]];
 const screenshotDir="/tmp/toefl-special-evidence";
 fs.mkdirSync(screenshotDir,{recursive:true});
@@ -23,7 +24,8 @@ fs.mkdirSync(screenshotDir,{recursive:true});
      const route=root+"courses/"+slug+"/";
      const response=await page.goto(base+route,{waitUntil:"networkidle",timeout:40000});
      assert.equal(response.status(),200,route);
-     assert.match(response.headers()["x-robots-tag"]||"",/noindex/,route+" preview must be noindex");
+     if(isPreview)assert.match(response.headers()["x-robots-tag"]||"",/noindex/,route+" preview must be noindex");
+     else assert.ok(!/noindex/i.test(response.headers()["x-robots-tag"]||""),route+" production must be indexable");
      const detail=await page.evaluate(()=>{
       const html=document.documentElement;
       const anchors=[...document.querySelectorAll(".eap-actions a")].map(a=>a.getAttribute("href"));
