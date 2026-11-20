@@ -1,4 +1,4 @@
-name: TOEFL House — Special Speaking & TOEFL preview browser acceptance
+name: TOEFL House — Special Speaking & TOEFL release browser acceptance
 on:
   push:
     branches: [main]
@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       preview_url:
-        description: 'Read-only Cloudflare Pages preview URL to verify'
+        description: 'Cloudflare Pages preview or canonical URL to verify'
         required: false
-        default: 'https://c4a0365c.the-toefl-house.pages.dev'
+        default: 'https://the-toefl-house.pages.dev'
 
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 14
     env:
-      TH_SPECIAL_PREVIEW: ${{ inputs.preview_url || 'https://c4a0365c.the-toefl-house.pages.dev' }}
+      TH_SPECIAL_PREVIEW: ${{ inputs.preview_url || 'https://the-toefl-house.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +33,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: special-programs-preview-screenshots
+          name: special-programs-release-screenshots
           path: /tmp/toefl-special-evidence/*.png
           if-no-files-found: warn
           retention-days: 14
