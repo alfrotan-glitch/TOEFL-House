@@ -1,7 +1,7 @@
 name: EAP academic program — three-language browser acceptance
 on:
   push:
-    branches: [main, eap-curriculum-and-semester-campaign-1405]
+    branches: [main, eap-curriculum-and-semester-campaign-1405, editorial-trilingual-2026-11-20]
     paths:
       - 'cloudflare/site-v2/**'
       - '.github/workflows/eap-browser.yml'
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      TH_EAP_URL: ${{ inputs.target_url || (github.ref_name == 'main' && 'https://the-toefl-house.pages.dev' || 'https://7e6c3612.the-toefl-house.pages.dev') }}
+      TH_EAP_URL: ${{ inputs.target_url || (github.ref_name == 'main' && 'https://the-toefl-house.pages.dev' || (github.ref_name == 'editorial-trilingual-2026-11-20' && 'https://ae6b8ef5.the-toefl-house.pages.dev' || 'https://7e6c3612.the-toefl-house.pages.dev')) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
