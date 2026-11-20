@@ -391,7 +391,7 @@ test("New semester billboard promotes the EAP page directly on all three homepag
  }
 });
 
-test("EAP 1–4 explicitly assigns all three matching volume numbers to the four school levels",async()=>{
+test("EAP four levels retain three series while distinguishing publisher editions and book numbers",async()=>{
  for(const lang of ["/","/fa/","/ps/"]){
   const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+lang+"courses/academic-english/"),env());
   assert.equal(response.status,200);
@@ -401,9 +401,15 @@ test("EAP 1–4 explicitly assigns all three matching volume numbers to the four
   for(let i=1;i<=4;i++){
    const block=sections[i-1][1];
    assert.match(block,new RegExp('EAP '+i));
-   for(const name of ["ACTIVE Skills for Reading","Contemporary Topics","Longman Academic Writing"]){
+   for(const name of ["ACTIVE Skills for Reading","Longman Academic Writing"]){
     assert.ok(block.includes(name+" "+i),lang+" "+name+" does not match EAP "+i);
    }
+   assert.ok(block.includes("Third Edition"),lang+" needs Cengage verified third edition");
+   assert.ok(block.includes("Updated release"),lang+" needs Longman updated release");
+   assert.ok(block.includes("Contemporary Topics"),lang+" needs Contemporary Topics series");
+   assert.ok(block.includes("Fourth Edition"),lang+" needs Pearson fourth edition");
+   if(i<=3)assert.ok(block.includes("Contemporary Topics "+i),lang+" Pearson published books 1 to 3");
+   else assert.ok(!block.includes("Contemporary Topics 4"),lang+" must not invent a publisher book 4");
    assert.equal((block.match(/<li dir="ltr">/g)||[]).length,3,lang+" must show precisely three assigned books per EAP level");
   }
   assert.match(html,/Reading|خواندن|لوستل/);
