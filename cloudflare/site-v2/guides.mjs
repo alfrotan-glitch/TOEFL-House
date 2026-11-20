@@ -44,7 +44,7 @@ async function v2Guides(request,env,locale,slug){
  // Guide cards must expose actual headings, not only bold text.
  if(!isArticle)body=body.replace(/<strong>([^<]+)<\/strong>/g,'<h2>$1</h2>');
  const top=v2SubpageHead(locale,route,title+" | The TOEFL House",description,[record,breadcrumbs]);
- const crumb='<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="'+p+'">'+v2T(site.name)+'</a><span aria-hidden="true">/</span>'+(isArticle?'<a href="'+p+'guides/">'+v2T(ui.back)+'</a><span aria-hidden="true">/</span><span aria-current="page">'+v2T(title)+'</span>':'<span aria-current="page">'+v2T(ui.back)+'</span>')+'</nav>';
+ const crumb='<nav class="breadcrumbs" aria-label="'+v2T(v2BreadcrumbLabel(locale))+'"><a href="'+p+'">'+v2T(site.name)+'</a><span aria-hidden="true">/</span>'+(isArticle?'<a href="'+p+'guides/">'+v2T(ui.back)+'</a><span aria-hidden="true">/</span><span aria-current="page">'+v2T(title)+'</span>':'<span aria-current="page">'+v2T(ui.back)+'</span>')+'</nav>';
  const page=top+'<main id="main" class="editorial-guides"><section class="guide-hero"><div class="shell">'+crumb+'<p class="eyebrow">'+v2T(ui.section)+'</p><h1>'+v2T(title)+'</h1><p>'+v2T(description)+'</p></div></section><section class="guide-body"><div class="shell">'+body+'</div></section></main>'+v2Footer(site,locale,cms);
  return v2SubpageResponse(request,page,locale);
 }
