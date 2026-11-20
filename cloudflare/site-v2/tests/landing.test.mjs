@@ -454,3 +454,17 @@ test("Public CMS endpoint rejects protected fields and never leaks drafts",async
  assert.equal(normal.status,200);
  assert.equal(JSON.stringify(main)+JSON.stringify(ps),before,"GET may not mutate CMS fixtures");
 });
+
+test("Language selector labels and textbook pronunciation are accessible in all three languages",async()=>{
+ for(const [path,label] of [["/","Choose language"],["/fa/","انتخاب زبان"],["/ps/","ژبه وټاکئ"]]){
+  const home=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  assert.equal(home.status,200);
+  const html=await home.text();
+  assert.ok(html.includes('class="language-links" role="group" aria-label="'+label+'">'),path+" chooser has invalid accessible label");
+  const academic=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path+"courses/academic-english/"),env());
+  assert.equal(academic.status,200);
+  const eapHtml=await academic.text();
+  assert.match(eapHtml,/<li dir="ltr" lang="en">ACTIVE Skills for Reading 1/);
+  assert.match(eapHtml,/<h3 dir="ltr" lang="en">ACTIVE Skills for Reading/);
+ }
+});
