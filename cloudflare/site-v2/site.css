@@ -595,3 +595,154 @@ html[dir=rtl] .eap-hero-copy h1{font-size:clamp(35px,4vw,55px);letter-spacing:-.
 .eap-assigned-books ul{list-style:none;display:grid;gap:7px;margin:9px 0 0;padding:0}
 .eap-assigned-books li{position:relative;color:#223b43;font-size:12px;line-height:1.7;padding:0 0 0 16px;text-align:left;overflow-wrap:anywhere}
 .eap-assigned-books li:before{content:"•";position:absolute;left:0;color:#ac2845}
+
+
+/* 2026 editorial accessibility pass — deliberate type scale, generous controls,
+   native Afghan Dari/Pashto reading rhythm and consistent brand presentation. */
+:root{--reading:#314a54;--on-paper:#152f38;--surface:#fff;--focus-ring:#b2223e}
+body{font-size:16px}
+a,button,summary,select{touch-action:manipulation}
+a:focus-visible,button:focus-visible,select:focus-visible,summary:focus-visible,input:focus-visible{outline:3px solid var(--focus-ring);outline-offset:3px}
+.language-links a{min-width:43px;min-height:43px;font-size:12px;color:#364950}
+.language-links a.is-active{color:#18313c;box-shadow:0 2px 8px #102e3319}
+.main-nav a{font-size:13px;padding-block:12px}
+.topline{font-size:12px}
+.desktop-apply{min-height:46px;font-size:13px}
+.button-xl{font-size:15px;min-height:52px}
+.button-light,.button-white{font-size:14px}
+.hero-lead{font-size:17px;line-height:1.85;color:#364d55}
+.hero-fine{font-size:13px;line-height:1.7;color:#435b62}
+.section-intro{font-size:15px;line-height:1.9;color:#405961}
+.course-card{border-radius:13px;min-height:290px;box-shadow:0 9px 35px #142d3509}
+.course-card:focus-within{border-color:#ba3551;box-shadow:0 0 0 2px #ba35512a}
+.course-card h3{font-size:21px;line-height:1.5}
+.course-copy{font-size:15px;line-height:1.8;color:#415961;max-width:100%}
+.course-bottom{gap:14px}
+.course-bottom small{font-size:12px;color:#52646a}
+.course-bottom strong{font-size:13px;color:#314950}
+.course-bottom a{font-size:14px;min-height:44px;display:inline-flex;align-items:center;gap:5px;white-space:normal;line-height:1.4}
+.course-featured .course-copy{color:#f1f6f4}
+.course-featured .course-bottom small{color:#d2e1e1}
+.course-featured .course-bottom strong{color:#fff}
+.stat-head p,.stat-item span{font-size:13px;color:#485d62}
+.online-copy p:not(.eyebrow){font-size:15px;color:#e7eeee}
+.faq-list summary,.faq-list details p{font-size:15px;line-height:1.8}
+.footer-brand p{font-size:15px;color:#d0dde0}
+.footer-hours{font-size:13px;color:#e2eaea}
+.footer-links a{font-size:14px;line-height:1.55;min-height:40px;display:inline-flex;align-items:center}
+.footer-bottom{font-size:12px;line-height:1.6}
+.detail-intro>p{font-size:17px;line-height:1.85;color:#3f5760}
+.detail-disclaimer{font-size:14px;color:#4f626a}
+.detail-small-label,.detail-summary-head span{font-size:13px}
+.detail-summary li,.detail-info p,.detail-aside p{font-size:15px;line-height:1.8}
+.detail-longcopy{font-size:17px;line-height:2.05;color:#304950}
+.admissions-copy>p:not(.eyebrow){font-size:17px;line-height:1.9;color:#415961}
+.admissions-benefits span,.form-privacy{font-size:14px;line-height:1.85}
+.admissions-formbox label{font-size:15px}
+.admissions-formbox select{min-height:52px;font-size:16px}
+.form-submit{min-height:52px;font-size:15px}
+.eap-lead,.eap-mission-grid>p,.eap-teachers p:not(.eyebrow){font-size:17px;line-height:1.95}
+.eap-goal p,.eap-level p,.eap-book p{font-size:15px;line-height:1.85}
+.eap-heading>p:not(.eyebrow){font-size:16px;line-height:1.9}
+.eap-fact span{font-size:14px;line-height:1.7}
+.eap-level li li,.eap-book li{font-size:14px;line-height:1.85}
+.eap-book-skill{font-size:13px}
+.eap-publisher{font-size:12px!important;line-height:1.6!important;color:#465e63!important}
+.eap-hero-note,.eap-fee-note,.eap-bottom p:not(.eyebrow){font-size:14px;line-height:1.85}
+.eap-faq-list summary,.eap-faq-list details p{font-size:15px;line-height:1.85}
+.eap-assigned-books>span{font-size:14px}
+.eap-assigned-books li{font-size:14px;line-height:1.65}
+.eap-level-top span{font-size:13px}
+.eap-bottom-link{font-size:15px;min-height:44px;display:inline-flex;align-items:center}
+.ge-section p,.ge-section li{line-height:1.85}
+.ge-section .ge-stage p,.ge-section .ge-panel p,.ge-section .ge-faq p{font-size:15px}
+.ge-section .ge-note,.ge-section .ge-fee-note{font-size:14px}
+.ge-cta .button{font-size:14px;min-height:48px}
+html[dir=rtl] .hero h1,html[dir=rtl] .section-head h2{letter-spacing:0}
+html[dir=rtl] .course-card h3{letter-spacing:0}
+html[dir=rtl] .course-copy,html[dir=rtl] .eap-goal p,html[dir=rtl] .eap-level p,html[dir=rtl] .eap-book p{line-height:2.05}
+html[dir=rtl] .eap-level li li,html[dir=rtl] .eap-book li{line-height:2}
+@media(max-width:760px){
+ .shell{width:min(100% - 36px,1180px)}
+ .hero-lead{font-size:16px;line-height:1.95}
+ .hero-fine{font-size:13px}
+ .course-card{min-height:0;padding:24px 22px}
+ .course-card h3{font-size:20px}
+ .course-copy{font-size:15px;margin-bottom:18px;line-height:1.8}
+ .course-bottom{display:flex;align-items:flex-end}
+ .course-bottom a{font-size:14px;min-height:44px}
+ .course-bottom strong{font-size:13px}
+ .course-bottom small{font-size:12px}
+ .language-links a{min-width:42px;min-height:42px}
+ .mobile-menu summary{min-width:46px;min-height:46px}
+ .eap-fact{padding:20px 16px}
+ .eap-fact strong{font-size:21px}
+ .eap-fact span{font-size:14px}
+ .eap-goal p,.eap-level p,.eap-book p{font-size:15px}
+ .eap-level li li,.eap-book li,.eap-assigned-books li{font-size:14px}
+ .eap-lead{font-size:16px}
+ .eap-hero-note,.eap-fee-note{font-size:14px}
+ .eap-faq-list summary,.eap-faq-list details p{font-size:15px}
+ .eap-hero-copy h1{font-size:clamp(30px,7.8vw,38px)!important}
+ .admissions-copy>p:not(.eyebrow){font-size:16px}
+ .detail-intro>p,.detail-longcopy{font-size:16px}
+ .footer-links a{min-height:44px}
+}
+@media(max-width:460px){
+ .course-card{padding:22px 20px}
+ .course-copy{font-size:15px}
+ .eap-fact{padding:16px 14px}
+ .eap-fact span{font-size:14px}
+ .eap-fact strong{font-size:21px}
+ .eap-book h3{font-size:21px}
+}
+
+/* Unified editorial guides: retain original educational articles, share the V2
+   layout, branding, navigation, typography, security and language switcher. */
+.editorial-guides{background:#fff;color:#17333c}
+.guide-hero{background:linear-gradient(130deg,#faf8f4 0%,#f5f0ec 65%,#f0e2e3 100%);border-bottom:1px solid #e9dedc;padding:38px 0 76px}
+.guide-hero .breadcrumbs{margin-bottom:48px}
+.guide-hero .eyebrow{margin-bottom:13px}
+.guide-hero h1{font-size:clamp(40px,5vw,68px);line-height:1.25;letter-spacing:-.045em;max-width:910px;margin:0 0 22px;font-weight:850}
+html[dir=rtl] .guide-hero h1{font-size:clamp(35px,4.5vw,57px);letter-spacing:0;line-height:1.65}
+.guide-hero p:not(.eyebrow){font-size:18px;line-height:1.9;color:#405760;max-width:790px;margin:0}
+.guide-body{padding:70px 0 95px}
+.editorial-guides .growth-main,.editorial-guides .growth-wrap{width:auto;max-width:none;margin:0;padding:0}
+.editorial-guides .growth-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.editorial-guides .growth-card{display:flex;flex-direction:column;gap:14px;background:#fff;border:1px solid #e6e8e4;border-radius:16px;padding:33px 28px;box-shadow:0 14px 40px #12313d0b;min-height:305px;transition:border-color .2s,transform .2s,box-shadow .2s}
+.editorial-guides .growth-card:hover,.editorial-guides .growth-card:focus-visible{border-color:#ac2945;box-shadow:0 18px 55px #12313d16;transform:translateY(-3px)}
+.editorial-guides .growth-card small{color:#a0213f;font-size:13px;font-weight:800;line-height:1.5}
+.editorial-guides .growth-card h2{color:#15333d;font-size:22px;line-height:1.55;margin:0;font-weight:800}
+.editorial-guides .growth-card p{font-size:16px;line-height:1.85;color:#405961;margin:0 0 14px}
+.editorial-guides .growth-card .growth-arrow{margin-top:auto;font-size:15px;font-weight:800;color:#a8213c;min-height:44px;display:flex;align-items:center}
+.editorial-guides .growth-article{max-width:850px;margin:0 auto;color:#304a54;font-size:17px;line-height:2}
+.editorial-guides .growth-article>p:first-child{font-size:20px;line-height:1.9;color:#233f49;margin-top:0}
+.editorial-guides .growth-article h2{color:#183640;font-size:clamp(24px,2.4vw,32px);line-height:1.5;margin:47px 0 16px;letter-spacing:-.025em}
+html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:1.7}
+.editorial-guides .growth-article p{font-size:17px;line-height:2;margin:0 0 18px}
+.editorial-guides .growth-article ul,.editorial-guides .growth-article ol{padding-inline-start:28px;margin:14px 0 28px}
+.editorial-guides .growth-article li{font-size:17px;line-height:2;padding-block:5px}
+.editorial-guides .growth-article a:not(.growth-action){color:#a31f3b;text-decoration:underline;text-underline-offset:4px}
+.editorial-guides .growth-cta{margin:42px 0;padding:27px 30px;border-radius:15px;background:#f9eff1;border:1px solid #efd9df;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.editorial-guides .growth-cta>div{flex:1 1 280px}
+.editorial-guides .growth-cta strong{display:block;color:#183640;font-size:21px}
+.editorial-guides .growth-cta p{margin:7px 0 0;font-size:15px}
+.editorial-guides .growth-cta a{font-size:14px;line-height:1.5}
+.editorial-guides .growth-action{background:#b02b46;color:#fff;border-radius:7px;padding:13px 20px;min-height:48px;display:inline-flex;align-items:center;font-weight:800}
+.editorial-guides .growth-action:hover{background:#901f37}
+.editorial-guides blockquote{margin:22px 0;padding:14px 22px;border-inline-start:4px solid #b42b46;background:#faf5f4}
+.editorial-guides .growth-article a:focus-visible{outline:3px solid #ab2944;outline-offset:3px}
+@media(max-width:970px){.editorial-guides .growth-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){
+ .guide-hero{padding:26px 0 50px}
+ .guide-hero .breadcrumbs{margin-bottom:26px}
+ .guide-hero h1{font-size:34px}
+ .guide-hero p:not(.eyebrow){font-size:16px}
+ .guide-body{padding:42px 0 70px}
+ .editorial-guides .growth-card-grid{grid-template-columns:1fr}
+ .editorial-guides .growth-card{min-height:0;padding:26px 23px}
+ .editorial-guides .growth-card h2{font-size:21px}
+ .editorial-guides .growth-article,.editorial-guides .growth-article p,.editorial-guides .growth-article li{font-size:16px;line-height:1.95}
+ .editorial-guides .growth-article>p:first-child{font-size:18px}
+ .editorial-guides .growth-cta{padding:24px 20px}
+}

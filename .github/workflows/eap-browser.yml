@@ -1,7 +1,7 @@
 name: EAP academic program — three-language browser acceptance
 on:
   push:
-    branches: [main, eap-curriculum-and-semester-campaign-1405, editorial-trilingual-2026-11-20]
+    branches: [main, eap-curriculum-and-semester-campaign-1405, editorial-trilingual-2026-11-20, global-ux-a11y-guides-20261120]
     paths:
       - 'cloudflare/site-v2/**'
       - '.github/workflows/eap-browser.yml'
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      TH_EAP_URL: ${{ inputs.target_url || (github.ref_name == 'main' && 'https://the-toefl-house.pages.dev' || (github.ref_name == 'editorial-trilingual-2026-11-20' && 'https://ae6b8ef5.the-toefl-house.pages.dev' || 'https://7e6c3612.the-toefl-house.pages.dev')) }}
+      TH_EAP_URL: ${{ inputs.target_url || (github.ref_name == 'main' && 'https://the-toefl-house.pages.dev' || (github.ref_name == 'editorial-trilingual-2026-11-20' && 'https://ae6b8ef5.the-toefl-house.pages.dev' || (github.ref_name == 'global-ux-a11y-guides-20261120' && 'https://00a79910.the-toefl-house.pages.dev' || 'https://7e6c3612.the-toefl-house.pages.dev'))) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,6 +28,8 @@ jobs:
         run: npm install --prefix /tmp/toefl-eap-browser --no-save playwright-core@1.56.0 --silent
       - name: Verify EAP levels, books, fees, academic goals, mobile layout and enrollment
         run: node cloudflare/site-v2/eap-browser.cjs
+      - name: Audit all three languages, guide pages, mobile readability and admissions
+        run: node cloudflare/site-v2/ux-browser.cjs
       - name: Archive EN, Dari and Pashto browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
