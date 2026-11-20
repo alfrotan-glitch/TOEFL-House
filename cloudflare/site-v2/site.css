@@ -748,3 +748,22 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 }
 
 .course-card{position:relative}.course-bottom a::after{content:"";position:absolute;inset:0}
+
+
+/* Special Speaking & 2026 TOEFL: consistent V2 editorial component system. */
+.sp-page .eap-hero{background:linear-gradient(135deg,#fffefa,#f7f1ef 60%,#f0e2e4)}
+.sp-page .eap-hero-visual{background:radial-gradient(circle at 30% 25%,#e55b6c 0,#bb2b46 47%,#78233a 100%);border:1px solid #d67a87;isolation:isolate}
+.sp-page .eap-hero-visual::before{content:"";position:absolute;inset:12%;border:1px solid #ffffff35;border-radius:50%;pointer-events:none}
+.sp-page .eap-hero-visual strong{font-size:clamp(54px,7.6vw,96px);letter-spacing:-.065em;line-height:1.1;max-width:95%;overflow-wrap:anywhere}
+.sp-page .eap-visual-kicker,.sp-page .eap-visual-small,.sp-page .eap-visual-number{color:#fff}
+.sp-page .eap-goal,.sp-page .eap-book{min-width:0}
+.sp-page .eap-fee-card strong{font-size:clamp(24px,3vw,40px);overflow-wrap:anywhere}
+.sp-page .eap-level li,.sp-page .eap-book li{overflow-wrap:anywhere}
+.sp-page .sp-resources{grid-template-columns:repeat(2,minmax(0,1fr))}
+.sp-page .sp-resources:has(>article:only-child){grid-template-columns:minmax(0,1fr);max-width:800px}
+.sp-external{margin:25px 0 0}
+.sp-external a{color:#a52541;font-weight:800;text-decoration:underline;text-underline-offset:4px;min-height:44px;display:inline-flex;align-items:center;gap:9px}
+.sp-external a:focus-visible{outline:3px solid #a52541;outline-offset:4px}
+.sp-method{background:#f7f8f5}
+@media(max-width:760px){.sp-page .sp-resources{grid-template-columns:1fr}.sp-page .eap-hero-visual strong{font-size:clamp(52px,14vw,74px)}}
+@media(prefers-reduced-motion:reduce){.sp-page *{scroll-behavior:auto}}
