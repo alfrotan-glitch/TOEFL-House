@@ -767,3 +767,5 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .sp-method{background:#f7f8f5}
 @media(max-width:760px){.sp-page .sp-resources{grid-template-columns:1fr}.sp-page .eap-hero-visual strong{font-size:clamp(52px,14vw,74px)}}
 @media(prefers-reduced-motion:reduce){.sp-page *{scroll-behavior:auto}}
+
+.sp-latin-title{display:inline-block;margin:0 0 12px;color:#a82541;font:800 11px/1.5 ui-sans-serif,system-ui,sans-serif;letter-spacing:.15em;text-align:start}
