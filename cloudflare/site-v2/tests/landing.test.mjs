@@ -509,3 +509,14 @@ test("Known retired anchors use current admissions, while unknown fragments neve
   assert.deepEqual(visit(root+"courses/academic-english/","#start"),[],root+" subpage fragment must remain");
  }
 });
+
+test("Dari and Pashto course breadcrumbs announce a localized navigation name",async()=>{
+ for(const [prefix,label] of [["/","Breadcrumb"],["/fa/","مسیر دسترسی به صفحه"],["/ps/","د پاڼې د لاسرسي لاره"]]){
+  for(const section of ["courses/academic-english/","courses/toefl-preparation/"]){
+   const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+prefix+section),env());
+   assert.equal(response.status,200);
+   const html=await response.text();
+   assert.ok(html.includes('class="breadcrumbs" aria-label="'+label+'"'),prefix+section+" breadcrumb not translated");
+  }
+ }
+});
