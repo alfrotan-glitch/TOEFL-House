@@ -10,7 +10,7 @@ const deployments=[
  {name:"marketing-overlay-nov09",url:"https://0c14f299.the-toefl-house.pages.dev"}
 ];
 const primary="https://the-toefl-house.pages.dev";
-const events=[],errors=[];
+const events=[],errors=[],warnings=[];
 async function request(url,label){
  const response=await fetch(url,{method:"GET",redirect:"manual",signal:AbortSignal.timeout(20000)});
  const body=await response.text();
@@ -25,7 +25,15 @@ for(const deployment of deployments){
   if(home.response.status!==200||!/<html/i.test(home.body))
    errors.push(deployment.name+" HTML unavailable");
   const api=await request(deployment.url+"/api/content",deployment.name+" published CMS");
-  if(api.response.status!==200||!api.body.includes('"cmsStatus":"connected"'))
+  if(api.response.status===503 && (api.response.headers.get("content-type")||"").includes("application/json")){
+   // Immutable preview deployments do not have the canonical site's live D1 binding.
+   // Their documented read-only CMS 503 is a known limitation, not proof that the
+   // CANONICAL site's published CMS is down. Report it, never silently hide it.
+   let unavailable;try{unavailable=JSON.parse(api.body)}catch{}
+   if(typeof unavailable?.error==="string" && !unavailable?.locales)
+    warnings.push(deployment.name+" direct CMS 503: canonical CMS must be healthy");
+   else errors.push(deployment.name+" unexpected CMS 503 payload");
+  }else if(api.response.status!==200||!api.body.includes('"cmsStatus":"connected"'))
    errors.push(deployment.name+" CMS unavailable");
   else{
    let json;try{json=JSON.parse(api.body)}catch{errors.push(deployment.name+" CMS invalid JSON")}
@@ -45,5 +53,5 @@ for(const [path,expected] of [
    errors.push("Canonical preserved route failed "+path);
  }catch(e){errors.push("Canonical "+path+" "+String(e))}
 }
-console.log(JSON.stringify({tested:events.length,dependencyWarnings:errors,results:events},null,2));
-assert.deepEqual(errors,[],"Legacy deployment dependency broken");
+console.log(JSON.stringify({tested:events.length,dependencyWarnings:warnings,errors,results:events},null,2));
+assert.deepEqual(errors,[],"Canonical CMS or legacy HTML/auth routing broken");
