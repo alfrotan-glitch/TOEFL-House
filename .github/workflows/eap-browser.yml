@@ -1,0 +1,38 @@
+name: EAP academic program — three-language browser acceptance
+on:
+  push:
+    branches: [eap-curriculum-and-semester-campaign-1405]
+    paths:
+      - 'cloudflare/site-v2/**'
+      - '.github/workflows/eap-browser.yml'
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target Cloudflare Pages Preview or canonical website URL'
+        required: false
+        default: 'https://the-toefl-house.pages.dev'
+permissions:
+  contents: read
+jobs:
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TH_EAP_URL: ${{ inputs.target_url || 'https://d627d7c2.the-toefl-house.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install headless browser driver
+        run: npm install --prefix /tmp/toefl-eap-browser --no-save playwright-core@1.56.0 --silent
+      - name: Verify EAP levels, books, fees, academic goals, mobile layout and enrollment
+        run: node cloudflare/site-v2/eap-browser.cjs
+      - name: Archive EN, Dari and Pashto browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eap-real-browser-proof
+          path: /tmp/eap-browser-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 14
