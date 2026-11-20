@@ -165,6 +165,7 @@ async function v2Cms(env){
  return {main:parsed,pashto,revision:main.revision,psRevision:ps.revision};
 }
 function v2Prefix(locale){return locale==="en"?"/":"/"+locale+"/";}
+function v2BreadcrumbLabel(locale){return locale==="fa"?"مسیر دسترسی به صفحه":locale==="ps"?"د پاڼې د لاسرسي لاره":"Breadcrumb";}
 function v2Languages(locale,suffix=""){
  return [["en","EN","/"],["fa","دری","/fa/"],["ps","پښتو","/ps/"]].map(([id,title,path])=>'<a lang="'+(id==="fa"?"fa-AF":id==="ps"?"ps-AF":"en")+'" hreflang="'+(id==="en"?"en":id==="fa"?"fa-AF":"ps-AF")+'" href="'+path+suffix+'"'+(id===locale?' aria-current="page" class="is-active"':'')+'>'+title+'</a>').join("");
 }
