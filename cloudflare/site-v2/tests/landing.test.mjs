@@ -533,3 +533,63 @@ test("Program tiles expose a full tap target, and EAP level order is stable in R
   assert.match(html,/<span class="eap-visual-number" dir="ltr">01 — 04<\/span>/);
  }
 });
+
+test("Special Speaking course pages use verified two-month curriculum and semester fee in all languages",async()=>{
+ const langs=[["/","en","AFN 2,000"],["/fa/","fa-AF","۲٬۰۰۰ افغانی"],["/ps/","ps-AF","۲٬۰۰۰ افغانۍ"]];
+ for(const [prefix,lang,tuition] of langs){
+  const url="https://the-toefl-house.pages.dev"+prefix+"courses/special-speaking/";
+  const res=await worker.fetch(new Request(url),env());
+  assert.equal(res.status,200,prefix);
+  assert.equal(res.headers.get("Content-Language"),lang,prefix);
+  const html=await res.text();
+  assert.equal((html.match(/<h1>/g)||[]).length,1);
+  assert.ok(html.includes(tuition),prefix+" must disclose full-semester fee");
+  assert.ok(html.includes("Master Speaking")&&html.includes("Grammar for Special Speaking"),prefix+" missing both school books");
+  assert.ok(html.includes("16")||html.includes("۱۶"),prefix+" must document 16 grammar lessons");
+  assert.match(html,/P2M/);
+  assert.match(html,/"price":"2000","priceCurrency":"AFN"/);
+  assert.match(html,/v2\/site.css\?v=/);
+  assert.match(html,/class="eap-faq-list"/);
+  assert.ok(html.includes('href="'+prefix+'admissions/?program=special-speaking"'));
+  assert.ok(html.includes('<meta property="og:url" content="'+url+'">'));
+  const head=await worker.fetch(new Request(url,{method:"HEAD"}),env());
+  assert.equal(head.status,200);
+  assert.equal(await head.text(),"");
+ }
+});
+
+test("TOEFL 2026 course describes all current ETS tasks, four months, and 1–6 scores, not old exam",async()=>{
+ const categories=["Complete the Words","Read in Daily Life","Read an Academic Passage",
+ "Listen and Choose a Response","Listen to a Conversation","Listen to an Announcement","Listen to an Academic Talk",
+ "Build a Sentence","Write an Email","Write for an Academic Discussion",
+ "Listen and Repeat","Take an Interview"];
+ for(const root of ["/","/fa/","/ps/"]){
+  const url="https://the-toefl-house.pages.dev"+root+"courses/toefl-preparation/";
+  const response=await worker.fetch(new Request(url),env());
+  assert.equal(response.status,200,root);
+  const html=await response.text();
+  assert.equal((html.match(/<h1>/g)||[]).length,1);
+  for(const category of categories)assert.ok(html.includes(category),root+" missing "+category);
+  assert.match(html,/P4M/);
+  assert.match(html,/2026|۲۰۲۶/);
+  assert.match(html,/1–6|۱ تا ۶|۱ تر ۶/);
+  assert.ok(html.includes("ets.org/toefl/test-takers/ibt/about/content.html"),"must link to primary ETS source");
+  assert.doesNotMatch(html,/"price":"2000"/,root+" must not invent TOEFL Preparation tuition");
+  assert.ok(html.includes('href="'+root+'admissions/?program=toefl-preparation"'));
+  assert.ok(html.includes('<meta property="og:url" content="'+url+'">'));
+  assert.equal((html.match(/<details/g)||[]).length,5,"must answer five current exam questions");
+ }
+});
+
+test("Home programme cards disclose the owner-approved speaking semester fee and updated TOEFL",async()=>{
+ for(const root of ["/","/fa/","/ps/"]){
+  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  assert.equal(r.status,200);
+  const html=await r.text();
+  assert.ok(html.includes("Master Speaking"),root+" card missing authentic school text");
+  assert.ok(html.includes("2026")||html.includes("۲۰۲۶"),root+" card missing 2026 TOEFL update");
+  assert.match(html,/2,000|۲٬۰۰۰/);
+  assert.ok(html.includes('href="'+root+'courses/special-speaking/"'));
+  assert.ok(html.includes('href="'+root+'courses/toefl-preparation/"'));
+ }
+});
