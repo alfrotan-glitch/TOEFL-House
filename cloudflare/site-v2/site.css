@@ -589,17 +589,16 @@ html[dir=rtl] .eap-hero-copy h1{font-size:clamp(35px,4vw,55px);letter-spacing:-.
 @media(max-width:760px){.eap-page .section{padding-block:58px}.eap-hero{padding:26px 0 45px}.eap-hero .breadcrumbs{margin-bottom:30px}.eap-hero-grid{grid-template-columns:1fr;gap:30px}.eap-hero-copy h1{font-size:36px}.eap-hero-visual{min-height:255px;aspect-ratio:1.5}.eap-hero-visual>strong{font-size:100px}.eap-facts{margin-top:30px;grid-template-columns:repeat(2,minmax(0,1fr))}.eap-mission-grid,.eap-teachers-grid,.eap-faq-grid{grid-template-columns:1fr;gap:20px}.eap-goals-grid,.eap-levels,.eap-books-grid,.eap-fee-grid{grid-template-columns:1fr}.eap-hero-copy h1,.eap-heading h2{font-size:32px}.eap-mission-grid>p,.eap-lead{font-size:13px}.eap-teacher-badge{min-height:145px}.eap-teacher-badge strong{font-size:74px}.eap-bottom-inner{flex-direction:column;align-items:stretch;gap:25px}.eap-bottom-actions{align-items:stretch;min-width:0}.eap-bottom-actions .button{width:100%}}
 @media(max-width:460px){.eap-hero-copy h1{font-size:30px!important}.eap-hero-visual{aspect-ratio:1.36}.eap-visual-kicker,.eap-visual-small{font-size:8px}.eap-fact{padding:14px 12px}.eap-fact strong{font-size:18px}.eap-fact span{font-size:10px}.eap-goal,.eap-book{padding:21px 18px}.eap-level{grid-template-columns:25px minmax(0,1fr);gap:8px;padding:19px 13px}.eap-fee-card{padding:20px 22px}.eap-fee-card strong{font-size:29px}}
 
-/* Exact school-level to textbook-level mapping, readable without horizontal scrolling. */
+/* EAP textbook mapping */
 .eap-assigned-books{margin:16px 0;padding:15px;border-radius:10px;background:#f8eef0;border:1px solid #f1dce2}
 .eap-assigned-books>span{display:block;color:#7d253c;font-size:12px;font-weight:850;line-height:1.7}
 .eap-assigned-books ul{list-style:none;display:grid;gap:7px;margin:9px 0 0;padding:0}
 .eap-assigned-books li{position:relative;color:#223b43;font-size:12px;line-height:1.7;padding:0 0 0 16px;text-align:left;overflow-wrap:anywhere}
 .eap-assigned-books li:before{content:"•";position:absolute;left:0;color:#ac2845}
-.eap-assigned-books .eap-fourth-note{margin:12px 0 0;padding:10px 12px;border-inline-start:3px solid #ac2845;background:#fff;color:#684354;font-size:12px;line-height:1.9;overflow-wrap:anywhere}
+.eap-assigned-books .eap-fourth-note{margin:10px 0 0;font-size:12px;line-height:1.8}
 
 
-/* 2026 editorial accessibility pass — deliberate type scale, generous controls,
-   native Afghan Dari/Pashto reading rhythm and consistent brand presentation. */
+/* Afghan Dari/Pashto editorial accessibility */
 :root{--reading:#314a54;--on-paper:#152f38;--surface:#fff;--focus-ring:#b2223e}
 body{font-size:16px}
 a,button,summary,select{touch-action:manipulation}
