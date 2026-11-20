@@ -3,7 +3,7 @@ const base="https://the-toefl-house.pages.dev";
 const cases=[
  {path:"/courses/general-english/",lang:"en",two:"2 instructors",month:"500 AFN",semester:"1,000 AFN",total:"4,500 AFN"},
  {path:"/fa/courses/general-english/",lang:"fa-AF",two:"۲ استاد",month:"۵۰۰ افغانی",semester:"۱٬۰۰۰ افغانی",total:"۴٬۵۰۰ افغانی"},
- {path:"/ps/courses/general-english/",lang:"ps-AF",two:"۲ استادان",month:"۵۰۰ افغانۍ",semester:"۱٬۰۰۰ افغانۍ",total:"۴٬۵۰۰ افغانۍ"}
+ {path:"/ps/courses/general-english/",lang:"ps-AF",two:"۲ ښوونکي",month:"۵۰۰ افغانۍ",semester:"۱٬۰۰۰ افغانۍ",total:"۴٬۵۰۰ افغانۍ"}
 ];
 const results=[];
 for(const c of cases){
