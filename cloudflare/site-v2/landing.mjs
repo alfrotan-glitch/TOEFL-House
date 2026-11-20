@@ -178,7 +178,7 @@ function v2Header(c,locale,suffix=""){
   +'<div class="topline"><div class="shell topline-inner"><span class="top-dots"></span><span>'+v2T(c.badge)+'</span><a class="toplink" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+' <span aria-hidden="true">↗</span></a></div></div>'
   +'<header class="site-header"><div class="shell header-inner"><a class="brand" href="'+prefix+'" aria-label="'+v2T(c.name)+'"><img src="'+V2_LOGO+'" width="48" height="48" alt="" decoding="async"><span><strong>THE TOEFL HOUSE</strong><small>'+v2T(c.localName)+'</small></span></a>'
   +'<nav class="main-nav" aria-label="'+v2T(c.navMenu)+'">'+links+'</nav>'
-  +'<div class="header-actions"><div class="language-links" aria-label="'+v2T(locale==="en"?"Choose language":locale==="fa"?"انتخاب زبان":"ژبه وټاکئ")+'>">'+l+'</div><a class="button button-primary desktop-apply" href="'+prefix+'admissions/">'+v2T(c.navApply)+' <span aria-hidden="true">↗</span></a></div>'
+  +'<div class="header-actions"><div class="language-links" role="group" aria-label="'+v2T(locale==="en"?"Choose language":locale==="fa"?"انتخاب زبان":"ژبه وټاکئ")+'">'+l+'</div><a class="button button-primary desktop-apply" href="'+prefix+'admissions/">'+v2T(c.navApply)+' <span aria-hidden="true">↗</span></a></div>'
   +'<details class="mobile-menu"><summary aria-label="'+v2T(c.navMenu)+'"><span></span><span></span><span></span></summary><nav aria-label="'+v2T(c.navMenu)+'">'+links+'<div class="mobile-language">'+l+'</div><a class="mobile-apply" href="'+prefix+'admissions/">'+v2T(c.navApply)+'</a></nav></details></div></header>';
 }
 function v2Stats(c,content,locale){
