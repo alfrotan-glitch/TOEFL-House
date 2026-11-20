@@ -207,6 +207,13 @@ function v2Programs(c,content,locale){
   };
   duration=shortDurations[locale][i]||duration;
   let desc=program.summary||program.subtitle||"";
+  // Owner-confirmed program facts take precedence over older CMS summaries.
+  const reviewed={
+    en:{"special-speaking":"Two-month semester with Master Speaking and grammar in conversation. Total semester fee: AFN 2,000.","toefl-preparation":"Four-month preparation for the updated 2026 TOEFL iBT: Reading, Listening, Writing and Speaking."},
+    fa:{"special-speaking":"سمستر دوماهه با کتاب اختصاصی Master Speaking و گرامر مکالمه؛ فیس مجموعی ۲٬۰۰۰ افغانی.","toefl-preparation":"آمادگی چهارماههٔ TOEFL iBT مطابق ساختار جدید سال ۲۰۲۶؛ چهار مهارت اصلی زبان."},
+    ps:{"special-speaking":"دوه میاشتنی سمستر د Master Speaking او د خبرو ګرامر له کتابونو سره؛ ټول فیس ۲٬۰۰۰ افغانۍ.","toefl-preparation":"د ۲۰۲۶ نوې TOEFL iBT بڼې ته څلور میاشتنی چمتووالی؛ د انګلیسي څلور مهارتونه."}
+  };
+  if(reviewed[locale]?.[id])desc=reviewed[locale][id];
   return '<article class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+String(i+1).padStart(2,"0")+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(program.title||c.courseNames[i])+'</h3><p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
  }).join("");
  return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div><div class="courses-grid">'+cards+'</div></div></section>';
