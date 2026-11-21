@@ -234,7 +234,7 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.001ms!important;transition-duration:.001ms!important}}
 
-/* Compact proof points as three tidy rows on narrow phones; never crush Dari labels. */
+/* Compact proof point */
 @media(max-width:460px){
  .stat-grid{grid-template-columns:1fr;gap:0}
  .stat-item{flex-direction:row;justify-content:space-between;align-items:center;gap:24px;min-height:66px;padding:11px 0;border-inline-start:0;border-bottom:1px solid #eef0eb}
@@ -339,7 +339,7 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 }
 
 
-/* WCAG 2.1 AA refinement: editorial secondary text must be legible at small sizes. */
+/* WCAG 2.1 AA refinem */
 .stat-head p{color:#53656b}
 .stat-item span{color:#53656b}
 .section-intro{color:#52636a}
@@ -358,7 +358,7 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .admission-help-inner p:not(.eyebrow){color:#52636a}
 
 
-/* Finish AA contrast for small explanatory copy in program, journey and FAQ panels. */
+/* Finish AA contrast */
 .course-copy{color:#52636a}
 .journey-step p{color:#52636a}
 .tools-content p{color:#52636a}
@@ -368,7 +368,7 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .detail-aside p{color:#52636a}
 
 
-/* General English editorial program guide — five school stages vs four Oxford book levels */
+/* General English edi */
 .ge-section{padding-block:90px 96px;background:#f7f8f5}
 .ge-section h2,.ge-section h3,.ge-section h4{color:var(--ink)}
 .ge-heading{max-width:920px;margin-bottom:29px}
@@ -440,7 +440,7 @@ html[dir=rtl] .ge-stage h4{align-self:flex-start;text-align:start}
 @media(max-width:760px){.ge-section{padding-block:60px 68px}.ge-heading h2{font-size:30px}.ge-heading>p:not(.eyebrow){font-size:13px}.ge-facts{gap:8px;margin-bottom:46px}.ge-fact{padding:16px;min-height:98px}.ge-fact strong{font-size:17px}.ge-fact span{font-size:11px}.ge-stages{grid-template-columns:1fr;gap:9px}.ge-stage{padding:16px}.ge-stages-block{margin-bottom:46px}.ge-columns{margin-bottom:46px}.ge-side{display:grid;grid-template-columns:1fr}.ge-panel{padding:24px 20px}.ge-fees{padding:25px 15px;margin-bottom:45px}.ge-fee-table th,.ge-fee-table td{font-size:11px;padding:13px 6px}.ge-fee-table tbody td strong{font-size:12px}.ge-fee-total{padding:17px 15px}.ge-questions{margin-bottom:38px}.ge-references{padding:19px 17px}.ge-cta{display:flex;flex-direction:column;align-items:stretch;padding:21px}.ge-cta .button{width:100%}}
 
 
-/* Seasonal enrollment campaign: intentionally separate from permanent learning content. */
+/* Seasonal enrollment */
 .semester-hero-pill{display:inline-flex;align-items:center;gap:10px;max-width:100%;margin:0 0 17px;padding:9px 15px;border:1px solid #e8c5cd;border-radius:999px;background:#fff8f9;color:#991933;font-size:12px;font-weight:800;line-height:1.65;transition:transform .22s var(--ease),box-shadow .22s var(--ease)}
 .semester-hero-pill:hover{transform:translateY(-2px);box-shadow:0 7px 24px #98263b15}
 .semester-mini-dot,.semester-dot{width:8px;height:8px;border-radius:50%;background:#ce3046;flex:none}
@@ -487,7 +487,7 @@ html[dir=rtl] .semester-chips li{font-size:12px}
 @media(prefers-reduced-motion:reduce){.semester-play-circle{transition:none}.semester-video-cover:hover .semester-play-circle{transform:none}}
 
 
-/* New semester → EAP pathway: strengthen the next action while keeping the video optional. */
+/* New semester → EAP */
 .semester-eap-spotlight{display:flex;align-items:center;gap:22px;min-height:112px;margin-top:16px;padding:19px 27px;border:1px solid #efd6dc;border-radius:16px;background:#fffafc;color:#632033;box-shadow:0 4px 25px #6916290c;transition:border-color .2s,transform .2s}
 .semester-eap-spotlight:hover{border-color:#ce3046;transform:translateY(-2px)}
 .semester-eap-mark{display:grid;place-items:center;min-width:75px;min-height:75px;background:#a51e3b;color:#fff;border-radius:14px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:23px;font-weight:900;letter-spacing:.06em}
@@ -498,7 +498,7 @@ html[dir=rtl] .semester-chips li{font-size:12px}
 .semester-eap-link{margin-inline-start:auto;color:#a01837;font-size:12px;font-weight:800;white-space:nowrap}
 @media(max-width:760px){.semester-eap-spotlight{flex-wrap:wrap;padding:20px;gap:14px}.semester-eap-mark{min-width:58px;min-height:58px;font-size:19px}.semester-eap-copy{flex:1 1 180px}.semester-eap-copy strong{font-size:15px}.semester-eap-link{width:100%;margin-inline-start:72px;white-space:normal}}
 @media(max-width:460px){.semester-eap-spotlight{gap:12px}.semester-eap-copy small{font-size:10px}.semester-eap-copy strong{font-size:14px}.semester-eap-link{margin-inline-start:0}}
-/* EAP program: clean editorial hierarchy, native RTL, brand red and accessible type. */
+/* EAP program: clean */
 .eap-page{background:#fff}
 .eap-page .section{padding-block:88px}
 .eap-hero{background:linear-gradient(137deg,#faf9f5 0%,#f6efed 73%,#f1e5e4 100%);border-bottom:1px solid #ebdfe0;padding:35px 0 63px;overflow:hidden}
@@ -697,8 +697,7 @@ html[dir=rtl] .eap-level li li,html[dir=rtl] .eap-book li{line-height:2}
  .eap-book h3{font-size:21px}
 }
 
-/* Unified editorial guides: retain original educational articles, share the V2
-   layout, branding, navigation, typography, security and language switcher. */
+/* Unified editorial g */
 .editorial-guides{background:#fff;color:#17333c}
 .guide-hero{background:linear-gradient(130deg,#faf8f4 0%,#f5f0ec 65%,#f0e2e3 100%);border-bottom:1px solid #e9dedc;padding:38px 0 76px}
 .guide-hero .breadcrumbs{margin-bottom:48px}
@@ -832,7 +831,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 }
 
 
-/* Goal-first discovery: useful decisions before six course cards, no JS or filtering. */
+/* Goal-first discover */
 html{scroll-padding-top:112px}
 #main,#programs,#why-us,#online,#faq,#contact,.course-card[id]{scroll-margin-top:112px}
 .goal-finder{display:grid;grid-template-columns:minmax(210px,.72fr) minmax(0,1.4fr);gap:22px;align-items:center;padding:21px 25px;margin:0 0 24px;border:1px solid #e9d8da;border-inline-start:4px solid #bd2945;border-radius:14px;background:#fff;box-shadow:0 8px 30px #6b26300a}
@@ -856,8 +855,7 @@ html[dir=rtl] .program-preview{font-size:15px;line-height:1.95}
 @media(forced-colors:active){.program-preview{border:2px solid CanvasText}}
 
 
-/* Mobile admissions: show the decision form before the fold, not below an
-   oversized building photograph. Keep campus imagery on desktop and homepage. */
+/* Mobile admissions: */
 @media(max-width:760px){
  .admissions-hero{padding:24px 0 58px}
  .admissions-grid{gap:18px}
@@ -872,3 +870,9 @@ html[dir=rtl] .program-preview{font-size:15px;line-height:1.95}
  .admissions-formbox h2{font-size:20px;margin:7px 0 14px;line-height:1.5}
  .admissions-formbox label{margin:5px 0 6px}
 }
+
+/* Dari font and mobile FAQ legibility; Pashto retains its original typeface. */
+@font-face{font-family:THDari;src:url("/__th/v2/font/vazirmatn-33.003.woff2") format("woff2");font-style:normal;font-weight:100 900;font-display:swap}
+html[lang=fa-AF] body{font-family:THDari,THArabic,Tahoma,sans-serif;line-height:1.8}
+html[lang=fa-AF] .brand small{font-family:THDari,THArabic,Tahoma,sans-serif}
+@media(max-width:760px){.faq-section.section{padding:54px 0 64px}.faq-aside{margin-bottom:26px}.faq-aside>p:not(.eyebrow){font-size:14px;line-height:1.8}.faq-section .text-link{font-size:14px;line-height:1.55}.faq-list summary{font-size:15px;padding:18px 0;line-height:1.65;gap:15px}.faq-list details p{font-size:14px;line-height:1.9;margin-bottom:21px}html[dir=rtl] .faq-section .faq-aside h2{font-size:clamp(26px,6.4vw,30px);line-height:1.5}}
