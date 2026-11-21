@@ -60,6 +60,11 @@ test("public CSS, JS, favicon, polish CSS and CMS remain usable",async()=>{
   assert.equal(r.status,200,path);
   assert.match(r.headers.get("content-type")||"",type,path);
  }
+ const tracker=await check("/__th/engagement-v1.js");
+ assert.ok(tracker.text.includes("toeflhouse.pages.dev"),"conversion script must recognise the official host");
+ assert.ok(!tracker.text.includes("the-toefl-house.pages.dev"),"conversion script must not expose legacy host");
+ const content=await check("/api/content");
+ assert.ok(!content.text.includes("the-toefl-house.pages.dev"),"public CMS JSON must use the short host");
  const tools=await check("/tools/");
  assert.equal(tools.r.status,200);
  assert.match(tools.r.headers.get("x-robots-tag")||"",/noindex/);
