@@ -621,3 +621,36 @@ test("Premium header uses CSS sticky layout and maintains usable mobile touch ta
  assert.ok(css.includes('.mobile-menu nav{max-height:'),"long translated navigation needs bounded height");
  assert.ok(css.includes('@media(forced-colors:active)'),"respect Windows high-contrast users");
 });
+
+test("Goal-first discovery is localized and routes visitors to actual program cards",async()=>{
+ const cases=[
+  ["/","Explore English programs by goal",["Start with the foundations","Speak with confidence","Prepare for university","Prepare for TOEFL"]],
+  ["/fa/","انتخاب برنامه بر اساس هدف آموزشی",["از پایه شروع کنم","با اطمینان صحبت کنم","برای پوهنتون آماده شوم","برای TOEFL آماده شوم"]],
+  ["/ps/","د زده‌کړې د موخې له مخې د پروګرام ټاکنه",["له بنسټ څخه پیل کوم","په ډاډه زړه خبرې کوم","پوهنتون ته چمتو کېږم","TOEFL ته چمتو کېږم"]]
+ ];
+ const goals=["general-english","special-speaking","academic-english","toefl-preparation"];
+ for(const [root,label,phrases] of cases){
+  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  assert.equal(response.status,200,root);
+  const html=await response.text();
+  assert.ok(html.includes('class="goal-finder" aria-label="'+label+'"'),root+" missing accessible localized discoverability");
+  for(let i=0;i<goals.length;i++){
+   assert.ok(html.includes('href="#course-'+goals[i]+'"'),root+" unlinked course goal "+goals[i]);
+   assert.ok(html.includes('id="course-'+goals[i]+'" class="course-card '),root+" missing goal anchor");
+   assert.ok(html.includes(phrases[i]),root+" missing native language goal label");
+  }
+  const goalMatches=[...html.matchAll(/href="#course-(general-english|special-speaking|academic-english|toefl-preparation)"/g)];
+  assert.equal(goalMatches.length,4,root+" should contain exactly four goal pathways");
+  assert.equal((html.match(/class="course-card /g)||[]).length,6,root+" must retain all six programs");
+ }
+});
+
+test("Sticky navigation offsets preserve focused anchors and goal controls have touch targets",async()=>{
+ const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ assert.equal(response.status,200);
+ const css=await response.text();
+ assert.ok(css.includes("html{scroll-padding-top:112px}"));
+ assert.ok(css.includes(".course-card[id]:target{outline:3px"),"target card must visibly respond to navigation");
+ assert.ok(css.includes(".goal-finder-links a{min-height:44px"),"quick goals need large targets");
+ assert.ok(css.includes(".goal-finder-links{display:grid;grid-template-columns:"),"mobile goals must reflow responsively");
+});
