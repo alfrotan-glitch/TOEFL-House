@@ -103,9 +103,9 @@ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
   assert.equal((html.match(/<h1>/g)||[]).length,1);
   assert.match(html,/id="v2-enquiry-form"/);
   assert.doesNotMatch(html,/Tuition is charged separately|فیس صنف‌های آموزشی جداگانه است|درسي ټولګي فیس لري|tuition is payable for courses|صنف‌ها فیس دارند|درسي ټولګي فیس لري/);
-  if(path.includes("fa"))assert.ok(html.includes("Grammar (۱۶ درس)"),"Dari Special Speaking book details");
-  if(path.includes("ps"))assert.ok(html.includes("Grammar ۱۶ درسي کتاب"),"Pashto Special Speaking book details");
-  if(path.includes("en"))assert.ok(html.includes("16-lesson Grammar book"),"English Special Speaking book details");
+  if(prefix==="fa/")assert.ok(html.includes("Grammar (۱۶ درس)"),"Dari Special Speaking book details");
+  if(prefix==="ps/")assert.ok(html.includes("Grammar ۱۶ درسي کتاب"),"Pashto Special Speaking book details");
+  if(prefix==="")assert.ok(html.includes("16-lesson Grammar book"),"English Special Speaking book details");
   assert.match(html,/name="program"/);
   assert.match(html,/name="format"/);
   assert.match(html,/name="when"/);
