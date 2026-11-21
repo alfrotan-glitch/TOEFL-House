@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-const base="https://the-toefl-house.pages.dev";
+const base="https://toeflhouse.pages.dev";
 const sitemap=await fetch(base+"/sitemap.xml",{signal:AbortSignal.timeout(20000)});
 assert.equal(sitemap.status,200);
 const xml=await sitemap.text();
