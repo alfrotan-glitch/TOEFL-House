@@ -854,3 +854,21 @@ html{scroll-padding-top:112px}
 .program-preview[hidden]{display:none}
 html[dir=rtl] .program-preview{font-size:15px;line-height:1.95}
 @media(forced-colors:active){.program-preview{border:2px solid CanvasText}}
+
+
+/* Mobile admissions: show the decision form before the fold, not below an
+   oversized building photograph. Keep campus imagery on desktop and homepage. */
+@media(max-width:760px){
+ .admissions-hero{padding:24px 0 58px}
+ .admissions-grid{gap:18px}
+ .admissions-copy .eyebrow{margin-bottom:7px}
+ .admissions-copy h1{font-size:clamp(26px,7vw,31px);line-height:1.3;margin-bottom:11px}
+ html[dir=rtl] .admissions-copy h1{line-height:1.5}
+ .admissions-copy>p:not(.eyebrow){font-size:14px;line-height:1.65}
+ .admissions-benefits{flex-direction:row;flex-wrap:wrap;gap:6px 14px;margin:13px 0 0}
+ .admissions-benefits span{font-size:12px;line-height:1.6}
+ .admissions-photo{display:none}
+ .admissions-formbox{padding:21px 18px}
+ .admissions-formbox h2{font-size:20px;margin:7px 0 14px;line-height:1.5}
+ .admissions-formbox label{margin:5px 0 6px}
+}
