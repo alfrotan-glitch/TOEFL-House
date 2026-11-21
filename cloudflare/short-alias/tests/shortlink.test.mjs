@@ -41,6 +41,7 @@ test("localized pages and admissions stay indexable on production and noindex on
  ]){
   const {r,text}=await check(path);
   assert.equal(r.status,200,path);
+  assert.doesNotMatch(text,/Tuition is charged separately|فیس صنف‌های آموزشی جداگانه است|درسي ټولګي فیس لري|tuition is payable for courses|صنف‌ها فیس دارند/);
   assert.match(text,new RegExp('<html lang="'+lang+'"'),path);
   assert.ok(text.includes(marker),path+" page content");
   assert.equal(r.headers.get("x-shortlink-source"),null);
