@@ -49,3 +49,16 @@ This is a professional design QA assessment, **not** an independent claim of bei
 
 ## Operational design principles
 Maintain Afghan Dari terminology, protect real brand identity and student privacy, keep tuition wording exact (monthly versus semester), prefer readable content and authentic media over heavy visual effects, and version all changes with an executable regression and rollback path.
+
+## Production closure — verified
+
+- **Exact released Worker source:** `d16e1d5779a166fb809baa930f6f70b283aa59b6`.
+- **Cloudflare Pages production deployment:** `bbb81b8c-1a5d-4e9e-b5a3-6a37b5be5dcf` — environment `production`, latest stage `success`. The preceding production deployment `2d2db382-3ff7-4a7e-a801-0ac8a2f35849` remains available for code rollback.
+- **Build parity:** 291,694 UTF-8 Worker bytes, asset revision `e413653b6596`, served CSS 71,051 bytes, client JS 7,834 bytes; exact results matched CI.
+- [Complete production quality gate](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44857699298) — success. 54 website tests, 16 Edge tests, 7 analytics tests, automated WCAG audit, public content/security checks and public-only CMS snapshot.
+- [Real-browser preview acceptance](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44857488118) — success; tests 12 homepage locale/viewport combinations plus 9 course-to-admissions paths, including clicking the main tile itself.
+- [Real-browser post-deployment production acceptance](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44857869320) — success, same 21 browser scenarios on the canonical domain. Archived 15 screenshots, including complete-page Dari mobile and desktop views.
+- Production API independently checked exactly **25 retained static assets**, the active `CMS_DB` D1 binding and successful source SHA. No database writes or authentication admin changes were made.
+- Production source and latest GitHub main can differ after documentation/QA-only commits because this Pages project is **Direct Upload**; use the source SHA above to identify actual production code.
+
+**Scope note:** Passing automated design/browser tests does not prove real-user conversion uplift, independent database recovery, manual assistive-technology certification, or legal brand ownership. These remain explicit open items.
