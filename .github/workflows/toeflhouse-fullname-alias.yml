@@ -6,6 +6,10 @@ on:
       - 'cloudflare/short-alias/toeflhouse-worker.mjs'
       - 'cloudflare/short-alias/tests/**'
       - '.github/workflows/toeflhouse-fullname-alias.yml'
+  pull_request:
+    paths:
+      - "cloudflare/short-alias/**"
+      - ".github/workflows/toeflhouse-fullname-alias.yml"
   workflow_dispatch:
     inputs:
       alias_url:
@@ -15,7 +19,19 @@ on:
 permissions:
   contents: read
 jobs:
+  source-check:
+    if: github.event_name == 'pull_request'
+    name: Validate short-domain Worker source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check cloudflare/short-alias/toeflhouse-worker.mjs
+
   public-smoke:
+    if: github.event_name != 'pull_request'
     name: EN, Dari, Pashto, assets, privacy and admission routes
     runs-on: ubuntu-latest
     timeout-minutes: 9
@@ -29,6 +45,7 @@ jobs:
       - name: Validate read-only public alias
         run: node --test cloudflare/short-alias/tests/shortlink.test.mjs
   real-browser:
+    if: github.event_name != 'pull_request'
     name: Android-size Chrome, language switching, course to admissions
     runs-on: ubuntu-latest
     timeout-minutes: 12
