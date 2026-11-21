@@ -10,6 +10,17 @@ const HTML_TYPE = /text\/html(?:\s*;|$)/i;
 const BLOCKED = /^\/(?:admin(?:\/|$)|cms(?:\/|$)|login(?:\/|$)|logout(?:\/|$)|dashboard(?:\/|$)|api\/(?!content(?:\/|$))|__th\/(?!v2\/(?:site\.(?:css|js)|font\/vazirmatn-33\.003\.woff2)$|engagement-v1\.js$))/i;
 const NOINDEX = /^\/(?:tools(?:\/|$)|api(?:\/|$))/i;
 const POLISH_CSS = ".footer-main{gap:44px;padding:52px 0 40px}\n.footer-brand h2{font-size:27px;margin-bottom:10px}\n.footer-links{padding-top:12px;gap:12px 22px}\n.footer-bottom{padding:16px 0 18px}\n.footer-cta{margin-top:22px;min-height:46px;padding:12px 18px;font-size:12px;align-self:flex-start}\n@media(max-width:760px){.footer-main{padding:36px 0 28px}.footer-brand h2{font-size:23px}.footer-links{padding-top:20px;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.footer-bottom{padding:13px 0 15px}.footer-bottom span{margin:0}.footer-cta{margin-top:18px}}";
+const COURSE_SLUGS=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
+const GUIDE_SLUGS=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
+const SITEMAP_PATHS=[
+ "/", "/fa/", "/ps/", "/admissions/", "/fa/admissions/", "/ps/admissions/",
+ ...["","fa/","ps/"].flatMap(prefix=>COURSE_SLUGS.map(id=>"/"+prefix+"courses/"+id+"/")),
+ ...["","fa/","ps/"].flatMap(prefix=>["/"+prefix+"guides/",...GUIDE_SLUGS.map(slug=>"/"+prefix+"guides/"+slug+"/")])
+];
+function sitemapXml(){
+ const urls=SITEMAP_PATHS.map(path=>"<url><loc>"+SHORT_ORIGIN+path+"</loc><changefreq>weekly</changefreq></url>").join("");
+ return '<?xml version="1.0" encoding="UTF-8"?>'+'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls+"</urlset>";
+}
 function plain(message,status=200,headers={}) {
  return new Response(message,{status,headers:{"Content-Type":"text/plain; charset=utf-8","X-Content-Type-Options":"nosniff",...headers}});
 }
@@ -69,6 +80,7 @@ export default {
    const rules=isPreview?"User-agent: *\nDisallow: /\n":"User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\n";
    return plain(rules,200,{"Cache-Control":"public, max-age=3600"});
   }
+  if(incoming.pathname==="/sitemap.xml")return new Response(sitemapXml(),{status:200,headers:{"Content-Type":"application/xml; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}});
   if(incoming.pathname==="/__th/short-polish.css")return new Response(POLISH_CSS,{status:200,headers:{"Content-Type":"text/css; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}});
   if(BLOCKED.test(incoming.pathname))return plain("Not found",404,{"X-Robots-Tag":"noindex, nofollow"});
   const translated=incoming.pathname==="/" ? "/fa/" :
