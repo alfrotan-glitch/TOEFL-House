@@ -69,6 +69,10 @@ test("public CSS, JS, favicon, polish CSS and CMS remain usable",async()=>{
  const tools=await check("/tools/");
  assert.equal(tools.r.status,200);
  assert.match(tools.r.headers.get("x-robots-tag")||"",/noindex/);
+ const faTools=await check("/fa/tools/");
+ assert.equal(faTools.r.status,200);
+ assert.match(faTools.r.headers.get("x-robots-tag")||"",/noindex/);
+ assert.ok(faTools.text.includes("index-Ch3KjNPK"),"Dari student tools bundle must load");
 });
 
 test("robots allow the official public site and keep private/utility routes out of search",async()=>{
@@ -84,6 +88,7 @@ test("robots allow the official public site and keep private/utility routes out 
  assert.equal(sitemap.r.status,200);
  assert.ok(sitemap.text.includes(origin),"sitemap must use the short domain");
  assert.ok(!sitemap.text.includes("the-toefl-house.pages.dev"),"legacy hostname must not appear in sitemap");
+ assert.equal((sitemap.text.match(/<loc>/g)||[]).length,39,"sitemap must include all 39 public routes");
  const admin=await check("/admin/");
  assert.equal(admin.r.status,404);
  assert.equal(admin.r.headers.get("location"),null);
