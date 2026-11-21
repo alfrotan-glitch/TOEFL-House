@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {createHash} from "node:crypto";
 
 const base=(process.env.TH_SHORT_BASE||"https://shortlink-preview.thaf.pages.dev").replace(/\/$/,"");
 const origin="https://the-toefl-house.pages.dev";
@@ -76,4 +77,18 @@ test("query attribution stays on short host without redirect",async()=>{
  assert.equal(r.status,200);
  assert.equal(r.headers.get("location"),null);
  assert.ok(text.includes("v2-program-preview"));
+});
+
+test("self-origin Persian font stays intact on short domain and legacy university term is absent from Dari",async()=>{
+ const r=await fetch(base+"/__th/v2/font/vazirmatn-33.003.woff2",{redirect:"manual",signal:AbortSignal.timeout(25000)});
+ assert.equal(r.status,200,"Font must load on alias, not redirect to another host");
+ assert.equal(r.headers.get("location"),null);
+ assert.match(r.headers.get("content-type")||"",/font\/woff2/);
+ const bytes=Buffer.from(await r.arrayBuffer());
+ assert.equal(bytes.subarray(0,4).toString(),"wOF2");
+ assert.equal(createHash("sha256").update(bytes).digest("hex"),"4e3fa217d38fdafc1fea4414ceb58ca5e662cf0ab5fa735a8c8c20e8b42cad92");
+ const home=await check("/");
+ assert.equal(home.r.status,200);
+ assert.ok(!home.text.includes("پوهنتون"),"Dari content should use دانشگاه");
+ assert.ok(home.text.includes("دانشگاه"),"Dari university term should be present");
 });
