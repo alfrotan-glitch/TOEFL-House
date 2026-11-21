@@ -3,7 +3,7 @@
 // anonymous aggregate CTA click tracking on permitted public HTML pages.
 // Do not introduce a second CMS or change staff auth/business API semantics.
 const UPSTREAM="https://0c14f299.the-toefl-house.pages.dev";
-const CANONICAL="the-toefl-house.pages.dev";
+const CANONICAL="toeflhouse.pages.dev";
 const COLLECTOR="https://toefl-house-conversions.alfrotan2.workers.dev";
 const JS_PATH="/__th/engagement-v1.js";
 const CSS_PATH="/__th/engagement-v1.css";
