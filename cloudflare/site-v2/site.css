@@ -26,7 +26,7 @@ a:focus-visible,summary:focus-visible,button:focus-visible{outline:3px solid #e8
 .brand img{width:44px;height:44px;object-fit:contain}
 .brand strong,.brand small{display:block;line-height:1.25}
 .brand strong{font-family:ui-sans-serif,system-ui,sans-serif;font-size:13px;letter-spacing:.055em;font-weight:850}
-.brand small{font-family:THArabic,Tahoma,sans-serif;font-size:11px;color:#7b8081;margin-top:4px;font-weight:600}
+.brand small{font-family:THArabic,Tahoma,sans-serif;font-size:11px;color:#43555b;margin-top:4px;font-weight:600}
 .main-nav{display:flex;align-items:center;gap:22px;margin-inline:auto}
 .main-nav a{font-size:12px;font-weight:700;color:#37474e;white-space:nowrap;transition:color .2s}
 .main-nav a:hover{color:var(--red)}
@@ -821,7 +821,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
  .brand{gap:5px}
  .brand img{width:32px;height:32px}
  .brand strong{font-size:10px;letter-spacing:0;max-width:85px}
- .brand small{font-size:9px;margin-top:2px}
+ .brand small{font-size:10px;margin-top:2px}
  .mobile-quick-apply{padding:7px 9px;max-width:112px;font-size:10.5px}
  .mobile-menu summary{width:44px;min-width:44px}
 }
