@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import worker from "../worker.mjs";
 
-const resp=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/engagement-v1.js"),{});
+const resp=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/engagement-v1.js"),{});
 assert.equal(resp.status,200);
 const script=await resp.text();
 
@@ -12,7 +12,7 @@ function eventFrom({pathname="/fa/admissions/",search="",selected=null,href="htt
  const ElementClass=class {
   closest(selector){return selector==="a[href]"?{getAttribute(){return href;}}:null;}
  };
- const location={hostname:"the-toefl-house.pages.dev",origin:"https://the-toefl-house.pages.dev",pathname,search,href:"https://the-toefl-house.pages.dev"+pathname+search};
+ const location={hostname:"toeflhouse.pages.dev",origin:"https://toeflhouse.pages.dev",pathname,search,href:"https://toeflhouse.pages.dev"+pathname+search};
  const data=new Map();
  const context={
   location,
