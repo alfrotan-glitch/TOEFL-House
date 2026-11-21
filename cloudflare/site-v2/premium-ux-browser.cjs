@@ -37,6 +37,8 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     assert.equal(d.overflow,false,root+" "+width+" horizontal overflow");
     assert.ok(d.logo>30,root+" "+width+" brand logo");
     assert.equal(d.cards,6,root+" "+width+" course choices");
+    const schema=await page.locator('script[type="application/ld+json"]').first().evaluate(el=>JSON.parse(el.textContent));
+    assert.equal(schema.find(x=>x["@type"]==="ItemList")?.itemListElement?.length,6,root+" "+width+" search course list");
     assert.equal(d.ctaVisible,mobile,root+" "+width+" visibility of quick placement");
     assert.equal(d.ctaHref,root+"admissions/");
     await page.evaluate(()=>{document.documentElement.style.scrollBehavior="auto";window.scrollTo(0,1000);});
@@ -94,6 +96,21 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     await page.locator(".mobile-quick-apply").click();
     await page.waitForURL(new RegExp("/admissions/\\?program="+program),{timeout:12000});
     assert.equal(await page.locator("#v2-program").inputValue(),program,route+" enrollment context should survive");
+    const preview=page.locator("#v2-program-preview");
+    assert.equal(await preview.isVisible(),true,route+" must show course facts before WhatsApp");
+    const note=await preview.textContent();
+    assert.ok(note&&note.length>35,route+" facts not informative");
+    if(program==="toefl-preparation")assert.equal(/AFN [0-9]|فیس [۰-۹]|فیس: [۰-۹]/.test(note),false,"Unconfirmed TOEFL fee invented");
+    if(program==="special-speaking")assert.match(note,/2,000|۲٬۰۰۰/,route+" speaking semester fee");
+    if(program==="academic-english")assert.match(note,/1,000|۱٬۰۰۰/,route+" EAP monthly fee");
+    if(lang==="fa-AF"&&program==="special-speaking"){
+     await page.screenshot({path:"/tmp/toefl-premium-evidence/admissions-fa-AF-speaking.png",fullPage:false});
+    }
+    await page.locator("#v2-program").selectOption("general-english");
+    assert.match(await preview.textContent(),/500|۵۰۰/,route+" program switching must refresh fee");
+    await page.locator("#v2-program").selectOption("toefl-preparation");
+    assert.ok((await preview.textContent()).length>25,route+" fee unknown still needs useful duration");
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2),false,route+" form overflow");
     checked++;
     await ctx.close();
    }
