@@ -198,9 +198,15 @@ function v2Stats(c,content,locale){
  +'<div class="stat-head"><h2>'+v2T(c.trustTitle)+'</h2><p>'+v2T(c.trustSub)+'</p></div>'
  +'<div class="stat-grid">'+values.map(([n,t],i)=>'<div class="stat-item"><strong dir="ltr">'+v2T(n||fallback[i][0])+'</strong><span>'+v2T(t||fallback[i][1])+'</span></div>').join("")+'</div></div></section>';
 }
+const V2_GOALS={
+ en:{title:"What do you want to achieve?",hint:"Choose your goal to find a suitable learning path.",label:"Explore English programs by goal",items:[["general-english","Start with the foundations"],["special-speaking","Speak with confidence"],["academic-english","Prepare for university"],["toefl-preparation","Prepare for TOEFL"]]},
+ fa:{title:"هدف شما از یادگیری انگلیسی چیست؟",hint:"هدف خود را انتخاب کنید و برنامهٔ مناسب را بشناسید.",label:"انتخاب برنامه بر اساس هدف آموزشی",items:[["general-english","از پایه شروع کنم"],["special-speaking","با اطمینان صحبت کنم"],["academic-english","برای پوهنتون آماده شوم"],["toefl-preparation","برای TOEFL آماده شوم"]]},
+ ps:{title:"له انګلیسي زده‌کړې موخه مو څه ده؟",hint:"خپله موخه وټاکئ او مناسب پروګرام ومومئ.",label:"د زده‌کړې د موخې له مخې د پروګرام ټاکنه",items:[["general-english","له بنسټ څخه پیل کوم"],["special-speaking","په ډاډه زړه خبرې کوم"],["academic-english","پوهنتون ته چمتو کېږم"],["toefl-preparation","TOEFL ته چمتو کېږم"]]}
+};
 function v2Programs(c,content,locale){
  const prefix=v2Prefix(locale);
  const src=locale==="ps"?content.pashto.programs:content.main.locales[locale].programs;
+ const goal=V2_GOALS[locale],goalNav='<nav class="goal-finder" aria-label="'+v2T(goal.label)+'"><div class="goal-finder-intro"><strong>'+v2T(goal.title)+'</strong><span>'+v2T(goal.hint)+'</span></div><div class="goal-finder-links">'+goal.items.map(([id,label])=>'<a href="#course-'+id+'">'+v2T(label)+' <span aria-hidden="true">↗</span></a>').join("")+'</div></nav>';
  const cards=V2_COURSE_IDS.map((id,i)=>{
   const program=src.find(x=>x.id===id)||{};
   let duration=program.duration;
@@ -218,9 +224,9 @@ function v2Programs(c,content,locale){
     ps:{"special-speaking":"دوه میاشتنی سمستر د Master Speaking او د خبرو ګرامر له کتابونو سره؛ ټول فیس ۲٬۰۰۰ افغانۍ.","toefl-preparation":"د ۲۰۲۶ نوې TOEFL iBT بڼې ته څلور میاشتنی چمتووالی؛ د انګلیسي څلور مهارتونه."}
   };
   if(reviewed[locale]?.[id])desc=reviewed[locale][id];
-  return '<article class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+String(i+1).padStart(2,"0")+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(program.title||c.courseNames[i])+'</h3><p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
+  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+String(i+1).padStart(2,"0")+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(program.title||c.courseNames[i])+'</h3><p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
  }).join("");
- return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div><div class="courses-grid">'+cards+'</div></div></section>';
+ return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div>'+goalNav+'<div class="courses-grid">'+cards+'</div></div></section>';
 }
 function v2Faq(c,content,locale){
  const raw=locale==="ps"?content.pashto.faq:content.main.locales[locale].faq;
