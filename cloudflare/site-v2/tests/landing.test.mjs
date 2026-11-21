@@ -625,7 +625,7 @@ test("Premium header uses CSS sticky layout and maintains usable mobile touch ta
 test("Goal-first discovery is localized and routes visitors to actual program cards",async()=>{
  const cases=[
   ["/","Explore English programs by goal",["Start with the foundations","Speak with confidence","Prepare for university","Prepare for TOEFL"]],
-  ["/fa/","انتخاب برنامه بر اساس هدف آموزشی",["از پایه شروع کنم","با اطمینان صحبت کنم","برای پوهنتون آماده شوم","برای TOEFL آماده شوم"]],
+  ["/fa/","انتخاب برنامه بر اساس هدف آموزشی",["از پایه شروع کنم","با اطمینان صحبت کنم","برای دانشگاه آماده شوم","برای TOEFL آماده شوم"]],
   ["/ps/","د زده‌کړې د موخې له مخې د پروګرام ټاکنه",["له بنسټ څخه پیل کوم","په ډاډه زړه خبرې کوم","پوهنتون ته چمتو کېږم","TOEFL ته چمتو کېږم"]]
  ];
  const goals=["general-english","special-speaking","academic-english","toefl-preparation"];
@@ -746,4 +746,35 @@ test("Course cards use concise localized headings, whole-card native hit areas, 
  assert.ok(css.includes(".course-card{position:relative;cursor:pointer"),"whole-card click needs positioned card");
  assert.ok(css.includes('.course-bottom a::after{content:"";position:absolute;inset:0;z-index:1'),"native link must have a full-card hit area");
  assert.ok(css.includes(".course-card:focus-within"),"keyboard focus must reveal the selected card");
+});
+
+test("Dari editorial keeps standard Peh and says university; Pashto remains unchanged",async()=>{
+ const d=structuredClone(main);
+ d.locales.fa.programs[4].summary="برای محصلان پوهنتونی و تحصیل در پوهنتون‌های جهان.";
+ d.locales.fa.stats.universityLabel="پذیرش پوهنتونی";
+ const dari=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env(d,ps));
+ assert.equal(dari.status,200);
+ const html=await dari.text();
+ assert.ok(html.includes("دانشگاه‌های جهان"),"CMS Dari output must use edited university term");
+ assert.ok(html.includes("پذیرش دانشگاهی"),"Dari compound form should be grammatically correct");
+ assert.ok(html.includes("برای دانشگاه آماده شوم"),"new Dari discovery choice");
+ assert.equal(html.includes("پوهنتون"),false,"no Pashto university noun in Dari HTML");
+ assert.equal("پرسش‌های".codePointAt(0),0x067e,"Peh must remain U+067E");
+ const pashto=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/"),env(d,ps));
+ assert.equal(pashto.status,200);
+ assert.match(await pashto.text(),/پوهنتون/,"Pashto vocabulary must not be changed");
+ const academic=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/courses/academic-english/"),env(d,ps));
+ assert.equal(academic.status,200);
+ const academicHtml=await academic.text();
+ assert.equal(academicHtml.includes("پوهنتون"),false);
+ assert.ok(academicHtml.includes("دانشگاه"));
+});
+test("Dari font is localized and mobile FAQ has a readable compact layout",async()=>{
+ const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ assert.equal(r.status,200);
+ const css=await r.text();
+ assert.match(css,/font-family:THDari;src:url\("\/__th\/v2\/font\/vazirmatn-33\.003\.woff2"\)/);
+ assert.ok(css.includes("html[lang=fa-AF] body{font-family:THDari"),"Dari only");
+ assert.ok(css.includes("html[dir=rtl] body{font-family:THArabic"),"Pashto unchanged");
+ assert.ok(css.includes(".faq-section.section{padding:54px 0 64px}"),"FAQ section compact on phones");
 });
