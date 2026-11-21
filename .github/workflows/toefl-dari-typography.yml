@@ -1,0 +1,39 @@
+name: TOEFL House — Dari typography & mobile FAQ browser acceptance
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/site-v2/dari-typography-browser.cjs'
+      - '.github/workflows/toefl-dari-typography.yml'
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: 'Cloudflare preview or approved production website'
+        required: false
+        default: 'https://76c73b0a.the-toefl-house.pages.dev'
+permissions:
+  contents: read
+jobs:
+  typography:
+    name: Live font, Peh dots, FAQ and university terminology
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      TH_DARI_BASE: ${{ inputs.site_url || 'https://76c73b0a.the-toefl-house.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Chrome driver
+        run: npm install --prefix /tmp/toefl-dari-browser --no-save playwright-core@1.56.0 --silent
+      - name: Inspect actual pages, download font, verify SHA and prevent clipped FAQ
+        run: node cloudflare/site-v2/dari-typography-browser.cjs
+      - name: Save screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dari-font-mobile-faq-screenshots
+          path: /tmp/toefl-dari-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 21
