@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 9
     env:
-      TH_SHORT_BASE: ${{ github.event_name == 'pull_request' && 'https://admissions-copy-cleanup-20261121.toeflhouse.pages.dev' || inputs.alias_url || 'https://toeflhouse.pages.dev' }}
+      TH_SHORT_BASE: ${{ github.event_name == 'pull_request' && 'https://admissions-copy-cleanup-2026.toeflhouse.pages.dev' || inputs.alias_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      TH_SHORT_BASE: ${{ github.event_name == 'pull_request' && 'https://admissions-copy-cleanup-20261121.toeflhouse.pages.dev' || inputs.alias_url || 'https://toeflhouse.pages.dev' }}
+      TH_SHORT_BASE: ${{ github.event_name == 'pull_request' && 'https://admissions-copy-cleanup-2026.toeflhouse.pages.dev' || inputs.alias_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
