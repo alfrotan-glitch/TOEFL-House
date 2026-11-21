@@ -37,7 +37,7 @@ This site **has not** been independently ranked as the world's best website, and
 - Preview `9328336a-0233-4480-932c-fcf4e1179e6e`, source `75b07cff77b776e170774295fee8bad1185afac8`, stage `success`.
 - **Identical compiled Worker** deployed to production, exactly **284,456 UTF-8 bytes**, client style version `9d49a58d9b4d`, served compact CSS **69,859 bytes**, lightweight client JS **7,253 bytes**. This confirms size/composition, not a simulated real-user Core Web Vitals speed score.
 - Latest Cloudflare `production` deployment `30f25c42-be07-4c73-9acd-86a4e6518c54` independently verified `success` with 25 original asset entries and D1 binding.
-- Post-release real-browser acceptance must be recorded against its actual completed GitHub Actions run ID; do not infer it from Preview results.
+- [Post-release actual-domain browser acceptance](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44848377203) — **success**, the same 21 scenarios (12 homepage device/language combinations and 9 admissions paths) on canonical production, including the four goal-anchor checks, sticky header, RTL, serious/critical automated WCAG checks and no side effects.
 
 ## Professional risk register — do not claim completed
 
