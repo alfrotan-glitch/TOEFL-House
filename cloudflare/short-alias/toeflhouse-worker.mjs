@@ -8,7 +8,7 @@ const SHORT_ORIGIN = "https://toeflhouse.pages.dev";
 const SHORT_HOST = "toeflhouse.pages.dev";
 const HTML_TYPE = /text\/html(?:\s*;|$)/i;
 const BLOCKED = /^\/(?:admin(?:\/|$)|cms(?:\/|$)|login(?:\/|$)|logout(?:\/|$)|dashboard(?:\/|$)|api\/(?!content(?:\/|$))|__th\/(?!v2\/(?:site\.(?:css|js)|font\/vazirmatn-33\.003\.woff2)$|engagement-v1\.js$))/i;
-const NOINDEX = /^\/(?:tools(?:\/|$)|api(?:\/|$))/i;
+const NOINDEX = /^\/(?:tools(?:\/|$)|api(?:\/|$)|(?:fa|ps)\/tools(?:\/|$))/i;
 const POLISH_CSS = ".footer-main{gap:44px;padding:52px 0 40px}\n.footer-brand h2{font-size:27px;margin-bottom:10px}\n.footer-links{padding-top:12px;gap:12px 22px}\n.footer-bottom{padding:16px 0 18px}\n.footer-cta{margin-top:22px;min-height:46px;padding:12px 18px;font-size:12px;align-self:flex-start}\n@media(max-width:760px){.footer-main{padding:36px 0 28px}.footer-brand h2{font-size:23px}.footer-links{padding-top:20px;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.footer-bottom{padding:13px 0 15px}.footer-bottom span{margin:0}.footer-cta{margin-top:18px}}";
 const COURSE_SLUGS=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
 const GUIDE_SLUGS=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
@@ -77,7 +77,7 @@ export default {
   const isPreview=incoming.hostname!==SHORT_HOST;
   if(request.method!=="GET"&&request.method!=="HEAD")return plain("Method not allowed",405,{"Allow":"GET, HEAD"});
   if(incoming.pathname==="/robots.txt") {
-   const rules=isPreview?"User-agent: *\nDisallow: /\n":"User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\n";
+   const rules=isPreview?"User-agent: *\nDisallow: /\n":"User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nDisallow: /fa/tools/\nDisallow: /ps/tools/\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\n";
    return plain(rules,200,{"Cache-Control":"public, max-age=3600"});
   }
   if(incoming.pathname==="/sitemap.xml")return new Response(sitemapXml(),{status:200,headers:{"Content-Type":"application/xml; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}});
