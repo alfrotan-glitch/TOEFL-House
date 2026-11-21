@@ -830,3 +830,20 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
  .mobile-quick-apply,.button-primary,.course-featured{border:1px solid ButtonText}
  .main-nav a::after{background:LinkText}
 }
+
+
+/* Goal-first discovery: useful decisions before six course cards, no JS or filtering. */
+html{scroll-padding-top:112px}
+#main,#programs,#why-us,#online,#faq,#contact,.course-card[id]{scroll-margin-top:112px}
+.goal-finder{display:grid;grid-template-columns:minmax(210px,.72fr) minmax(0,1.4fr);gap:22px;align-items:center;padding:21px 25px;margin:0 0 24px;border:1px solid #e9d8da;border-inline-start:4px solid #bd2945;border-radius:14px;background:#fff;box-shadow:0 8px 30px #6b26300a}
+.goal-finder-intro{display:grid;gap:5px;min-width:0}
+.goal-finder-intro strong{font-size:16px;color:#263c45;line-height:1.55;font-weight:850}
+.goal-finder-intro span{font-size:13px;color:#52676f;line-height:1.65}
+.goal-finder-links{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.goal-finder-links a{min-height:44px;padding:10px 13px;display:inline-flex;gap:7px;align-items:center;justify-content:center;border:1px solid #e9d4da;background:#fff9fa;border-radius:8px;font-size:12px;font-weight:800;color:#84223b;line-height:1.55;transition:border-color .2s,background .2s,transform .2s}
+.goal-finder-links a:hover,.goal-finder-links a:focus-visible{border-color:#bd2945;background:#f7e7eb;transform:translateY(-1px)}
+.goal-finder-links a span{flex:none}
+.course-card[id]:target{outline:3px solid #c22f4b;outline-offset:3px}
+@media(max-width:960px){.goal-finder{grid-template-columns:1fr;gap:14px}}
+@media(max-width:760px){html{scroll-padding-top:90px}.goal-finder{padding:19px 17px;margin-bottom:20px}.goal-finder-intro strong{font-size:16px}.goal-finder-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.goal-finder-links a{min-width:0;text-align:center;padding:12px 9px;white-space:normal}}
+@media(max-width:390px){.brand strong{max-width:108px;font-size:10px;line-height:1.22}.brand img{width:36px;height:36px}.goal-finder-links{grid-template-columns:1fr}.goal-finder-links a{justify-content:space-between;text-align:start}}
