@@ -1,0 +1,38 @@
+name: TOEFL House — Premium UX mobile and desktop preview
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/toefl-premium-ux-preview.yml'
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: 'Approved read-only Pages preview or production URL'
+        required: false
+        default: 'https://4788848a.the-toefl-house.pages.dev'
+permissions:
+  contents: read
+jobs:
+  responsive-qa:
+    name: 320–1440px, EN/FA/PS, sticky header, enrollment continuity
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      TH_PREMIUM_BASE: ${{ inputs.preview_url || 'https://4788848a.the-toefl-house.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated browser accessibility tools
+        run: npm install --prefix /tmp/toefl-premium-browser --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Check desktop and narrow phones in all languages
+        run: node cloudflare/site-v2/premium-ux-browser.cjs
+      - name: Store real-browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: premium-ux-responsive-screenshots
+          path: /tmp/toefl-premium-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 14
