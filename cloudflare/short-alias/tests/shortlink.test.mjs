@@ -24,7 +24,7 @@ test("official root serves Dari in-place, indexable and canonical on the short h
  assert.ok(text.includes('href="/fa/"'),"Dari language path");
  assert.ok(text.includes('href="/ps/"'),"Pashto language path");
  assert.ok(text.includes("footer-cta"),"footer must have one clear admissions action");
- assert.ok(!/صنف‌های آموزشی دارای فیس|صنف‌های آموزشی فیس دارند|رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست|course tuition free|Tuition applies to courses/.test(text),"remove obvious tuition disclaimers");
+ assert.ok(!/صنف‌های آموزشی دارای فیس|صنف‌های آموزشی فیس دارند|رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست|course tuition free|course tuition is separate|Tuition applies to courses/.test(text),"remove obvious tuition disclaimers");
  assert.ok(text.includes("روبه‌روی مرکز جلیلی"),"normalize Dari address spelling");
  assert.ok(!text.includes("روبروی مرکز جلیلی"),"remove legacy Dari address spelling");
 });
