@@ -3,9 +3,11 @@ const base="https://toeflhouse.pages.dev";
 const sitemap=await fetch(base+"/sitemap.xml",{signal:AbortSignal.timeout(20000)});
 assert.equal(sitemap.status,200);
 const xml=await sitemap.text();
-const urls=[...xml.matchAll(/<loc>(https:\/\/the-toefl-house\.pages\.dev[^<]+)<\/loc>/g)].map(x=>x[1]);
+const urls=[...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(x=>x[1]);
 const paths=[...new Set(urls.map(s=>new URL(s).pathname))];
 const ids=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
+const guideIds=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
+for(const lang of ["","fa/","ps/"]){expectedPaths.push("/"+lang+"guides/");for(const id of guideIds)expectedPaths.push("/"+lang+"guides/"+id+"/");}
 const expectedPaths=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
 for(const lang of ["","fa/","ps/"]){for(const id of ids)expectedPaths.push("/"+lang+"courses/"+id+"/");}
 const check=new Set(paths), failures=[],rows=[];
