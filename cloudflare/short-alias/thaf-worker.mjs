@@ -10,7 +10,7 @@
 const UPSTREAM = "https://the-toefl-house.pages.dev";
 const SHORT_HOST = "thaf.pages.dev";
 const HTML_TYPE = /text\/html(?:\s*;|$)/i;
-const BLOCKED = /^\/(?:admin(?:\/|$)|cms(?:\/|$)|login(?:\/|$)|logout(?:\/|$)|dashboard(?:\/|$)|api\/(?!content(?:\/|$))|__th\/(?!v2\/site\.(?:css|js)$|engagement-v1\.js$))/i;
+const BLOCKED = /^\/(?:admin(?:\/|$)|cms(?:\/|$)|login(?:\/|$)|logout(?:\/|$)|dashboard(?:\/|$)|api\/(?!content(?:\/|$))|__th\/(?!v2\/(?:site\.(?:css|js)|font\/vazirmatn-33\.003\.woff2)$|engagement-v1\.js$))/i;
 
 export default {
   async fetch(request) {
