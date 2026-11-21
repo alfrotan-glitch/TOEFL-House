@@ -761,6 +761,8 @@ test("Dari editorial keeps standard Peh and says university; Pashto remains unch
  const html=await dari.text();
  assert.ok(html.includes("دانشگاه‌های جهان"),"CMS Dari output must use edited university term");
  assert.ok(html.includes("پذیرش دانشگاهی"),"Dari compound form should be grammatically correct");
+ assert.ok(html.includes("روبه‌روی مرکز جلیلی"),"Dari campus address uses standard spelling");
+ assert.equal(html.includes("روبروی مرکز جلیلی"),false,"legacy address spelling is normalized");
  assert.ok(html.includes("برای دانشگاه آماده شوم"),"new Dari discovery choice");
  assert.equal(html.includes("پوهنتون"),false,"no Pashto university noun in Dari HTML");
  assert.equal("پرسش‌های".codePointAt(0),0x067e,"Peh must remain U+067E");
