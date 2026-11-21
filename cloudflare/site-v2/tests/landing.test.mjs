@@ -593,3 +593,31 @@ test("Home programme cards disclose the owner-approved speaking semester fee and
   assert.ok(html.includes('href="'+root+'courses/toefl-preparation/"'));
  }
 });
+
+test("High-visibility mobile admissions action exists on every language and preserves the selected course",async()=>{
+ const cases=[["/","Free assessment"],["/fa/","تعیین سطح"],["/ps/","وړیا ارزونه"]];
+ for(const [root,label] of cases){
+  const home=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  assert.equal(home.status,200);
+  const html=await home.text();
+  assert.match(html,new RegExp('class="mobile-quick-apply" href="'+root+'admissions/"'));
+  assert.ok(html.includes('>'+label+'</a>'),root+" missing localized mobile CTA");
+  for(const id of ["special-speaking","toefl-preparation","academic-english"]){
+   const course=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root+"courses/"+id+"/"),env());
+   assert.equal(course.status,200,root+id);
+   const page=await course.text();
+   assert.ok(page.includes('class="mobile-quick-apply" href="'+root+'admissions/?program='+id+'"'),root+id+" mobile context lost");
+   assert.ok(page.includes('class="button button-primary desktop-apply" href="'+root+'admissions/?program='+id+'"'),root+id+" desktop context lost");
+  }
+ }
+});
+
+test("Premium header uses CSS sticky layout and maintains usable mobile touch targets",async()=>{
+ const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ assert.equal(r.status,200);
+ const css=await r.text();
+ assert.ok(css.includes('.site-header{position:sticky;'),"header must stay available when navigating long course pages");
+ assert.ok(css.includes('.mobile-quick-apply{display:inline-flex;'),"mobile CTA must not be hidden");
+ assert.ok(css.includes('.mobile-menu nav{max-height:'),"long translated navigation needs bounded height");
+ assert.ok(css.includes('@media(forced-colors:active)'),"respect Windows high-contrast users");
+});
