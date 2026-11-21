@@ -42,7 +42,7 @@ Sparse CMS descriptions fall back to truthful course-name descriptions, not fabr
 - [Source release quality gate](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44856318283) — **success**. 53 multilingual V2 site tests, 16 Edge tests, 7 analytics tests, WCAG A/AA automated audit, public CMS/security checks.
 - [EAP browser regression](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44856318282) — **success**.
 - [Exact final Cloudflare preview browser acceptance](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44856410253) — **success**. Tests 12 homepage device/language combinations and nine course-to-admissions flows including verified fee switching, short translated select labels, first-screen form, accessible goal navigation, correct structured data, layout, no browser errors, and automated serious/critical WCAG checks; screenshots archived.
-- [Post-production real-browser test](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44856584472) — pending at time report first authored. Verify successful completion, then update this status and attach the final evidence.
+- [Post-production real-browser test](https://github.com/alfrotan-glitch/TOEFL-House/actions/runs/44856584472) — **success**. Repeated the 21-scenario responsive, trilingual admissions, visible-first-form, approved tuition, six-course structured data and accessibility regression suite on the actual canonical domain after the final production deploy; screenshots retained as the workflow artifact.
 - Cloudflare API confirms source `d8f14ef2b6a19e62240174adf016f75e59e5fddf` as latest successful **production** deployment, 25 original static files retained, `CMS_DB` still bound.
 - Production Pages project uses **Direct Upload**; a later GitHub documentation or workflow commit does **not** automatically deploy altered website code.
 
@@ -61,4 +61,4 @@ Only an authorised operator may revert **code** to the previous Pages deployment
 
 ## Completion standard
 
-This release's **public website features** are source-qualified, preview-browser-qualified, successfully deployed and pending final canonical post-release browser closeout. The *entire institutional operating system* (including secured CMS write flows and independent disaster recovery) is **not** claimed to have unconditional production acceptance merely because these web features pass.
+This release's **public website features** are source-qualified, preview-browser-qualified, successfully deployed and canonically browser-qualified. The *entire institutional operating system* (including secured CMS write flows and independent disaster recovery) is **not** claimed to have unconditional production acceptance merely because these web features pass.
