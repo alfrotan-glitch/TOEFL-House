@@ -42,6 +42,9 @@ test("localized pages and admissions stay indexable on production and noindex on
   const {r,text}=await check(path);
   assert.equal(r.status,200,path);
   assert.doesNotMatch(text,/Tuition is charged separately|فیس صنف‌های آموزشی جداگانه است|درسي ټولګي فیس لري|tuition is payable for courses|صنف‌ها فیس دارند/);
+  if(path.startsWith("/fa/"))assert.ok(text.includes("Grammar (۱۶ درس)"),"Dari Special Speaking book details");
+  if(path.startsWith("/ps/"))assert.ok(text.includes("Grammar ۱۶ درسي کتاب"),"Pashto Special Speaking book details");
+  if(path.startsWith("/en/"))assert.ok(text.includes("16-lesson Grammar book"),"English Special Speaking book details");
   assert.match(text,new RegExp('<html lang="'+lang+'"'),path);
   assert.ok(text.includes(marker),path+" page content");
   assert.equal(r.headers.get("x-shortlink-source"),null);
