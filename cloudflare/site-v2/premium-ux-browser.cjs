@@ -79,7 +79,12 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     assert.ok(target.y>=d.headerHeight-18&&target.y<900,root+" "+width+" sticky header obscures program card: "+target.y);
     assert.equal(target.outline,"solid",root+" "+width+" selected course is not highlighted");
     assert.deepEqual(browserErrors,[],root+" "+width+" browser errors");
-    summaries.push({route:root,width,...d,sticky:true});
+    // Full-card hit target: the visual tile, not only its small text link,
+    // must open the right program on both mouse and touch-sized viewports.
+    await page.locator("#course-special-speaking").click();
+    await page.waitForURL(base+root+"courses/special-speaking/",{timeout:12000});
+    assert.equal(await page.locator("h1").count(),1,root+" "+width+" card navigation");
+    summaries.push({route:root,width,...d,sticky:true,wholeCardLinks:true});
     checked++;
     await context.close();
    }
