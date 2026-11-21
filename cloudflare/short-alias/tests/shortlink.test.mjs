@@ -35,9 +35,9 @@ test("localized pages and admissions stay indexable on production and noindex on
   ["/fa/","fa-AF","goal-finder"],
   ["/ps/","ps-AF","goal-finder"],
   ["/en/","en","goal-finder"],
-  ["/fa/admissions/","fa-AF","v2-program"],
+  ["/fa/admissions/?program=special-speaking","fa-AF","v2-program"],
   ["/fa/courses/special-speaking/","fa-AF","Special Speaking"],
-  ["/en/admissions/","en","v2-program"]
+  ["/en/admissions/?program=special-speaking","en","v2-program"]
  ]){
   const {r,text}=await check(path);
   assert.equal(r.status,200,path);
