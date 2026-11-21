@@ -19,7 +19,7 @@ function env(testMain=main,testPs=ps){
 }
 for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","ps-AF","rtl"]]){
  test("full trilingual V2 SSR "+route,async()=>{
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+route),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
   assert.equal(r.status,200);
   assert.match(r.headers.get("Content-Type"),/text\/html/);
   assert.equal(r.headers.get("Content-Language"),lang);
@@ -33,24 +33,28 @@ for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","
   assert.match(html,/v2\/site\.js/);
   assert.match(html,/engagement-v1\.js/);
   assert.match(html,/<link rel="canonical"/);
+  assert.match(html,/https:\\/\\/toeflhouse\\.pages\\.dev/);
+  assert.match(html,/class="footer-cta"/);
+  assert.doesNotMatch(html,/صنف‌های آموزشی دارای فیس|درسی ټولګي فیس لري|Tuition applies to courses|course tuition is separate|It does not make course tuition free/i);
   assert.match(html,/href="\/(?:fa\/|ps\/)?tools\/"/);
   assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/"/);
   assert.match(html,/<script type="application\/ld\+json">/);
   assert.doesNotMatch(html,/500 Internal Server Error/);
+  assert.doesNotMatch(html,/the-toefl-house\\.pages\\.dev/);
   assert.doesNotMatch(html,/Figures reported by The TOEFL House|آمار منتشرشده توسط تافل هوس|د خانه موفقیت خپاره کړي شمېرې|The course itself is not free|01:01/,"No editorial/design leftovers in public content");
  });
 }
 test("Preview home is noindex but visible",async()=>{
- const r=await worker.fetch(new Request("https://v2.the-toefl-house.pages.dev/fa/"),env());
+ const r=await worker.fetch(new Request("https://v2.toeflhouse.pages.dev/fa/"),env());
  assert.equal(r.status,200);assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
 });
 test("HEAD home does not download HTML",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/",{method:"HEAD"}),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/",{method:"HEAD"}),env());
  assert.equal(r.status,200);assert.equal(await r.text(),"");
 });
 test("new CSS, JS are local, security-hardened assets",async()=>{
  for(const [p,type] of [["site.css","text/css"],["site.js","javascript"]]){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/"+p),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/"+p),env());
   assert.equal(r.status,200);assert.match(r.headers.get("Content-Type"),new RegExp(type));
   assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
   assert.ok((await r.text()).length>400);
@@ -60,13 +64,13 @@ test("CMS DB failure gracefully preserves immutable original homepage",async()=>
  const orig=globalThis.fetch;
  globalThis.fetch=async r=>new Response("previous site remains available",{status:200,headers:{"Content-Type":"text/plain"}});
  try{
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/"),{});
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/"),{});
   assert.equal(r.status,200);
   assert.equal(await r.text(),"previous site remains available");
  }finally{globalThis.fetch=orig;}
 });
 test("V2 home does not reveal user data from CMS",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/"),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/"),env());
  const html=await r.text();
  assert.ok(!html.includes("password_hash"));
  assert.ok(!html.includes("session_token"));
@@ -76,7 +80,7 @@ test("V2 home does not reveal user data from CMS",async()=>{
 
 for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
  test("Course details preserve four-month TOEFL and semantic SEO in "+prefix,async()=>{
-  const req=new Request("https://the-toefl-house.pages.dev"+prefix+"courses/toefl-preparation/");
+  const req=new Request("https://toeflhouse.pages.dev"+prefix+"courses/toefl-preparation/");
   const r=await worker.fetch(req,env());
   assert.equal(r.status,200);
   assert.equal(r.headers.get("Content-Language"),lang);
@@ -92,7 +96,7 @@ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
   assert.match(html,new RegExp('href="'+prefix+'admissions/'));
  });
  test("Admissions page offers no-email WhatsApp only funnel in "+prefix,async()=>{
-  const req=new Request("https://the-toefl-house.pages.dev"+prefix+"admissions/");
+  const req=new Request("https://toeflhouse.pages.dev"+prefix+"admissions/");
   const r=await worker.fetch(req,env());
   assert.equal(r.status,200);
   const html=await r.text();
@@ -111,7 +115,7 @@ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
   globalThis.fetch=async request=>new Response('Prior React app is preserved',{headers:{"Content-Type":"text/plain"}});
   try{
    const route=prefix+"tools/";
-   const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+route),env());
+   const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
    assert.equal(r.status,200);
    assert.match(await r.text(),/Prior React app/);
    assert.match(r.headers.get("X-Robots-Tag")||"",/noindex/);
@@ -120,7 +124,7 @@ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
 }
 
 test("Course language switcher retains current program, and all subpage menu links target existing home anchors",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/courses/toefl-preparation/"),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/courses/toefl-preparation/"),env());
  const html=await r.text();
  assert.match(html,/href="\/courses\/toefl-preparation\/"/);
  assert.match(html,/href="\/fa\/courses\/toefl-preparation\/"/);
@@ -131,7 +135,7 @@ test("Course language switcher retains current program, and all subpage menu lin
  assert.match(html,/href="\/fa\/#faq"/);
 });
 test("Admissions language switcher retains admissions context",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/admissions/"),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/admissions/"),env());
  const html=await r.text();
  assert.match(html,/href="\/admissions\/"/);
  assert.match(html,/href="\/fa\/admissions\/"/);
@@ -142,30 +146,30 @@ test("Admissions language switcher retains admissions context",async()=>{
 test("Public editor changes to address and hours appear in V2 footer without source rebuild",async()=>{
  const custom=structuredClone(main);
  custom.locales.fa.contact={title:"آدرس جدید کورس",address:"CMS_DYNAMIC_ADDRESS_QA",operatingHours:"CMS_DYNAMIC_HOURS_QA"};
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env(custom));
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/"),env(custom));
  const html=await r.text();
  assert.match(html,/CMS_DYNAMIC_ADDRESS_QA/);
  assert.match(html,/CMS_DYNAMIC_HOURS_QA/);
- const d=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/courses/toefl-preparation/"),env(custom));
+ const d=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/courses/toefl-preparation/"),env(custom));
  const page=await d.text();
  assert.match(page,/CMS_DYNAMIC_ADDRESS_QA/);
  assert.match(page,/CMS_DYNAMIC_HOURS_QA/);
 });
 test("Both marketing assets use fingerprinted URLs so old CSS and JS cannot persist after release",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/"),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/"),env());
  const html=await r.text();
  const css=html.match(/\/__th\/v2\/site\.css\?v=([a-f0-9]{12})/);
  const js=html.match(/\/__th\/v2\/site\.js\?v=([a-f0-9]{12})/);
  assert.ok(css,"Missing content-hash CSS");
  assert.ok(js,"Missing content-hash JS");
  assert.equal(css[1],js[1]);
- const file=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css?v="+css[1]),env());
+ const file=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css?v="+css[1]),env());
  assert.equal(file.status,200);
  assert.match(file.headers.get("Cache-Control")||"",/immutable/);
 });
 test("Learning guides are reachable from main header and footer in all languages",async()=>{
  for(const prefix of ["/","/fa/","/ps/"]){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+prefix),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
   const html=await r.text();
   assert.ok(html.includes('href="'+prefix+'guides/"'),"Missing guides: "+prefix);
  }
@@ -173,17 +177,17 @@ test("Learning guides are reachable from main header and footer in all languages
 
 
 test("Afghan Dari V2 public marketing uses the current TOEFL House name",async()=>{
- const home=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env());
+ const home=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/"),env());
  const html=await home.text();
  assert.match(html,/<title>تافل هوس \| کورس زبان انگلیسی و آمادگی تافل در کابل<\/title>/);
  assert.match(html,/تافل هوس/);
- const admissions=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/admissions/"),env());
+ const admissions=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/admissions/"),env());
  assert.match(await admissions.text(),/تافل هوس/);
 });
 
 test("Malformed URL hash does not crash the student menu or enrolment script",async()=>{
  const {runInNewContext}=await import("node:vm");
- const client=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.js"),env());
+ const client=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.js"),env());
  const source=await client.text();
  const handlers=[];
  const menu={querySelectorAll(){return []},open:false,contains(){return true}};
@@ -207,7 +211,7 @@ test("General English exposes five school levels, realistic AFN tuition and Oxfo
   {path:"/ps/courses/general-english/",two:"۲ ښوونکي",monthly:"۵۰۰ افغانۍ",semester:"۱٬۰۰۰ افغانۍ",total:"۴٬۵۰۰ افغانۍ",free:"وړیا"}
  ];
  for(const c of cases){
-  const res=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+c.path),env());
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+c.path),env());
   assert.equal(res.status,200,c.path);
   const html=await res.text();
   assert.match(html,/id="general-english-details"/,c.path);
@@ -233,17 +237,17 @@ test("General English exposes five school levels, realistic AFN tuition and Oxfo
 });
 test("General English supplement is exclusive to General English; other courses unchanged",async()=>{
  for(const route of ["/courses/toefl-preparation/","/fa/courses/academic-english/","/ps/courses/special-speaking/"]){
-  const res=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+route),env());
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
   assert.equal(res.status,200);
   const html=await res.text();
   assert.doesNotMatch(html,/id="general-english-details"/,route);
  }
 });
 test("General English course preview remains noindex and HEAD has no body",async()=>{
- const q=await worker.fetch(new Request("https://abc12345.the-toefl-house.pages.dev/fa/courses/general-english/"),env());
+ const q=await worker.fetch(new Request("https://abc12345.toeflhouse.pages.dev/fa/courses/general-english/"),env());
  assert.equal(q.status,200);
  assert.match(q.headers.get("X-Robots-Tag"),/noindex/);
- const h=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/courses/general-english/",{method:"HEAD"}),env());
+ const h=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/courses/general-english/",{method:"HEAD"}),env());
  assert.equal(h.status,200);
  assert.equal(await h.text(),"");
 });
@@ -254,8 +258,8 @@ test("Published CMS historical name uses visitor brand without modifying saved d
  const pashto=structuredClone(ps);
  pashto.faq.items[0].a="په خانه موفقیت کې د سویې معلومول وړیا دي.";
  const [faResponse,psResponse]=await Promise.all([
-  worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env(fa,pashto)),
-  worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/"),env(fa,pashto))
+  worker.fetch(new Request("https://toeflhouse.pages.dev/fa/"),env(fa,pashto)),
+  worker.fetch(new Request("https://toeflhouse.pages.dev/ps/"),env(fa,pashto))
  ]);
  assert.match(await faResponse.text(),/در تافل هوس تعیین سطح رایگان است/);
  assert.match(await psResponse.text(),/په تافل هوس کې د سویې معلومول وړیا دي/);
@@ -274,7 +278,7 @@ test("Public course and admissions pages remove legacy branding and internal-ver
   ["/fa/admissions/",updated],
   ["/admissions/",updated]
  ]){
-  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env(updated,pashto));
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env(updated,pashto));
   assert.equal(response.status,200,path);
   const html=await response.text();
   assert.doesNotMatch(html,/خانه موفقیت|View original student form|فورم قبلی|پخوانی فورم/,path);
@@ -289,20 +293,20 @@ test("Legacy published timetable blurbs use a consistent, verifiable public sche
  e.locales.fa.contact={operatingHours:"جلسات درسی: شنبه الی پنج‌شنبه · برادران: ۶:۲۰ صبح تا ۵:۵۰ شام · خواهران: ۶:۳۰ صبح تا ۵:۴۰ شام · جمعه: رخصت"};
  p.contact={hours:"شنبه تر پنجشنبې: سهار ۶:۲۰ تر ماښام ۶:۰۰؛ جمعه رخصتي، ځانګړي پروګرامونه جلا اعلانېږي"};
  for(const path of ["/","/fa/","/ps/"]){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env(e,p));
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env(e,p));
   const html=await r.text();
   assert.equal(r.status,200,path);
   assert.doesNotMatch(html,/6:20 AM–5:50 PM|۶:۲۰ صبح تا ۵:۵۰ شام|سهار ۶:۲۰ تر ماښام ۶:۰۰/);
   assert.match(html,/Confirm class times with admissions|وقت دقیق صنف را از پذیرش بپرسید|د ټولګي دقیق وخت له ادارې وپوښتئ/);
  }
  p.contact.hours="د نوې دورې مهالوېش CMS_EDITED_HOURS";
- const page=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/"),env(e,p));
+ const page=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/"),env(e,p));
  assert.match(await page.text(),/CMS_EDITED_HOURS/);
 });
 
 test("Semester Qaws 1405 video announcement is visible, accessible and localised without autoplay",async()=>{
  for(const [path,lang,teaser] of [["/","en","New semester"],["/fa/","fa","سمستر قوس ۱۴۰۵"],["/ps/","ps","قوس ۱۴۰۵"]]){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
   const html=await r.text();
   assert.equal(r.status,200,path);
   assert.equal((html.match(/id="semester-qaws-1405"/g)||[]).length,1,path);
@@ -319,12 +323,12 @@ test("Semester Qaws 1405 video announcement is visible, accessible and localised
 });
 
 test("Semester campaign has a keyboard-accessible poster play control with native video fallback",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/"),env());
  assert.equal(r.status,200);
  const html=await r.text();
  assert.match(html,/<button class="semester-video-cover" type="button" hidden aria-label="پخش ویدیوی معرفی سمستر جدید"/);
  assert.match(html,/class="semester-play-circle"/);
- const client=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.js"),env());
+ const client=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.js"),env());
  const code=await client.text();
  assert.match(code,/semesterCover\.addEventListener\("click"/);
  assert.match(code,/semesterVideo\.play\(\)/);
@@ -339,7 +343,7 @@ test("EAP is a complete, stand-alone multilingual academic guide with owner-conf
   ["/ps/courses/academic-english/","ps-AF","۱٬۰۰۰ افغانۍ","۲٬۰۰۰ افغانۍ"]
  ];
  for(const [path,lang,monthly,semester] of cases){
-  const result=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  const result=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
   assert.equal(result.status,200,path);
   const html=await result.text();
   assert.match(html,new RegExp('<html lang="'+lang+'" dir="'));
@@ -368,17 +372,17 @@ test("EAP is a complete, stand-alone multilingual academic guide with owner-conf
 });
 test("EAP preview remains unindexed, HEAD returns no body and no CMS records are mutated",async()=>{
  const before=JSON.stringify(main)+JSON.stringify(ps);
- const preview=await worker.fetch(new Request("https://preview.the-toefl-house.pages.dev/fa/courses/academic-english/"),env());
+ const preview=await worker.fetch(new Request("https://preview.toeflhouse.pages.dev/fa/courses/academic-english/"),env());
  assert.equal(preview.status,200);
  assert.match(preview.headers.get("X-Robots-Tag"),/noindex/);
- const h=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/courses/academic-english/",{method:"HEAD"}),env());
+ const h=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/courses/academic-english/",{method:"HEAD"}),env());
  assert.equal(h.status,200);
  assert.equal(await h.text(),"");
  assert.equal(JSON.stringify(main)+JSON.stringify(ps),before,"published CMS object must not be changed");
 });
 test("New semester billboard promotes the EAP page directly on all three homepages",async()=>{
  for(const path of ["/","/fa/","/ps/"]){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
   assert.equal(r.status,200);
   const html=await r.text();
   assert.match(html,/class="semester-eap-spotlight"/);
@@ -393,7 +397,7 @@ test("New semester billboard promotes the EAP page directly on all three homepag
 
 test("EAP four levels retain three series while distinguishing publisher editions and book numbers",async()=>{
  for(const lang of ["/","/fa/","/ps/"]){
-  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+lang+"courses/academic-english/"),env());
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+lang+"courses/academic-english/"),env());
   assert.equal(response.status,200);
   const html=await response.text();
   const sections=[...html.matchAll(/<li class="eap-level">([\s\S]*?)(?=<li class="eap-level">|<\/ol>)/g)];
@@ -427,7 +431,7 @@ test("EAP four levels retain three series while distinguishing publisher edition
 });
 
 test("Published read-only API restores the exact public CMS contract in all languages",async()=>{
- const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),env());
+ const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env());
  assert.equal(response.status,200);
  assert.match(response.headers.get("Content-Type"),/application\/json/);
  assert.match(response.headers.get("X-Robots-Tag"),/noindex/);
@@ -438,30 +442,30 @@ test("Published read-only API restores the exact public CMS contract in all lang
  assert.equal(publicContent.psRevision,40);
  for(const l of ["en","fa","ps"])assert.equal(publicContent.locales[l].programs.length,7);
  assert.deepEqual(publicContent.locales.en.programs.map(p=>p.id),allIds);
- const head=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content",{method:"HEAD"}),env());
+ const head=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content",{method:"HEAD"}),env());
  assert.equal(head.status,200);
  assert.equal(await head.text(),"");
 });
 test("Public CMS endpoint rejects protected fields and never leaks drafts",async()=>{
  const unsafe={...main,locales:{...main.locales,en:{...main.locales.en, password_hash:"secret-do-not-publish"}}};
- const bad=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),env(unsafe,ps));
+ const bad=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env(unsafe,ps));
  assert.equal(bad.status,503);
  assert.ok(!(await bad.text()).includes("secret-do-not-publish"));
- const missing=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),{});
+ const missing=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),{});
  assert.equal(missing.status,503);
  const before=JSON.stringify(main)+JSON.stringify(ps);
- const normal=await worker.fetch(new Request("https://the-toefl-house.pages.dev/api/content"),env());
+ const normal=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env());
  assert.equal(normal.status,200);
  assert.equal(JSON.stringify(main)+JSON.stringify(ps),before,"GET may not mutate CMS fixtures");
 });
 
 test("Language selector labels and textbook pronunciation are accessible in all three languages",async()=>{
  for(const [path,label] of [["/","Choose language"],["/fa/","انتخاب زبان"],["/ps/","ژبه وټاکئ"]]){
-  const home=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path),env());
+  const home=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
   assert.equal(home.status,200);
   const html=await home.text();
   assert.ok(html.includes('class="language-links" role="group" aria-label="'+label+'">'),path+" chooser has invalid accessible label");
-  const academic=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+path+"courses/academic-english/"),env());
+  const academic=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path+"courses/academic-english/"),env());
   assert.equal(academic.status,200);
   const eapHtml=await academic.text();
   assert.match(eapHtml,/<li dir="ltr" lang="en">ACTIVE Skills for Reading 1/);
@@ -472,7 +476,7 @@ test("Language selector labels and textbook pronunciation are accessible in all 
 test("Public pages expose canonical branded social previews in EN, Dari and Pashto",async()=>{
  for(const root of ["/","/fa/","/ps/"]){
   for(const route of ["","courses/academic-english/","admissions/"]){
-   const path=root+route,source="https://the-toefl-house.pages.dev"+path;
+   const path=root+route,source="https://toeflhouse.pages.dev"+path;
    const res=await worker.fetch(new Request(source),env());
    assert.equal(res.status,200,path);
    const html=await res.text();
@@ -486,7 +490,7 @@ test("Public pages expose canonical branded social previews in EN, Dari and Pash
 
 test("Known retired anchors use current admissions, while unknown fragments never hijack visitors",async()=>{
  const {runInNewContext}=await import("node:vm");
- const client=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.js"),env());
+ const client=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.js"),env());
  const source=await client.text();
  function visit(pathname,hash,hasTarget=false){
   const redirects=[];
@@ -513,7 +517,7 @@ test("Known retired anchors use current admissions, while unknown fragments neve
 test("Dari and Pashto course breadcrumbs announce a localized navigation name",async()=>{
  for(const [prefix,label] of [["/","Breadcrumb"],["/fa/","مسیر دسترسی به صفحه"],["/ps/","د پاڼې د لاسرسي لاره"]]){
   for(const section of ["courses/academic-english/","courses/toefl-preparation/"]){
-   const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+prefix+section),env());
+   const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+section),env());
    assert.equal(response.status,200);
    const html=await response.text();
    assert.ok(html.includes('class="breadcrumbs" aria-label="'+label+'"'),prefix+section+" breadcrumb not translated");
@@ -522,12 +526,12 @@ test("Dari and Pashto course breadcrumbs announce a localized navigation name",a
 });
 
 test("Program tiles expose a full tap target, and EAP level order is stable in RTL",async()=>{
- const cssResponse=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(cssResponse.status,200);
  const css=await cssResponse.text();
  assert.ok(css.includes('.course-card{position:relative}.course-bottom a::after{content:"";position:absolute;inset:0}'));
  for(const root of ["/","/fa/","/ps/"]){
-  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root+"courses/academic-english/"),env());
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root+"courses/academic-english/"),env());
   assert.equal(response.status,200);
   const html=await response.text();
   assert.match(html,/<span class="eap-visual-number" dir="ltr">01 — 04<\/span>/);
@@ -537,7 +541,7 @@ test("Program tiles expose a full tap target, and EAP level order is stable in R
 test("Special Speaking course pages use verified two-month curriculum and semester fee in all languages",async()=>{
  const langs=[["/","en","AFN 2,000"],["/fa/","fa-AF","۲٬۰۰۰ افغانی"],["/ps/","ps-AF","۲٬۰۰۰ افغانۍ"]];
  for(const [prefix,lang,tuition] of langs){
-  const url="https://the-toefl-house.pages.dev"+prefix+"courses/special-speaking/";
+  const url="https://toeflhouse.pages.dev"+prefix+"courses/special-speaking/";
   const res=await worker.fetch(new Request(url),env());
   assert.equal(res.status,200,prefix);
   assert.equal(res.headers.get("Content-Language"),lang,prefix);
@@ -564,7 +568,7 @@ test("TOEFL 2026 course describes all current ETS tasks, four months, and 1–6 
  "Build a Sentence","Write an Email","Write for an Academic Discussion",
  "Listen and Repeat","Take an Interview"];
  for(const root of ["/","/fa/","/ps/"]){
-  const url="https://the-toefl-house.pages.dev"+root+"courses/toefl-preparation/";
+  const url="https://toeflhouse.pages.dev"+root+"courses/toefl-preparation/";
   const response=await worker.fetch(new Request(url),env());
   assert.equal(response.status,200,root);
   const html=await response.text();
@@ -583,7 +587,7 @@ test("TOEFL 2026 course describes all current ETS tasks, four months, and 1–6 
 
 test("Home programme cards disclose the owner-approved speaking semester fee and updated TOEFL",async()=>{
  for(const root of ["/","/fa/","/ps/"]){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env());
   assert.equal(r.status,200);
   const html=await r.text();
   assert.ok(html.includes("Master Speaking"),root+" card missing authentic school text");
@@ -597,13 +601,13 @@ test("Home programme cards disclose the owner-approved speaking semester fee and
 test("High-visibility mobile admissions action exists on every language and preserves the selected course",async()=>{
  const cases=[["/","Free assessment"],["/fa/","تعیین سطح"],["/ps/","وړیا ارزونه"]];
  for(const [root,label] of cases){
-  const home=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  const home=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env());
   assert.equal(home.status,200);
   const html=await home.text();
   assert.match(html,new RegExp('class="mobile-quick-apply" href="'+root+'admissions/"'));
   assert.ok(html.includes('>'+label+'</a>'),root+" missing localized mobile CTA");
   for(const id of ["special-speaking","toefl-preparation","academic-english"]){
-   const course=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root+"courses/"+id+"/"),env());
+   const course=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root+"courses/"+id+"/"),env());
    assert.equal(course.status,200,root+id);
    const page=await course.text();
    assert.ok(page.includes('class="mobile-quick-apply" href="'+root+'admissions/?program='+id+'"'),root+id+" mobile context lost");
@@ -613,7 +617,7 @@ test("High-visibility mobile admissions action exists on every language and pres
 });
 
 test("Premium header uses CSS sticky layout and maintains usable mobile touch targets",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(r.status,200);
  const css=await r.text();
  assert.ok(css.includes('.site-header{position:sticky;'),"header must stay available when navigating long course pages");
@@ -630,7 +634,7 @@ test("Goal-first discovery is localized and routes visitors to actual program ca
  ];
  const goals=["general-english","special-speaking","academic-english","toefl-preparation"];
  for(const [root,label,phrases] of cases){
-  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env());
   assert.equal(response.status,200,root);
   const html=await response.text();
   assert.ok(html.includes('class="goal-finder" aria-label="'+label+'"'),root+" missing accessible localized discoverability");
@@ -646,7 +650,7 @@ test("Goal-first discovery is localized and routes visitors to actual program ca
 });
 
 test("Sticky navigation offsets preserve focused anchors and goal controls have touch targets",async()=>{
- const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(response.status,200);
  const css=await response.text();
  assert.ok(css.includes("html{scroll-padding-top:112px}"));
@@ -658,14 +662,14 @@ test("Sticky navigation offsets preserve focused anchors and goal controls have 
 test("International SEO declares the English fallback on every trilingual course and admissions page",async()=>{
  for(const root of ["/","/fa/","/ps/"]){
   for(const path of ["courses/special-speaking/","courses/toefl-preparation/","courses/academic-english/","admissions/"]){
-   const url="https://the-toefl-house.pages.dev"+root+path;
+   const url="https://toeflhouse.pages.dev"+root+path;
    const response=await worker.fetch(new Request(url),env());
    assert.equal(response.status,200,root+path);
    const html=await response.text();
    assert.ok(html.includes('<link rel="canonical" href="'+url+'">'),url+" canonical");
-   assert.ok(html.includes('<link rel="alternate" hreflang="x-default" href="https://the-toefl-house.pages.dev/'+path+'">'),url+" default international alternate");
+   assert.ok(html.includes('<link rel="alternate" hreflang="x-default" href="https://toeflhouse.pages.dev/'+path+'">'),url+" default international alternate");
    for(const [tag,prefix] of [["en","/"],["fa-AF","/fa/"],["ps-AF","/ps/"]]){
-    assert.ok(html.includes('<link rel="alternate" hreflang="'+tag+'" href="https://the-toefl-house.pages.dev'+prefix+path+'">'),url+" locale "+tag);
+    assert.ok(html.includes('<link rel="alternate" hreflang="'+tag+'" href="https://toeflhouse.pages.dev'+prefix+path+'">'),url+" locale "+tag);
    }
   }
  }
@@ -674,7 +678,7 @@ test("International SEO declares the English fallback on every trilingual course
 test("Home publishes six genuine localized courses in valid search structured data",async()=>{
  const expected=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training"];
  for(const prefix of ["/","/fa/","/ps/"]){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+prefix),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
   assert.equal(r.status,200);
   const html=await r.text();
   const match=html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
@@ -686,7 +690,7 @@ test("Home publishes six genuine localized courses in valid search structured da
   assert.ok(list,"course list missing");
   assert.equal(list.itemListElement.length,6);
   for(let i=0;i<expected.length;i++){
-   const row=list.itemListElement[i],url="https://the-toefl-house.pages.dev"+prefix+"courses/"+expected[i]+"/";
+   const row=list.itemListElement[i],url="https://toeflhouse.pages.dev"+prefix+"courses/"+expected[i]+"/";
    assert.equal(row.position,i+1);
    assert.equal(row.url,url);
    assert.equal(row.item["@type"],"Course");
@@ -706,7 +710,7 @@ test("Admissions displays the actual verified fee and never invents TOEFL tuitio
   ["/ps/",["۵۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۲٬۰۰۰ افغانۍ","څلور میاشتنی"]]
  ];
  for(const [root,terms] of checks){
-  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root+"admissions/"),env());
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root+"admissions/"),env());
   assert.equal(r.status,200);
   const body=await r.text();
   assert.ok(body.includes('id="v2-program-preview" role="status" aria-live="polite" hidden'),root+" missing accessible summary");
@@ -725,7 +729,7 @@ test("Course cards use concise localized headings, whole-card native hit areas, 
   ["/ps/","ps_AF","د کابل په دشت برچي کې د تافل هوس د ودانۍ بڼه","ځانګړې خبرې"]
  ];
  for(const [root,ogLocale,photoAlt,speakingTitle] of expected){
-  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env());
   assert.equal(response.status,200);
   const page=await response.text();
   assert.ok(page.includes('<meta property="og:locale" content="'+ogLocale+'">'),root+" missing correct OpenGraph locale");
@@ -734,13 +738,13 @@ test("Course cards use concise localized headings, whole-card native hit areas, 
   assert.ok(card,root+" missing Special Speaking card");
   assert.ok(card[1].includes("<h3>"+speakingTitle+"</h3>"),root+" course card title too verbose");
   assert.ok(card[1].includes('href="'+root+'courses/special-speaking/"'),root+" card must keep direct navigation without scripts");
-  const admissions=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root+"admissions/"),env());
+  const admissions=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root+"admissions/"),env());
   assert.equal(admissions.status,200);
   const form=await admissions.text();
   assert.ok(form.includes('<meta property="og:locale" content="'+ogLocale+'">'),root+" admissions OG locale");
   assert.ok(form.includes('alt="'+photoAlt+'" loading="lazy"'),root+" admissions campus photo needs descriptive alt");
  }
- const cssResponse=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(cssResponse.status,200);
  const css=await cssResponse.text();
  assert.ok(css.includes(".course-card{position:relative;cursor:pointer"),"whole-card click needs positioned card");
@@ -752,7 +756,7 @@ test("Dari editorial keeps standard Peh and says university; Pashto remains unch
  const d=structuredClone(main);
  d.locales.fa.programs[4].summary="برای محصلان پوهنتونی و تحصیل در پوهنتون‌های جهان.";
  d.locales.fa.stats.universityLabel="پذیرش پوهنتونی";
- const dari=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/"),env(d,ps));
+ const dari=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/"),env(d,ps));
  assert.equal(dari.status,200);
  const html=await dari.text();
  assert.ok(html.includes("دانشگاه‌های جهان"),"CMS Dari output must use edited university term");
@@ -760,17 +764,17 @@ test("Dari editorial keeps standard Peh and says university; Pashto remains unch
  assert.ok(html.includes("برای دانشگاه آماده شوم"),"new Dari discovery choice");
  assert.equal(html.includes("پوهنتون"),false,"no Pashto university noun in Dari HTML");
  assert.equal("پرسش‌های".codePointAt(0),0x067e,"Peh must remain U+067E");
- const pashto=await worker.fetch(new Request("https://the-toefl-house.pages.dev/ps/"),env(d,ps));
+ const pashto=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/"),env(d,ps));
  assert.equal(pashto.status,200);
  assert.match(await pashto.text(),/پوهنتون/,"Pashto vocabulary must not be changed");
- const academic=await worker.fetch(new Request("https://the-toefl-house.pages.dev/fa/courses/academic-english/"),env(d,ps));
+ const academic=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/courses/academic-english/"),env(d,ps));
  assert.equal(academic.status,200);
  const academicHtml=await academic.text();
  assert.equal(academicHtml.includes("پوهنتون"),false);
  assert.ok(academicHtml.includes("دانشگاه"));
 });
 test("Dari font is localized and mobile FAQ has a readable compact layout",async()=>{
- const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(r.status,200);
  const css=await r.text();
  assert.match(css,/font-family:THDari;src:url\("\/__th\/v2\/font\/vazirmatn-33\.003\.woff2"\)/);
