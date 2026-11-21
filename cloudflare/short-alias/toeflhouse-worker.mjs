@@ -48,6 +48,12 @@ function polishHtml(html,path) {
  html=html.replace(/(<link rel="alternate" hreflang="en" href=")[^"]*(")/i,'$1'+SHORT_ORIGIN+'/en/$2');
  html=html.replace(/<a\b[^>]*>/gi,tag=>/\bhreflang="en"/i.test(tag)?tag.replace(/href="\/"/i,'href="/en/"'):tag);
  html=html.replaceAll("تعیین سطح رایگان · صنف‌های آموزشی دارای فیس","");
+ html=html.replaceAll('<span>✓ فیس صنف‌های آموزشی جداگانه است</span>',"");
+ html=html.replaceAll('<span>✓ Tuition is charged separately</span>',"");
+ html=html.replaceAll('<span>✓ درسي ټولګي فیس لري</span>',"");
+ html=html.replaceAll("The placement assessment is free; tuition is payable for courses.","The placement assessment is free.");
+ html=html.replaceAll("بلی. تعیین سطح رایگان است؛ صنف‌ها فیس دارند.","بلی. تعیین سطح رایگان است.");
+ html=html.replaceAll("هو. د سویې ارزونه وړیا ده؛ درسي ټولګي فیس لري.","هو. د سویې ارزونه وړیا ده.");
  html=html.replaceAll("Free placement assessment · Tuition applies to courses","");
  html=html.replaceAll("Placement assessment is free; course tuition is separate.","");
  html=html.replaceAll("د سویې ارزونه وړیا ده · درسي ټولګي فیس لري","");
@@ -60,6 +66,10 @@ function polishHtml(html,path) {
  html=html.replaceAll("آدرس ما","نشانی مرکز");
  html=html.replaceAll("پیدا کردن آدرس کورس","مسیریابی تا مرکز");
  html=html.replaceAll("در کابل پذیرای شما هستیم.","تافل هوس در کابل");
+ html=html.replaceAll("Two-month semester, Master Speaking and grammar. Semester tuition: AFN 2,000. Confirm any separate book costs.","Two-month semester with a 16-lesson Grammar book and the Master Speaking schedule. Semester tuition: AFN 2,000; book cost is confirmed separately.");
+ html=html.replaceAll("سمستر دوماهه با کتاب اختصاصی Master Speaking و گرامر. فیس مجموعی سمستر ۲٬۰۰۰ افغانی؛ هزینهٔ جداگانهٔ کتاب‌ها را تأیید کنید.","سمستر دوماهه؛ کتاب Grammar (۱۶ درس) و برنامهٔ Master Speaking. فیس سمستر ۲٬۰۰۰ افغانی است؛ هزینهٔ کتاب جداگانه تأیید می‌شود.");
+ html=html.replaceAll("دوه میاشتنی سمستر د Master Speaking او ګرامر له کتابونو سره. د سمستر فیس ۲٬۰۰۰ افغانۍ؛ د کتابونو جلا بیه تایید کړئ.","دوه میاشتنی سمستر؛ د Grammar ۱۶ درسي کتاب او د Master Speaking مهالویش. د سمستر فیس ۲٬۰۰۰ افغانۍ دی؛ د کتاب بیه جلا تاییدېږي.");
+
  html=html.replace(/<p class="semester-free">[\s\S]*?<\/p>/gi,"");
  html=html.replace(/<div class="footer-bottom">([\s\S]*?)<span>\s*<\/span>/i,'<div class="footer-bottom">$1');
  if(!html.includes("footer-cta")) {

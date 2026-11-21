@@ -35,12 +35,16 @@ test("localized pages and admissions stay indexable on production and noindex on
   ["/fa/","fa-AF","goal-finder"],
   ["/ps/","ps-AF","goal-finder"],
   ["/en/","en","goal-finder"],
-  ["/fa/admissions/","fa-AF","v2-program"],
+  ["/fa/admissions/?program=special-speaking","fa-AF","v2-program"],
   ["/fa/courses/special-speaking/","fa-AF","Special Speaking"],
-  ["/en/admissions/","en","v2-program"]
+  ["/en/admissions/?program=special-speaking","en","v2-program"]
  ]){
   const {r,text}=await check(path);
   assert.equal(r.status,200,path);
+  assert.doesNotMatch(text,/Tuition is charged separately|فیس صنف‌های آموزشی جداگانه است|درسي ټولګي فیس لري|tuition is payable for courses|صنف‌ها فیس دارند/);
+  if(path.includes("/admissions/")&&path.startsWith("/fa/"))assert.ok(text.includes("Grammar (۱۶ درس)"),"Dari Special Speaking book details");
+  if(path.includes("/admissions/")&&path.startsWith("/ps/"))assert.ok(text.includes("Grammar ۱۶ درسي کتاب"),"Pashto Special Speaking book details");
+  if(path.includes("/admissions/")&&path.startsWith("/en/"))assert.ok(text.includes("16-lesson Grammar book"),"English Special Speaking book details");
   assert.match(text,new RegExp('<html lang="'+lang+'"'),path);
   assert.ok(text.includes(marker),path+" page content");
   assert.equal(r.headers.get("x-shortlink-source"),null);
