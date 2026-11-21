@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-const base="https://the-toefl-house.pages.dev";
+const base="https://toeflhouse.pages.dev";
 const cases=[
 {path:"/fa/courses/toefl-preparation/",paths:["/courses/toefl-preparation/","/fa/courses/toefl-preparation/","/ps/courses/toefl-preparation/","/fa/#programs"],lang:"fa-AF"},
 {path:"/ps/courses/special-speaking/",paths:["/courses/special-speaking/","/fa/courses/special-speaking/","/ps/courses/special-speaking/","/ps/#programs"],lang:"ps-AF"},
