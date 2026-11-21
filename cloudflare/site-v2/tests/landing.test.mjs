@@ -670,3 +670,50 @@ test("International SEO declares the English fallback on every trilingual course
   }
  }
 });
+
+test("Home publishes six genuine localized courses in valid search structured data",async()=>{
+ const expected=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training"];
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+prefix),env());
+  assert.equal(r.status,200);
+  const html=await r.text();
+  const match=html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  assert.ok(match,prefix+" lacks structured data");
+  const nodes=JSON.parse(match[1]);
+  assert.ok(Array.isArray(nodes),prefix+" must expose Organization and ItemList");
+  assert.equal(nodes[0]["@type"],"EducationalOrganization");
+  const list=nodes.find(x=>x["@type"]==="ItemList");
+  assert.ok(list,"course list missing");
+  assert.equal(list.itemListElement.length,6);
+  for(let i=0;i<expected.length;i++){
+   const row=list.itemListElement[i],url="https://the-toefl-house.pages.dev"+prefix+"courses/"+expected[i]+"/";
+   assert.equal(row.position,i+1);
+   assert.equal(row.url,url);
+   assert.equal(row.item["@type"],"Course");
+   assert.equal(row.item.url,url);
+   assert.ok(row.item.name.length>=3);
+   assert.ok(row.item.description.length>=10);
+   assert.equal(row.item.provider.name,"The TOEFL House");
+  }
+  assert.equal(list.itemListElement.some(x=>x.url.includes("online-individual-zoom")),false,"online is a format not a seventh course");
+ }
+});
+
+test("Admissions displays the actual verified fee and never invents TOEFL tuition",async()=>{
+ const checks=[
+  ["/",["AFN 500","AFN 1,000","AFN 2,000","Four-month preparation"]],
+  ["/fa/",["۵۰۰ افغانی","۱٬۰۰۰ افغانی","۲٬۰۰۰ افغانی","چهارماهه"]],
+  ["/ps/",["۵۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۲٬۰۰۰ افغانۍ","څلور میاشتنی"]]
+ ];
+ for(const [root,terms] of checks){
+  const r=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root+"admissions/"),env());
+  assert.equal(r.status,200);
+  const body=await r.text();
+  assert.ok(body.includes('id="v2-program-preview" role="status" aria-live="polite" hidden'),root+" missing accessible summary");
+  for(const term of terms)assert.ok(body.includes(term),root+" missing "+term);
+  const toe=body.match(/<option value="toefl-preparation" data-summary="([^"]+)"/);
+  assert.ok(toe,root+" missing TOEFL program");
+  assert.ok(!/AFN [0-9]|فیس [۰-۹]|فیس: [۰-۹]/.test(toe[1]),root+" must not invent TOEFL tuition");
+  assert.ok(body.includes('value="special-speaking" data-summary="'),root+" speaking facts missing");
+ }
+});
