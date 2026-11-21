@@ -37,6 +37,10 @@ function polishHtml(html,path) {
  html=html.replace(/(<link rel="alternate" hreflang="en" href=")[^"]*(")/i,'$1'+SHORT_ORIGIN+'/en/$2');
  html=html.replace(/<a\b[^>]*>/gi,tag=>/\bhreflang="en"/i.test(tag)?tag.replace(/href="\/"/i,'href="/en/"'):tag);
  html=html.replaceAll("تعیین سطح رایگان · صنف‌های آموزشی دارای فیس","");
+ html=html.replaceAll("Free placement assessment · Tuition applies to courses","");
+ html=html.replaceAll("Placement assessment is free; course tuition is separate.","");
+ html=html.replaceAll("د سویې ارزونه وړیا ده · درسي ټولګي فیس لري","");
+ html=html.replaceAll("د سویې وړیا ارزونه · ټولګي فیس لري","");
  html=html.replaceAll("تعیین سطح رایگان است؛ صنف‌های آموزشی فیس دارند.","");
  html=html.replaceAll("رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست.","");
  html=html.replaceAll("It does not make course tuition free.","");
