@@ -2,6 +2,7 @@
  * No enrollment, account, or finance data is fetched. CMS reads are read-only.
  * The original interactive portal remains reachable at /tools/ per language.
  */
+// This is the only public/canonical website host; legacy origin stays internal to the edge worker.
 const V2_ORIGIN="https://toeflhouse.pages.dev";
 const V2_IMG="/assets/aistudio/campus_dfe458a8.webp";
 const V2_CAMPUS_ALT={en:"Exterior of The TOEFL House campus in Dasht-e-Barchi, Kabul",fa:"نمای ساختمان تافل هوس در دشت برچی، کابل",ps:"د کابل په دشت برچي کې د تافل هوس د ودانۍ بڼه"};
