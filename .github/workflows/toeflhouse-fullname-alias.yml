@@ -1,0 +1,53 @@
+name: TOEFL House — Full-brand free hostname acceptance
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/short-alias/toeflhouse-worker.mjs'
+      - 'cloudflare/short-alias/tests/**'
+      - '.github/workflows/toeflhouse-fullname-alias.yml'
+  workflow_dispatch:
+    inputs:
+      alias_url:
+        description: 'Approved Pages preview or full-name production address'
+        required: false
+        default: 'https://full-brand-shortlink-preview.toeflhouse.pages.dev'
+permissions:
+  contents: read
+jobs:
+  public-smoke:
+    name: EN, Dari, Pashto, assets, privacy and admission routes
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://full-brand-shortlink-preview.toeflhouse.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate read-only public alias
+        run: node --test cloudflare/short-alias/tests/shortlink.test.mjs
+  real-browser:
+    name: Android-size Chrome, language switching, course to admissions
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://full-brand-shortlink-preview.toeflhouse.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Playwright driver
+        run: npm install --prefix /tmp/toefl-short-browser --no-save playwright-core@1.56.0 --silent
+      - name: Verify actual visual and interaction behavior
+        run: node cloudflare/short-alias/tests/browser.cjs
+      - name: Archive browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toeflhouse-free-domain-mobile-evidence
+          path: /tmp/toefl-short-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 14
