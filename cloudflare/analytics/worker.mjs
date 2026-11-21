@@ -1,4 +1,4 @@
-const ORIGIN = "https://the-toefl-house.pages.dev";
+const ORIGIN = "https://toeflhouse.pages.dev";
 const REDIRECTS = {
   "/wa": { event: "whatsapp", destination: "https://wa.me/93794357509" },
   "/call": { event: "phone", destination: "tel:+93745651844" },
