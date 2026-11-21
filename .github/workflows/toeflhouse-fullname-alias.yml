@@ -1,4 +1,4 @@
-name: TOEFL House — Full-brand free hostname acceptance
+name: TOEFL House — Full-brand free production address QA
 on:
   push:
     branches: [main]
@@ -11,7 +11,7 @@ on:
       alias_url:
         description: 'Approved Pages preview or full-name production address'
         required: false
-        default: 'https://full-brand-shortlink-preview.toeflhouse.pages.dev'
+        default: 'https://toeflhouse.pages.dev'
 permissions:
   contents: read
 jobs:
@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 9
     env:
-      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://full-brand-shortlink-preview.toeflhouse.pages.dev' }}
+      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://full-brand-shortlink-preview.toeflhouse.pages.dev' }}
+      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
