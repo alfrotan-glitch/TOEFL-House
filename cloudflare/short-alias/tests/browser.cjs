@@ -33,7 +33,7 @@ const isPreview=new URL(base).hostname!=="toeflhouse.pages.dev";
    const expectedCanonical=path==="/" ? "https://toeflhouse.pages.dev/fa/" : "https://toeflhouse.pages.dev"+path;
    assert.equal(view.canonical,expectedCanonical,path+" canonical host/path");
    assert.ok(view.footerCta,path+" footer admissions CTA");
-   assert.doesNotMatch(view.copy,/صنف‌های آموزشی دارای فیس|رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست|Tuition applies to courses/i,path+" obsolete tuition disclaimer");
+   assert.doesNotMatch(view.copy,/صنف‌های آموزشی دارای فیس|رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست|course tuition is separate|Tuition applies to courses/i,path+" obsolete tuition disclaimer");
    await page.screenshot({path:"/tmp/toefl-short-evidence/home-"+lang+"-"+(path==="/"?"root":"localized")+".png"});
    checked++;
   }
