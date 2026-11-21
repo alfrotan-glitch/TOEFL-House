@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../worker.mjs";
 
-const canonical="https://the-toefl-house.pages.dev";
+const canonical="https://toeflhouse.pages.dev";
 const preview="https://v18upgrade.the-toefl-house.pages.dev";
 const pinned="https://0c14f299.the-toefl-house.pages.dev";
 
