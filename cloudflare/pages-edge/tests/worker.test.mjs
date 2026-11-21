@@ -62,7 +62,7 @@ test("the same-origin event script avoids PII and supports click types",async()=
     assert.match(s,/\"whatsapp\"/);
     assert.match(s,/\"phone\"/);
     assert.match(s,/\"admissions\"/);
-    assert.match(s,/location\.hostname!==\"the-toefl-house\.pages\.dev\"/);
+    assert.match(s,/location\.hostname!==\"toeflhouse\.pages\.dev\"/);
     assert.doesNotMatch(s,/form\.elements|formData|localStorage/i);
   });
 });
