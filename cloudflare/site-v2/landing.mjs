@@ -157,7 +157,7 @@ function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موف
 // This also normalizes legacy, editable CMS copy at render time without
 // rewriting the database or altering Pashto's correct "پوهنتون".
 function v2DariEditorial(html,locale){
- return locale!=="fa"?html:html.replace(/پوهنتونی/g,"دانشگاهی").replace(/پوهنتون/g,"دانشگاه");
+ return locale!=="fa"?html:html.replace(/پوهنتونی/g,"دانشگاهی").replace(/پوهنتون/g,"دانشگاه").replace(/روبروی/g,"روبه‌روی");
 }
 
 function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
