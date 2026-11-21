@@ -877,3 +877,11 @@ html[lang=fa-AF] body{font-family:THDari,THArabic,Tahoma,sans-serif;line-height:
 html[lang=fa-AF] .brand small{font-family:THDari,THArabic,Tahoma,sans-serif}
 @media(max-width:760px){.faq-section.section{padding:54px 0 64px}.faq-aside{margin-bottom:26px}.faq-aside>p:not(.eyebrow){font-size:14px;line-height:1.8}.faq-section .text-link{font-size:14px;line-height:1.55}.faq-list summary{font-size:15px;padding:18px 0;line-height:1.65;gap:15px}.faq-list details p{font-size:14px;line-height:1.9;margin-bottom:21px}html[dir=rtl] .faq-section .faq-aside h2{font-size:clamp(26px,6.4vw,30px);line-height:1.5}}
 @media(max-width:760px){html{scroll-behavior:auto}}
+
+/* Compact, balanced footer: keep the address, hours and one clear next step. */
+.footer-main{gap:44px;padding:52px 0 40px}
+.footer-brand h2{font-size:27px;margin-bottom:10px}
+.footer-links{padding-top:12px;gap:12px 22px}
+.footer-cta{margin-top:22px;min-height:46px;padding:12px 18px;font-size:12px;align-self:flex-start}
+.footer-bottom{padding:16px 0 18px}
+@media(max-width:760px){.footer-main{padding:36px 0 28px}.footer-brand h2{font-size:23px}.footer-links{padding-top:20px;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.footer-bottom{padding:13px 0 15px}.footer-bottom span{margin:0}.footer-cta{margin-top:18px}}
