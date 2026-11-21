@@ -7,9 +7,9 @@ const urls=[...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>
 const paths=[...new Set(urls.map(s=>new URL(s).pathname))];
 const ids=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
 const guideIds=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
-for(const lang of ["","fa/","ps/"]){expectedPaths.push("/"+lang+"guides/");for(const id of guideIds)expectedPaths.push("/"+lang+"guides/"+id+"/");}
 const expectedPaths=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
 for(const lang of ["","fa/","ps/"]){for(const id of ids)expectedPaths.push("/"+lang+"courses/"+id+"/");}
+for(const lang of ["","fa/","ps/"]){expectedPaths.push("/"+lang+"guides/");for(const id of guideIds)expectedPaths.push("/"+lang+"guides/"+id+"/");}
 const check=new Set(paths), failures=[],rows=[];
 for(const path of expectedPaths){if(!check.has(path))failures.push("missing sitemap entry "+path);}
 for(const path of paths){
