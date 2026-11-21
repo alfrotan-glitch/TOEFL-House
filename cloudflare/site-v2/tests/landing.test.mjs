@@ -717,3 +717,33 @@ test("Admissions displays the actual verified fee and never invents TOEFL tuitio
   assert.ok(body.includes('value="special-speaking" data-summary="'),root+" speaking facts missing");
  }
 });
+
+test("Course cards use concise localized headings, whole-card native hit areas, and descriptive campus images",async()=>{
+ const expected=[
+  ["/","en_US","Exterior of The TOEFL House campus in Dasht-e-Barchi, Kabul","Special Speaking"],
+  ["/fa/","fa_AF","نمای ساختمان تافل هوس در دشت برچی، کابل","مکالمهٔ ویژه"],
+  ["/ps/","ps_AF","د کابل په دشت برچي کې د تافل هوس د ودانۍ بڼه","ځانګړې خبرې"]
+ ];
+ for(const [root,ogLocale,photoAlt,speakingTitle] of expected){
+  const response=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root),env());
+  assert.equal(response.status,200);
+  const page=await response.text();
+  assert.ok(page.includes('<meta property="og:locale" content="'+ogLocale+'">'),root+" missing correct OpenGraph locale");
+  assert.ok(page.includes('alt="'+photoAlt+'" fetchpriority="high"'),root+" campus image requires meaningful native language alt");
+  const card=page.match(/<article id="course-special-speaking" class="course-card [^"]*">([\s\S]*?)<\/article>/);
+  assert.ok(card,root+" missing Special Speaking card");
+  assert.ok(card[1].includes("<h3>"+speakingTitle+"</h3>"),root+" course card title too verbose");
+  assert.ok(card[1].includes('href="'+root+'courses/special-speaking/"'),root+" card must keep direct navigation without scripts");
+  const admissions=await worker.fetch(new Request("https://the-toefl-house.pages.dev"+root+"admissions/"),env());
+  assert.equal(admissions.status,200);
+  const form=await admissions.text();
+  assert.ok(form.includes('<meta property="og:locale" content="'+ogLocale+'">'),root+" admissions OG locale");
+  assert.ok(form.includes('alt="'+photoAlt+'" loading="lazy"'),root+" admissions campus photo needs descriptive alt");
+ }
+ const cssResponse=await worker.fetch(new Request("https://the-toefl-house.pages.dev/__th/v2/site.css"),env());
+ assert.equal(cssResponse.status,200);
+ const css=await cssResponse.text();
+ assert.ok(css.includes(".course-card{position:relative;cursor:pointer"),"whole-card click needs positioned card");
+ assert.ok(css.includes('.course-bottom a::after{content:"";position:absolute;inset:0;z-index:1'),"native link must have a full-card hit area");
+ assert.ok(css.includes(".course-card:focus-within"),"keyboard focus must reveal the selected card");
+});
