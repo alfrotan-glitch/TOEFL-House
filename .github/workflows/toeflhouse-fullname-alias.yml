@@ -31,12 +31,11 @@ jobs:
       - run: node --check cloudflare/short-alias/toeflhouse-worker.mjs
 
   public-smoke:
-    if: github.event_name != 'pull_request'
     name: EN, Dari, Pashto, assets, privacy and admission routes
     runs-on: ubuntu-latest
     timeout-minutes: 9
     env:
-      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://toeflhouse.pages.dev' }}
+      TH_SHORT_BASE: ${{ github.event_name == 'pull_request' && 'https://website-polish-canonical-sho.toeflhouse.pages.dev' || inputs.alias_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,12 +44,11 @@ jobs:
       - name: Validate read-only public alias
         run: node --test cloudflare/short-alias/tests/shortlink.test.mjs
   real-browser:
-    if: github.event_name != 'pull_request'
     name: Android-size Chrome, language switching, course to admissions
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      TH_SHORT_BASE: ${{ inputs.alias_url || 'https://toeflhouse.pages.dev' }}
+      TH_SHORT_BASE: ${{ github.event_name == 'pull_request' && 'https://website-polish-canonical-sho.toeflhouse.pages.dev' || inputs.alias_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
