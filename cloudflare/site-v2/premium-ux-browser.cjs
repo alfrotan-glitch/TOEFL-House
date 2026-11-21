@@ -95,6 +95,12 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2),false,route+" overflow");
     await page.locator(".mobile-quick-apply").click();
     await page.waitForURL(new RegExp("/admissions/\\?program="+program),{timeout:12000});
+    const shortLabels={
+     en:{"special-speaking":"Special Speaking","toefl-preparation":"TOEFL Preparation","academic-english":"Academic English"},
+     "fa-AF":{"special-speaking":"مکالمهٔ ویژه","toefl-preparation":"آمادگی تافل","academic-english":"انگلیسی اکادمیک"},
+     "ps-AF":{"special-speaking":"ځانګړې خبرې","toefl-preparation":"د TOEFL چمتووالی","academic-english":"اکاډمیکه انګلیسي"}
+    };
+    assert.equal((await page.locator("#v2-program option:checked").textContent()).trim(),shortLabels[lang][program],route+" admissions option is too verbose or not localized");
     const formRect=await page.locator(".admissions-formbox").boundingBox();
     assert.ok(formRect&&formRect.y<570,route+" admissions form buried below the first mobile screen: "+formRect?.y);
     const selectRect=await page.locator("#v2-program").boundingBox();
