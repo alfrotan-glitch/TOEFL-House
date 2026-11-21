@@ -39,7 +39,7 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     assert.equal(d.cards,6,root+" "+width+" course choices");
     assert.equal(d.ctaVisible,mobile,root+" "+width+" visibility of quick placement");
     assert.equal(d.ctaHref,root+"admissions/");
-    await page.evaluate(()=>window.scrollTo(0,1000));
+    await page.evaluate(()=>{document.documentElement.style.scrollBehavior="auto";window.scrollTo(0,1000);});
     await page.waitForTimeout(90);
     const pinned=await page.locator(".site-header").evaluate(el=>Math.abs(el.getBoundingClientRect().top)<4);
     assert.equal(pinned,true,root+" "+width+" sticky header fails");
