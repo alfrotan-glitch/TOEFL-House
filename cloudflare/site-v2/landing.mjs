@@ -266,7 +266,8 @@ function v2CourseListSchema(locale,content){
   const course=programs.find(p=>p.id===id)||{};
   const url=V2_ORIGIN+root+"courses/"+id+"/";
   const name=String(course.title||names[i]).trim().slice(0,180);
-  const description=String(course.summary||course.details||name+" course at The TOEFL House in Kabul.").replace(/\s+/g," ").trim().slice(0,280);
+  const summary=String(course.summary||course.details||"").replace(/\s+/g," ").trim();
+  const description=(summary.length>=10?summary:name+" course at The TOEFL House in Kabul.").slice(0,280);
   return {"@type":"ListItem","position":i+1,"url":url,"item":{"@type":"Course","name":name,"description":description,"url":url,"provider":provider}};
  })};
 }
