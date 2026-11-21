@@ -1,0 +1,29 @@
+name: TOEFL House — Free short Cloudflare address acceptance
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/short-alias/**'
+      - '.github/workflows/toefl-house-short-alias.yml'
+  workflow_dispatch:
+    inputs:
+      short_url:
+        description: "Approved Cloudflare preview or production short link"
+        required: false
+        default: "https://shortlink-preview.thaf.pages.dev"
+permissions:
+  contents: read
+jobs:
+  smoke:
+    name: Dari default, EN/PS, admissions, safe proxy and SEO
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      TH_SHORT_BASE: ${{ inputs.short_url || 'https://shortlink-preview.thaf.pages.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify live Cloudflare short alias without writes
+        run: node --test cloudflare/short-alias/tests/shortlink.test.mjs
