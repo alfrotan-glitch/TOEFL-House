@@ -48,7 +48,7 @@ const V2_ADMISSIONS_FACTS={
   "general-english": "Pre-Starter: 1 month; other levels: 2 months each. Tuition: AFN 500 per month. Confirm current class times.",
   "academic-english": "Four levels, 2 months each. Tuition: AFN 1,000 per month (AFN 2,000 per level).",
   "toefl-preparation": "Four-month preparation for the 2026 TOEFL iBT. Confirm tuition, class times and current enrollment.",
-  "special-speaking": "Two-month semester, Master Speaking and grammar. Semester tuition: AFN 2,000. Confirm any separate book costs.",
+  "special-speaking": "Two-month semester with a 16-lesson Grammar book and the Master Speaking schedule. Semester tuition: AFN 2,000; book cost is confirmed separately.",
   "professional-writing": "Two-month course. Please confirm tuition, teaching materials and current class times.",
   "teacher-training": "Two-month teacher-training course. Confirm tuition, practical requirements and available shifts.",
   "online-individual-zoom": "One-to-one online learning by arrangement. Subject, instructor, time zone and fee are confirmed with admissions."
@@ -57,7 +57,7 @@ const V2_ADMISSIONS_FACTS={
   "general-english": "Pre-Starter: یک ماه؛ سایر سطح‌ها: هر کدام دو ماه. فیس ماهانه: ۵۰۰ افغانی. وقت فعلی صنف را از پذیرش بپرسید.",
   "academic-english": "چهار سطح؛ هر سطح دو ماه. فیس ماهانه ۱٬۰۰۰ افغانی (هر سطح ۲٬۰۰۰ افغانی).",
   "toefl-preparation": "دورهٔ چهارماهه مطابق ساختار TOEFL iBT سال ۲۰۲۶. فیس و تقسیم اوقات را با پذیرش تأیید کنید.",
-  "special-speaking": "سمستر دوماهه با کتاب اختصاصی Master Speaking و گرامر. فیس مجموعی سمستر ۲٬۰۰۰ افغانی؛ هزینهٔ جداگانهٔ کتاب‌ها را تأیید کنید.",
+  "special-speaking": "سمستر دوماهه؛ کتاب Grammar (۱۶ درس) و برنامهٔ Master Speaking. فیس سمستر ۲٬۰۰۰ افغانی است؛ هزینهٔ کتاب جداگانه تأیید می‌شود.",
   "professional-writing": "دورهٔ دوماههٔ نگارش مسلکی. فیس، کتاب‌های درسی و تقسیم اوقات را از پذیرش بپرسید.",
   "teacher-training": "دورهٔ دوماههٔ تربیهٔ استاد. فیس، شرایط تمرین عملی و وقت صنف را با پذیرش تأیید کنید.",
   "online-individual-zoom": "صنف آنلاین انفرادی با هماهنگی قبلی. موضوع، استاد، منطقهٔ زمانی و فیس با پذیرش مشخص می‌شود."
@@ -66,7 +66,7 @@ const V2_ADMISSIONS_FACTS={
   "general-english": "Pre-Starter: یوه میاشت؛ نورې کچې: هره یوه دوه میاشتې. میاشتنی فیس: ۵۰۰ افغانۍ. دقیق مهالویش تایید کړئ.",
   "academic-english": "څلور کچې، هره کچه دوه میاشتې. میاشتنی فیس ۱٬۰۰۰ افغانۍ (د هرې کچې فیس ۲٬۰۰۰ افغانۍ).",
   "toefl-preparation": "د ۲۰۲۶ TOEFL iBT له نوې بڼې سره سم څلور میاشتنی چمتووالی. فیس او مهالویش له ادارې سره تایید کړئ.",
-  "special-speaking": "دوه میاشتنی سمستر د Master Speaking او ګرامر له کتابونو سره. د سمستر فیس ۲٬۰۰۰ افغانۍ؛ د کتابونو جلا بیه تایید کړئ.",
+  "special-speaking": "دوه میاشتنی سمستر؛ د Grammar ۱۶ درسي کتاب او د Master Speaking مهالویش. د سمستر فیس ۲٬۰۰۰ افغانۍ دی؛ د کتاب بیه جلا تاییدېږي.",
   "professional-writing": "د مسلکي لیکنې دوه میاشتنی کورس. فیس، درسي کتابونه او مهالویش له ادارې وپوښتئ.",
   "teacher-training": "د ښوونکو د روزنې دوه میاشتنی کورس. فیس، عملي شرایط او موجود وختونه تایید کړئ.",
   "online-individual-zoom": "انفرادي آنلاین زده‌کړه د همغږۍ له مخې؛ موضوع، ښوونکی، مهالویش او فیس له ادارې سره ټاکل کېږي."
