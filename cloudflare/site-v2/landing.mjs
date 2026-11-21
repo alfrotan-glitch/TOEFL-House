@@ -31,7 +31,7 @@ const V2_COPY={
   faqLabel:"GOOD TO KNOW",faqTitle:"Questions before you enroll?",faqLead:"Essential information about placement, tuition and available classes.",faqMore:"More questions? Message our team",
   visitLabel:"VISIT US",visitTitle:"Visit The TOEFL House in Kabul.",visitText:"Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi, Kabul, Afghanistan.",hours:"Classes Saturday–Thursday · Friday closed · Confirm class times with admissions",phone:"Call admissions",wa:"WhatsApp admissions",map:"Find our campus",
   finalEyebrow:"YOUR NEXT CHAPTER",finalTitle:"Your next step begins with the right level.",finalText:"Request a free placement assessment and ask our admissions team about current programs, fees and class times.",finalCta:"Request your free assessment",
-  footerLine:"Unlock the world with TOEFL.",footerRights:"All rights reserved.",footerNote:"",footPrograms:"Programs",footJoin:"Admissions",footTools:"Student tools",
+  footerRights:"All rights reserved.",footPrograms:"Programs",footTools:"Student tools",
   statsFallback:[["6,000+","Graduates since 2013"],["500+","TOEFL test-takers guided"],["100+","University admissions worldwide"]],courseNames:["General English","Academic English","TOEFL Preparation","Special Speaking","Professional Writing","Teacher Training"],fallbackFaq:[["Is the placement assessment free?","Yes. The placement assessment is free and helps identify a suitable starting level."],["Can I enroll without an email?","Yes. You may contact admissions through WhatsApp or by phone."],["Are online classes available?","Private online classes can be arranged based on teacher availability and time zones."]]
  },
  fa:{
@@ -50,7 +50,7 @@ const V2_COPY={
   faqLabel:"معلومات ضروری",faqTitle:"پرسش‌های مهم پیش از ثبت‌نام",faqLead:"معلومات روشن دربارهٔ تعیین سطح، فیس و شیوهٔ اشتراک در صنف‌ها.",faqMore:"پرسش دیگری دارید؟ در واتساپ پیام بدهید",
   visitLabel:"نشانی مرکز",visitTitle:"تافل هوس در کابل",visitText:"کابل، دشت برچی، ایستگاه مغازه، روبروی مرکز جلیلی، افغانستان.",hours:"صنف‌ها از شنبه تا پنج‌شنبه · جمعه رخصت · وقت دقیق صنف را از پذیرش بپرسید",phone:"تماس با پذیرش",wa:"واتساپ پذیرش",map:"مسیریابی تا مرکز",
   finalEyebrow:"گام بعدی شما",finalTitle:"برای پیشرفت، از سطح مناسب آغاز کنید.",finalText:"تعیین سطح رایگان انجام دهید و دربارهٔ صنف‌های موجود، فیس و تقسیم اوقات از پذیرش معلومات بگیرید.",finalCta:"درخواست تعیین سطح رایگان",
-  footerLine:"با تافل، دریچه‌های تازه‌ای به جهان باز کنید.",footerRights:"تمام حقوق محفوظ است.",footerNote:"",footPrograms:"برنامه‌ها",footJoin:"پذیرش",footTools:"ابزارهای درسی",
+  footerRights:"تمام حقوق محفوظ است.",footPrograms:"برنامه‌ها",footTools:"ابزارهای درسی",
   statsFallback:[["۶٬۰۰۰+","فارغ‌التحصیل از سال ۲۰۱۳"],["۵۰۰+","اشتراک‌کننده در تافل"],["۱۰۰+","پذیرش در دانشگاه‌های جهان"]],courseNames:["انگلیسی عمومی","انگلیسی اکادمیک","آمادگی تافل","مکالمهٔ ویژه","نگارش مسلکی","تربیهٔ استاد"],fallbackFaq:[["آیا تعیین سطح رایگان است؟","بلی، تعیین سطح رایگان است و برای انتخاب سطح مناسب کمک می‌کند."],["آیا بدون ایمیل می‌توانم معلومات بگیرم؟","بلی. از طریق واتساپ یا تماس تلفونی با بخش پذیرش در ارتباط شوید."],["آیا صنف آنلاین دارید؟","صنف‌های آنلاین انفرادی مطابق ظرفیت استاد و منطقهٔ زمانی با هماهنگی برگزار می‌شود."]]
  },
  ps:{
@@ -69,7 +69,7 @@ const V2_COPY={
   faqLabel:"اړین معلومات",faqTitle:"له نوم‌لیکنې مخکې مهمې پوښتنې",faqLead:"د سویې ارزونې، فیس او د ټولګیو د ګډون په اړه روښانه ځوابونه.",faqMore:"نورې پوښتنې لرئ؟ موږ ته په واټساپ پیغام واستوئ",
   visitLabel:"زموږ پته",visitTitle:"په کابل کې تافل هوس ته راشئ.",visitText:"کابل، دشت برچي، مغازه تمځای، د جلیلي مرکز مخامخ، افغانستان.",hours:"ټولګي له شنبې تر پنجشنبې · جمعه رخصتي · د ټولګي دقیق وخت له ادارې وپوښتئ",phone:"له ادارې سره اړیکه",wa:"د واټساپ اړیکه",map:"زموږ ځای ومومئ",
   finalEyebrow:"ستاسو راتلونکی ګام",finalTitle:"خپل پرمختګ له مناسبې کچې پیل کړئ.",finalText:"د سویې وړیا ارزونه وغواړئ او د شته ټولګیو، فیس او مهالوېش په اړه له ادارې معلومات واخلئ.",finalCta:"د وړیا سویې معلومولو غوښتنه",
-  footerLine:"له TOEFL سره نړۍ ته ورسېږئ.",footerRights:"ټول حقونه خوندي دي.",footerNote:"",footPrograms:"پروګرامونه",footJoin:"نوم‌لیکنه",footTools:"د زده‌کړې وسایل",
+  footerRights:"ټول حقونه خوندي دي.",footPrograms:"پروګرامونه",footTools:"د زده‌کړې وسایل",
   statsFallback:[["۶٬۰۰۰+","له ۲۰۱۳ کال راهیسې فارغان"],["۵۰۰+","د TOEFL ازموینې لارښوونه ترلاسه کوونکي"],["۱۰۰+","په نړیوالو پوهنتونونو کې منل شوي"]],courseNames:["عمومي انګلیسي","اکاډمیکه انګلیسي","د TOEFL چمتووالی","ځانګړې خبرې","مسلکي لیکنه","د ښوونکو روزنه"],fallbackFaq:[["آیا د سویې معلومول وړیا دي؟","هو. د سویې ارزونه وړیا ده او د مناسبې کچې په ټاکلو کې مرسته کوي."],["له ایمیل پرته نوم‌لیکنه کېدای شي؟","هو. له ادارې سره په واټساپ یا ټیلیفون اړیکه ونیسئ."],["آنلاین ټولګي شته؟","انفرادي آنلاین ټولګي د ښوونکي د وخت او ظرفیت له مخې همغږي کېږي."]]
  }
 };
@@ -86,8 +86,7 @@ const V2_SEMESTER={
    "Academic English · EAP",
    "Special Speaking"
   ],
-  "free": "",
-  "cta": "Request a free placement assessment",
+    "cta": "Request a free placement assessment",
   "secondary": "Explore all six programs",
   "videoLabel": "Watch our new semester announcement",
   "play": "Play the new semester video",
@@ -110,8 +109,7 @@ const V2_SEMESTER={
    "Academic English · EAP",
    "Special Speaking"
   ],
-  "free": "",
-  "cta": "درخواست تعیین سطح رایگان",
+    "cta": "درخواست تعیین سطح رایگان",
   "secondary": "دیدن تمام شش برنامه",
   "videoLabel": "ویدیوی معرفی سمستر جدید تافل هوس",
   "play": "پخش ویدیوی معرفی سمستر جدید",
@@ -134,8 +132,7 @@ const V2_SEMESTER={
    "Academic English · EAP",
    "Special Speaking"
   ],
-  "free": "",
-  "cta": "د سویې د وړیا ارزونې غوښتنه",
+    "cta": "د سویې د وړیا ارزونې غوښتنه",
   "secondary": "ټول شپږ پروګرامونه وګورئ",
   "videoLabel": "د تافل هوس د نوي سمستر معرفي ویډیو",
   "play": "د نوي سمستر ویډیو پلې کړئ",
@@ -151,7 +148,7 @@ const V2_SEMESTER={
 function v2SemesterCampaign(locale){
  const p=v2Prefix(locale),c=V2_SEMESTER[locale];
  const signup=p+"admissions/?utm_source=website&amp;utm_campaign=qaws_1405_semester";
- return '<section class="semester-section" id="semester-qaws-1405" aria-labelledby="semester-heading"><div class="shell"><div class="semester-card"><div class="semester-copy"><p class="semester-eyebrow"><span class="semester-dot" aria-hidden="true"></span>'+v2T(c.eyebrow)+'</p><h2 id="semester-heading" class="semester-title">'+v2T(c.title)+' <span>'+v2T(c.accent)+'</span></h2><p class="semester-lead">'+v2T(c.lead)+'</p><ul class="semester-chips">'+c.chips.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul>'+(c.free?'<p class="semester-free"><span aria-hidden="true">✦</span> '+v2T(c.free)+'</p>':'')+'<div class="semester-actions"><a class="button semester-primary" href="'+signup+'">'+v2T(c.cta)+' <span aria-hidden="true">↗</span></a><a class="button semester-secondary" href="#programs">'+v2T(c.secondary)+'</a></div></div><div class="semester-media"><div class="semester-video-frame"><video class="semester-video" controls playsinline preload="none" poster="'+V2_IMG_640+'" width="720" height="1280" aria-label="'+v2T(c.videoLabel)+'"><source src="'+V2_SEMESTER_VIDEO+'" type="video/mp4">'+v2T(c.videoFallback)+'</video><button class="semester-video-cover" type="button" hidden aria-label="'+v2T(c.play)+'"><img src="'+V2_IMG_640+'" width="640" height="820" loading="lazy" decoding="async" alt=""><span class="semester-cover-shade" aria-hidden="true"></span><span class="semester-play-circle" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M8 5.6c0-.8.9-1.3 1.6-.9L20 11.2c.6.4.6 1.2 0 1.6L9.6 19.3C8.9 19.7 8 19.2 8 18.4V5.6z"/></svg></span><span class="semester-play-caption" aria-hidden="true">'+v2T(c.playText)+'</span></button><span class="semester-filmmark" aria-hidden="true">THE TOEFL HOUSE · 00:36</span></div><p class="semester-video-caption">'+v2T(c.videoCaption)+'</p></div></div><a class="semester-eap-spotlight" href="'+p+'courses/academic-english/"><span class="semester-eap-mark">EAP</span><span class="semester-eap-copy"><small>'+v2T(c.eapLabel)+'</small><strong>'+v2T(c.eapTeaser)+'</strong><span>'+v2T(c.eapDetail)+'</span></span><span class="semester-eap-link">'+v2T(c.eapLink)+' <span aria-hidden="true">↗</span></span></a></div></section>';
+ return '<section class="semester-section" id="semester-qaws-1405" aria-labelledby="semester-heading"><div class="shell"><div class="semester-card"><div class="semester-copy"><p class="semester-eyebrow"><span class="semester-dot" aria-hidden="true"></span>'+v2T(c.eyebrow)+'</p><h2 id="semester-heading" class="semester-title">'+v2T(c.title)+' <span>'+v2T(c.accent)+'</span></h2><p class="semester-lead">'+v2T(c.lead)+'</p><ul class="semester-chips">'+c.chips.map(x=>'<li>'+v2T(x)+'</li>').join("")+'</ul><div class="semester-actions"><a class="button semester-primary" href="'+signup+'">'+v2T(c.cta)+' <span aria-hidden="true">↗</span></a><a class="button semester-secondary" href="#programs">'+v2T(c.secondary)+'</a></div></div><div class="semester-media"><div class="semester-video-frame"><video class="semester-video" controls playsinline preload="none" poster="'+V2_IMG_640+'" width="720" height="1280" aria-label="'+v2T(c.videoLabel)+'"><source src="'+V2_SEMESTER_VIDEO+'" type="video/mp4">'+v2T(c.videoFallback)+'</video><button class="semester-video-cover" type="button" hidden aria-label="'+v2T(c.play)+'"><img src="'+V2_IMG_640+'" width="640" height="820" loading="lazy" decoding="async" alt=""><span class="semester-cover-shade" aria-hidden="true"></span><span class="semester-play-circle" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M8 5.6c0-.8.9-1.3 1.6-.9L20 11.2c.6.4.6 1.2 0 1.6L9.6 19.3C8.9 19.7 8 19.2 8 18.4V5.6z"/></svg></span><span class="semester-play-caption" aria-hidden="true">'+v2T(c.playText)+'</span></button><span class="semester-filmmark" aria-hidden="true">THE TOEFL HOUSE · 00:36</span></div><p class="semester-video-caption">'+v2T(c.videoCaption)+'</p></div></div><a class="semester-eap-spotlight" href="'+p+'courses/academic-english/"><span class="semester-eap-mark">EAP</span><span class="semester-eap-copy"><small>'+v2T(c.eapLabel)+'</small><strong>'+v2T(c.eapTeaser)+'</strong><span>'+v2T(c.eapDetail)+'</span></span><span class="semester-eap-link">'+v2T(c.eapLink)+' <span aria-hidden="true">↗</span></span></a></div></section>';
 }
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
 function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
@@ -239,11 +236,7 @@ function v2Programs(c,content,locale){
  return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div>'+goalNav+'<div class="courses-grid">'+cards+'</div></div></section>';
 }
 function v2CleanFaqAnswer(value){
- return String(value||"")
-  .replace(/\s*رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست\.?/g,"")
-  .replace(/\s*It does not make course tuition free\.?/gi,"")
-  .replace(/\s*د سویې وړیا ارزونه د دې معنا نه لري چې درسي ټولګي هم وړیا دي\.?/g,"")
-  .replace(/\s{2,}/g," ").trim();
+ return String(value||"").replace(/\s*(?:رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست|It does not make course tuition free|د سویې وړیا ارزونه د دې معنا نه لري چې درسي ټولګي هم وړیا دي)\.?/gi,"").trim();
 }
 function v2Faq(c,content,locale){
  const raw=locale==="ps"?content.pashto.faq:content.main.locales[locale].faq;
