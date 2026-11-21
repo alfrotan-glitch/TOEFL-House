@@ -66,6 +66,18 @@ if(enquiry){
  }
  enquiry.addEventListener("change",syncLanguageLinks);
  syncLanguageLinks();
+ // Read only human-reviewed public option facts; no personal information,
+ // network request, cookie or extra tracking is used in this preview.
+ var coursePreview=enquiry.querySelector("#v2-program-preview");
+ function updateCoursePreview(){
+  if(!coursePreview)return;
+  var choice=courseChoice&&courseChoice.selectedOptions&&courseChoice.selectedOptions[0];
+  var summary=choice?choice.getAttribute("data-summary")||"":"";
+  coursePreview.textContent=summary;
+  coursePreview.hidden=!summary;
+ }
+ enquiry.addEventListener("change",updateCoursePreview);
+ updateCoursePreview();
  enquiry.addEventListener("submit",function(event){
   event.preventDefault();
   if(!enquiry.checkValidity()){enquiry.reportValidity();return;}
