@@ -36,7 +36,7 @@ test("admissions link redirects and records date, campaign, source and course", 
   const x = testContext();
   const r = await worker.fetch(new Request(base + "/apply?s=facebook&c=launch2026&p=toefl-preparation"), x.env, x.ctx);
   assert.equal(r.status, 302);
-  assert.equal(r.headers.get("Location"), "https://the-toefl-house.pages.dev/admissions/");
+  assert.equal(r.headers.get("Location"), "https://toeflhouse.pages.dev/admissions/");
   await Promise.all(x.pending);
   assert.equal(x.written.length, 1);
   assert.equal(x.written[0][1], "admissions");
@@ -83,7 +83,7 @@ test("in-page event endpoint blocks other origins", async () => {
 test("in-page event from website may count a click", async () => {
   const x = testContext();
   const r = await worker.fetch(new Request(base + "/e", {
-    method:"POST",headers:{"Origin":"https://the-toefl-house.pages.dev","Content-Type":"application/json"},
+    method:"POST",headers:{"Origin":"https://toeflhouse.pages.dev","Content-Type":"application/json"},
     body:JSON.stringify({action:"whatsapp",source:"website",campaign:"homepage",course:"all"})
   }), x.env, x.ctx);
   assert.equal(r.status,204);
