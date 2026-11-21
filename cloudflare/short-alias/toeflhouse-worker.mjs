@@ -59,6 +59,7 @@ export default {
  async fetch(request) {
   const incoming=new URL(request.url);
   if(incoming.hostname!==SHORT_HOST&&!incoming.hostname.endsWith("."+SHORT_HOST))return plain("Unknown hostname",421);
+  const isPreview=incoming.hostname!==SHORT_HOST;
   if(request.method!=="GET"&&request.method!=="HEAD")return plain("Method not allowed",405,{"Allow":"GET, HEAD"});
   if(incoming.pathname==="/robots.txt") {
    return plain("User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\n",200,{"Cache-Control":"public, max-age=3600"});
@@ -87,7 +88,7 @@ export default {
   responseHeaders.delete("X-Robots-Tag");
   responseHeaders.set("X-Content-Type-Options","nosniff");
   responseHeaders.set("Referrer-Policy","strict-origin-when-cross-origin");
-  if(NOINDEX.test(incoming.pathname))responseHeaders.set("X-Robots-Tag","noindex, nofollow, noarchive");
+  if(isPreview||NOINDEX.test(incoming.pathname))responseHeaders.set("X-Robots-Tag","noindex, nofollow, noarchive");
   if(request.method==="HEAD")return new Response(null,{status:upstream.status,statusText:upstream.statusText,headers:responseHeaders});
   const contentType=upstream.headers.get("content-type")||"";
   if(HTML_TYPE.test(contentType)&&upstream.ok) {
