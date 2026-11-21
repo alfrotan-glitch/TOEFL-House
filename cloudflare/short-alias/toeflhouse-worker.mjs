@@ -62,7 +62,8 @@ export default {
   const isPreview=incoming.hostname!==SHORT_HOST;
   if(request.method!=="GET"&&request.method!=="HEAD")return plain("Method not allowed",405,{"Allow":"GET, HEAD"});
   if(incoming.pathname==="/robots.txt") {
-   return plain("User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\n",200,{"Cache-Control":"public, max-age=3600"});
+   const rules=isPreview?"User-agent: *\nDisallow: /\n":"User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\n";
+   return plain(rules,200,{"Cache-Control":"public, max-age=3600"});
   }
   if(incoming.pathname==="/__th/short-polish.css")return new Response(POLISH_CSS,{status:200,headers:{"Content-Type":"text/css; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}});
   if(BLOCKED.test(incoming.pathname))return plain("Not found",404,{"X-Robots-Tag":"noindex, nofollow"});
