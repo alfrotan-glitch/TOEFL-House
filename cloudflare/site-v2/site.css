@@ -847,3 +847,10 @@ html{scroll-padding-top:112px}
 @media(max-width:960px){.goal-finder{grid-template-columns:1fr;gap:14px}}
 @media(max-width:760px){html{scroll-padding-top:90px}.goal-finder{padding:19px 17px;margin-bottom:20px}.goal-finder-intro strong{font-size:16px}.goal-finder-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.goal-finder-links a{min-width:0;text-align:center;padding:12px 9px;white-space:normal}}
 @media(max-width:390px){.brand strong{max-width:108px;font-size:10px;line-height:1.22}.brand img{width:36px;height:36px}.goal-finder-links{grid-template-columns:1fr}.goal-finder-links a{justify-content:space-between;text-align:start}}
+
+
+/* Honest price-and-duration detail at the point of admissions selection. */
+.program-preview{margin:10px 0 18px;padding:14px 17px;border:1px solid #e8d6db;border-inline-start:4px solid #b52b46;border-radius:8px;background:#fff8fa;color:#512b3b;font-size:14px;line-height:1.85;font-weight:650;overflow-wrap:anywhere}
+.program-preview[hidden]{display:none}
+html[dir=rtl] .program-preview{font-size:15px;line-height:1.95}
+@media(forced-colors:active){.program-preview{border:2px solid CanvasText}}
