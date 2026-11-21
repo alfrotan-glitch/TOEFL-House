@@ -6,23 +6,10 @@
 const UPSTREAM = "https://the-toefl-house.pages.dev";
 const SHORT_ORIGIN = "https://toeflhouse.pages.dev";
 const SHORT_HOST = "toeflhouse.pages.dev";
-const HTML_TYPE = /text\\/html(?:\\s*;|$)/i;
-const BLOCKED = /^\\/(?:admin(?:\\/|$)|cms(?:\\/|$)|login(?:\\/|$)|logout(?:\\/|$)|dashboard(?:\\/|$)|api\\/(?!content(?:\\/|$))|__th\\/(?!v2\\/(?:site\\.(?:css|js)|font\\/vazirmatn-33\\.003\\.woff2)$|engagement-v1\\.js$))/i;
-const NOINDEX = /^\\/(?:tools(?:\\/|$)|api(?:\\/|$))/i;
-const POLISH_CSS = `
-.footer-main{gap:44px;padding:52px 0 40px}
-.footer-brand h2{font-size:27px;margin-bottom:10px}
-.footer-links{padding-top:12px;gap:12px 22px}
-.footer-bottom{padding:16px 0 18px}
-.footer-cta{margin-top:22px;min-height:46px;padding:12px 18px;font-size:12px;align-self:flex-start}
-@media(max-width:760px){
- .footer-main{padding:36px 0 28px}
- .footer-brand h2{font-size:23px}
- .footer-links{padding-top:20px;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}
- .footer-bottom{padding:13px 0 15px}
- .footer-bottom span{margin:0}
- .footer-cta{margin-top:18px}
-}`;
+const HTML_TYPE = /text\/html(?:\s*;|$)/i;
+const BLOCKED = /^\/(?:admin(?:\/|$)|cms(?:\/|$)|login(?:\/|$)|logout(?:\/|$)|dashboard(?:\/|$)|api\/(?!content(?:\/|$))|__th\/(?!v2\/(?:site\.(?:css|js)|font\/vazirmatn-33\.003\.woff2)$|engagement-v1\.js$))/i;
+const NOINDEX = /^\/(?:tools(?:\/|$)|api(?:\/|$))/i;
+const POLISH_CSS = ".footer-main{gap:44px;padding:52px 0 40px}\n.footer-brand h2{font-size:27px;margin-bottom:10px}\n.footer-links{padding-top:12px;gap:12px 22px}\n.footer-bottom{padding:16px 0 18px}\n.footer-cta{margin-top:22px;min-height:46px;padding:12px 18px;font-size:12px;align-self:flex-start}\n@media(max-width:760px){.footer-main{padding:36px 0 28px}.footer-brand h2{font-size:23px}.footer-links{padding-top:20px;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}.footer-bottom{padding:13px 0 15px}.footer-bottom span{margin:0}.footer-cta{margin-top:18px}}";
 function plain(message,status=200,headers={}) {
  return new Response(message,{status,headers:{"Content-Type":"text/plain; charset=utf-8","X-Content-Type-Options":"nosniff",...headers}});
 }
@@ -48,7 +35,7 @@ function polishHtml(html,path) {
  html=html.replace(/<link rel="canonical" href="[^"]*"[^>]*>/i,'<link rel="canonical" href="'+canonical+'">');
  html=html.replace(/<meta property="og:url" content="[^"]*"[^>]*>/i,'<meta property="og:url" content="'+canonical+'">');
  html=html.replace(/(<link rel="alternate" hreflang="en" href=")[^"]*(")/i,'$1'+SHORT_ORIGIN+'/en/$2');
- html=html.replace(/(<a\\b[^>]*hreflang="en"[^>]*href=")\\/(")/i,'$1/en/$2');
+ html=html.replace(/<a\b[^>]*>/gi,tag=>/\bhreflang="en"/i.test(tag)?tag.replace(/href="\/"/i,'href="/en/"'):tag);
  html=html.replaceAll("تعیین سطح رایگان · صنف‌های آموزشی دارای فیس","");
  html=html.replaceAll("تعیین سطح رایگان است؛ صنف‌های آموزشی فیس دارند.","");
  html=html.replaceAll("رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست.","");
@@ -58,10 +45,10 @@ function polishHtml(html,path) {
  html=html.replaceAll("آدرس ما","نشانی مرکز");
  html=html.replaceAll("پیدا کردن آدرس کورس","مسیریابی تا مرکز");
  html=html.replaceAll("در کابل پذیرای شما هستیم.","تافل هوس در کابل");
- html=html.replace(/<p class="semester-free">[\\s\\S]*?<\\/p>/gi,"");
- html=html.replace(/<div class="footer-bottom">([\\s\\S]*?)<span>\\s*<\\/span>/i,'<div class="footer-bottom">$1');
+ html=html.replace(/<p class="semester-free">[\s\S]*?<\/p>/gi,"");
+ html=html.replace(/<div class="footer-bottom">([\s\S]*?)<span>\s*<\/span>/i,'<div class="footer-bottom">$1');
  if(!html.includes("footer-cta")) {
-  html=html.replace(/(<span class="footer-hours">[\\s\\S]*?<\\/span>)/i,"$1"+admissionsCta(path));
+  html=html.replace(/(<span class="footer-hours">[\s\S]*?<\/span>)/i,"$1"+admissionsCta(path));
  }
  if(!html.includes("/__th/short-polish.css")) {
   html=html.replace("</head>",'<link rel="stylesheet" href="/__th/short-polish.css?v=1"></head>');
@@ -74,13 +61,13 @@ export default {
   if(incoming.hostname!==SHORT_HOST&&!incoming.hostname.endsWith("."+SHORT_HOST))return plain("Unknown hostname",421);
   if(request.method!=="GET"&&request.method!=="HEAD")return plain("Method not allowed",405,{"Allow":"GET, HEAD"});
   if(incoming.pathname==="/robots.txt") {
-   return plain("User-agent: *\\nAllow: /\\nDisallow: /admin/\\nDisallow: /cms/\\nDisallow: /login\\nDisallow: /logout\\nDisallow: /dashboard/\\nDisallow: /api/\\nDisallow: /tools/\\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\\n",200,{"Cache-Control":"public, max-age=3600"});
+   return plain("User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nSitemap: "+SHORT_ORIGIN+"/sitemap.xml\n",200,{"Cache-Control":"public, max-age=3600"});
   }
   if(incoming.pathname==="/__th/short-polish.css")return new Response(POLISH_CSS,{status:200,headers:{"Content-Type":"text/css; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}});
   if(BLOCKED.test(incoming.pathname))return plain("Not found",404,{"X-Robots-Tag":"noindex, nofollow"});
-  const translated=incoming.pathname==="//"?"/fa/":
-   incoming.pathname==="/en/"?"/":
-   incoming.pathname.startsWith("/en/")?incoming.pathname.slice(3):incoming.pathname;
+  const translated=incoming.pathname==="/" ? "/fa/" :
+   incoming.pathname==="/en/" ? "/" :
+   incoming.pathname.startsWith("/en/") ? incoming.pathname.slice(3) : incoming.pathname;
   const upstreamUrl=new URL(translated+incoming.search,UPSTREAM);
   const headers=new Headers();
   const accept=request.headers.get("accept");
