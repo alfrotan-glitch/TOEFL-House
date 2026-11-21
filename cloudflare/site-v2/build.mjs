@@ -28,7 +28,10 @@ const eapDataPattern=/const V2_EAP=(\{[\s\S]*?\n\});/;
 if(!eapDataPattern.test(academicEnglishSource))throw Error("EAP data shape changed; refusing unsafe build");
 const academicEnglish=academicEnglishSource.replace(eapDataPattern,(_,json)=>"const V2_EAP="+JSON.stringify(JSON.parse(json))+";");
 const specialPrograms=await readFile(join(here,"special-programs.mjs"),"utf8");
-const css=await readFile(join(here,"site.css"),"utf8");
+// Remove CSS comments and layout-only whitespace in the published asset, while
+// retaining readable, separately version-controlled CSS source for editors.
+const cssSource=await readFile(join(here,"site.css"),"utf8");
+const css=cssSource.replace(/\/\*[\s\S]*?\*\//g,"").split("\n").map(line=>line.trim()).join("");
 const js=await readFile(join(here,"site.js"),"utf8");
 const assetRevision=createHash("sha256").update(css).update(js).digest("hex").slice(0,12);
 const entry="export default {\n  async fetch(request,env,ctx){";
