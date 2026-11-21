@@ -10,7 +10,7 @@ on:
       short_url:
         description: "Approved Cloudflare preview or production short link"
         required: false
-        default: "https://thaf.pages.dev"
+        default: "https://toeflhouse.pages.dev"
 permissions:
   contents: read
 jobs:
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 9
     env:
-      TH_SHORT_BASE: ${{ inputs.short_url || 'https://thaf.pages.dev' }}
+      TH_SHORT_BASE: ${{ inputs.short_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      TH_SHORT_BASE: ${{ inputs.short_url || 'https://thaf.pages.dev' }}
+      TH_SHORT_BASE: ${{ inputs.short_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
