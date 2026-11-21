@@ -48,6 +48,12 @@ function polishHtml(html,path) {
  html=html.replace(/(<link rel="alternate" hreflang="en" href=")[^"]*(")/i,'$1'+SHORT_ORIGIN+'/en/$2');
  html=html.replace(/<a\b[^>]*>/gi,tag=>/\bhreflang="en"/i.test(tag)?tag.replace(/href="\/"/i,'href="/en/"'):tag);
  html=html.replaceAll("تعیین سطح رایگان · صنف‌های آموزشی دارای فیس","");
+ html=html.replaceAll('<span>✓ فیس صنف‌های آموزشی جداگانه است</span>',"");
+ html=html.replaceAll('<span>✓ Tuition is charged separately</span>',"");
+ html=html.replaceAll('<span>✓ درسي ټولګي فیس لري</span>',"");
+ html=html.replaceAll("The placement assessment is free; tuition is payable for courses.","The placement assessment is free.");
+ html=html.replaceAll("بلی. تعیین سطح رایگان است؛ صنف‌ها فیس دارند.","بلی. تعیین سطح رایگان است.");
+ html=html.replaceAll("هو. د سویې ارزونه وړیا ده؛ درسي ټولګي فیس لري.","هو. د سویې ارزونه وړیا ده.");
  html=html.replaceAll("Free placement assessment · Tuition applies to courses","");
  html=html.replaceAll("Placement assessment is free; course tuition is separate.","");
  html=html.replaceAll("د سویې ارزونه وړیا ده · درسي ټولګي فیس لري","");
