@@ -2,7 +2,7 @@
 
 ## Live production and source
 
-- Official website: https://the-toefl-house.pages.dev/
+- Official website: https://toeflhouse.pages.dev/
 - Source of the V2 edge renderer: `cloudflare/site-v2/` in the repository's `main` branch.
 - Public content comes from the existing Cloudflare D1 `CMS_DB`; **do not** replace that database or overwrite it with sample data.
 - Historical React tools are available at `/tools/`, `/fa/tools/`, `/ps/tools/`, and are intentionally `noindex`.
@@ -23,7 +23,7 @@ The workflow runs for relevant PRs/merges, **daily** for operational monitoring,
 
 ## Deployment
 
-Production Pages uses **Direct Upload**, not Cloudflare's native Git connection. Code merging alone **does not publish a new website**. Until a narrowly scoped Cloudflare API credential is configured in CI, only an authorized release operator should:
+The official Pages project is `toeflhouse` and uses **Direct Upload**, not Cloudflare's native Git connection. Its public homepage, course routes, guides and admissions are served on `https://toeflhouse.pages.dev/`. The legacy compatibility layer uses a pinned immutable upstream only for retained media and student tools; this is an internal dependency, not a public address. Code merging alone **does not publish a new website**. Until a narrowly scoped Cloudflare API credential is configured in CI, only an authorized release operator should:
 
 - Build and test the exact source SHA in a staging preview on the existing Pages project.
 - Confirm all languages, course links, admissions, old tools, CMS, security headers, indexability and performance.

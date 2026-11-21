@@ -2,7 +2,7 @@
 const assert=require("node:assert/strict");
 const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
 const axe=require("/tmp/toefl-accessibility/node_modules/axe-core");
-const base=process.env.TOEFL_QA_BASE||"https://the-toefl-house.pages.dev";
+const base=process.env.TOEFL_QA_BASE||"https://toeflhouse.pages.dev";
 const pages=["/","/fa/","/ps/","/courses/toefl-preparation/","/fa/courses/toefl-preparation/","/ps/courses/toefl-preparation/","/admissions/","/fa/admissions/","/ps/admissions/"];
 let browser;
 const results=[],failures=[];

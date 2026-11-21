@@ -154,16 +154,17 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
 .final-inner h2{font-size:clamp(26px,3.1vw,40px);font-weight:850;margin:0 0 7px;line-height:1.4;letter-spacing:-.03em}
 .final-inner p:not(.eyebrow){color:#ffe2e6;font-size:12px;margin:0}
 .footer{background:#0c252d;color:#eef4f2}
-.footer-main{display:flex;justify-content:space-between;gap:60px;padding:75px 0 68px}
+.footer-main{display:flex;justify-content:space-between;gap:44px;padding:52px 0 40px}
 .footer-brand{max-width:550px}
 .footer-brand .eyebrow{color:#dba2ac}
-.footer-brand h2{margin:0 0 16px;font-size:30px;line-height:1.4;letter-spacing:-.035em}
+.footer-brand h2{margin:0 0 10px;font-size:27px;line-height:1.4;letter-spacing:-.035em}
 .footer-brand p{font-size:13px;color:#a8b8bd;line-height:2;margin:0 0 15px}
 .footer-hours{font-size:11px;color:#90a6aa;font-weight:750}
-.footer-links{display:grid;grid-template-columns:repeat(2,minmax(130px,1fr));gap:15px 24px;min-width:310px;align-content:start;padding-top:35px}
+.footer-links{display:grid;grid-template-columns:repeat(2,minmax(130px,1fr));gap:12px 22px;min-width:310px;align-content:start;padding-top:12px}
 .footer-links a{font-size:12px;font-weight:650;color:#d2dedf;transition:color .2s}
 .footer-links a:hover{color:#fff}
-.footer-bottom{border-top:1px solid #45616b65;padding:24px 0 30px;display:flex;justify-content:space-between;gap:20px;font-size:10px;color:#8eabad}
+.footer-bottom{border-top:1px solid #45616b65;padding:16px 0 18px;display:flex;justify-content:space-between;gap:20px;font-size:10px;color:#8eabad}
+.footer-cta{margin-top:22px;min-height:46px;padding:12px 18px;font-size:12px;align-self:flex-start}
 @media(max-width:1200px){.main-nav{gap:12px}.header-inner{gap:16px}.brand{min-width:175px}.hero-grid{gap:48px}.online-panel{gap:20px}.shell{width:min(1110px,calc(100% - 56px))}}
 @media(max-width:1020px){.main-nav{display:none}.header-actions{margin-inline-start:auto}.hero-grid{grid-template-columns:1fr 380px;gap:32px}.hero h1{font-size:49px}html[dir=rtl] .hero h1{font-size:42px}.course-card{padding:23px 22px}.course-card h3{font-size:18px}.online-panel{grid-template-columns:90px 1fr;gap:22px}.online-panel>.button{grid-column:2;justify-self:start}.faq-layout{gap:42px}}
 @media(max-width:760px){
@@ -221,7 +222,7 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
  .tools-glyph{display:none}.tools-content h3{font-size:20px}
  .faq-layout{display:block}.faq-aside{margin-bottom:25px}.faq-list summary{font-size:13px;padding:22px 0}.faq-list details p{font-size:12px}
  .final-cta{padding:53px 0}.final-inner{display:block}.final-inner h2{font-size:30px;line-height:1.55}.final-inner .button{margin-top:24px}
- .footer-main{display:block;padding:57px 0 47px}.footer-brand h2{font-size:25px}.footer-links{min-width:0;padding-top:30px}.footer-bottom{display:block;font-size:10px}.footer-bottom span{display:block;margin-bottom:5px}
+ .footer-main{display:block;padding:36px 0 28px}.footer-brand h2{font-size:23px}.footer-links{min-width:0;padding-top:20px}.footer-bottom{display:block;font-size:10px}.footer-bottom span{display:block;margin:0}.footer-cta{margin-top:18px}
 }
 @media(max-width:460px){
  .hero h1{font-size:39px}html[dir=rtl] .hero h1{font-size:35px}
@@ -459,8 +460,6 @@ html[dir=rtl] .semester-lead{line-height:2.05}
 .semester-chips{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:0 0 24px}
 .semester-chips li{font-size:11px;font-weight:750;padding:7px 13px;border:1px solid #ffffff54;border-radius:999px;background:#ffffff14;color:#fff}
 html[dir=rtl] .semester-chips li{font-size:12px}
-.semester-free{margin:0 0 27px;display:flex;gap:9px;align-items:flex-start;color:#fff;font-size:12px;font-weight:700;line-height:1.8}
-.semester-free span{color:#ffe0e7}
 .semester-actions{display:flex;flex-wrap:wrap;align-items:center;gap:11px}
 .semester-primary{padding:15px 19px;min-height:53px;background:#fff;color:#82132b;font-weight:850;font-size:12px}
 .semester-primary:hover{background:#fff0f3}
