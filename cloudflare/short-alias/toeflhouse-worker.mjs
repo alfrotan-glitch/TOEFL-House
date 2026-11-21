@@ -97,6 +97,10 @@ export default {
    responseHeaders.set("Cache-Control","no-cache, no-store, must-revalidate");
    return new Response(html,{status:upstream.status,statusText:upstream.statusText,headers:responseHeaders});
   }
+  if(/(?:javascript|ecmascript|text\\/css|application\\/json)/i.test(contentType)&&upstream.ok) {
+   const body=(await upstream.text()).replaceAll(UPSTREAM,SHORT_ORIGIN).replaceAll("the-toefl-house.pages.dev",SHORT_HOST);
+   return new Response(body,{status:upstream.status,statusText:upstream.statusText,headers:responseHeaders});
+  }
   if(incoming.pathname==="/sitemap.xml"&&upstream.ok) {
    const xml=(await upstream.text()).replaceAll(UPSTREAM,SHORT_ORIGIN);
    return new Response(xml,{status:upstream.status,headers:responseHeaders});
