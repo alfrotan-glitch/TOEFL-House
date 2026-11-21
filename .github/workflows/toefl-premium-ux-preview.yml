@@ -1,4 +1,4 @@
-name: TOEFL House — World-class goal discovery preview browser acceptance
+name: TOEFL House — Goal-first production browser acceptance
 on:
   push:
     branches: [main]
@@ -9,7 +9,7 @@ on:
       preview_url:
         description: 'Approved read-only Pages preview or production URL'
         required: false
-        default: 'https://9328336a.the-toefl-house.pages.dev'
+        default: 'https://the-toefl-house.pages.dev'
 permissions:
   contents: read
 jobs:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 14
     env:
-      TH_PREMIUM_BASE: ${{ inputs.preview_url || 'https://9328336a.the-toefl-house.pages.dev' }}
+      TH_PREMIUM_BASE: ${{ inputs.preview_url || 'https://the-toefl-house.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
