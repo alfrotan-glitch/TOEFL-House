@@ -240,9 +240,9 @@ function v2Programs(c,content,locale){
 }
 function v2CleanFaqAnswer(value){
  return String(value||"")
-  .replace(/\s*رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست\\.?/g,"")
-  .replace(/\s*It does not make course tuition free\\.?/gi,"")
-  .replace(/\s*د سویې وړیا ارزونه د دې معنا نه لري چې درسي ټولګي هم وړیا دي\\.?/g,"")
+  .replace(/\s*رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست\.?/g,"")
+  .replace(/\s*It does not make course tuition free\.?/gi,"")
+  .replace(/\s*د سویې وړیا ارزونه د دې معنا نه لري چې درسي ټولګي هم وړیا دي\.?/g,"")
   .replace(/\s{2,}/g," ").trim();
 }
 function v2Faq(c,content,locale){
