@@ -29,6 +29,7 @@ jobs:
           test "$bytes" -gt 80000 && test "$bytes" -lt 160000
           base64 -w 0 /tmp/TH-Vazirmatn-33.003.woff2 > cloudflare/site-v2/vendor-font/Vazirmatn-33.003.woff2.base64
           sha256sum /tmp/TH-Vazirmatn-33.003.woff2 > cloudflare/site-v2/vendor-font/sha256.txt
+          md5sum /tmp/TH-Vazirmatn-33.003.woff2 > cloudflare/site-v2/vendor-font/md5.txt
           echo "Pinned OFL 1.1 typeface. Source: rastikerdar/vazirmatn v33.003." > cloudflare/site-v2/vendor-font/README.txt
           cat cloudflare/site-v2/vendor-font/sha256.txt
       - name: Commit auditable font source bytes
