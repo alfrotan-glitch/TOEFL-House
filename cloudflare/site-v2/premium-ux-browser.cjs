@@ -78,6 +78,9 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     }));
     assert.ok(target.y>=d.headerHeight-18&&target.y<900,root+" "+width+" sticky header obscures program card: "+target.y);
     assert.equal(target.outline,"solid",root+" "+width+" selected course is not highlighted");
+    if(lang==="fa-AF"&&(width===390||width===1440)){
+     await page.screenshot({path:"/tmp/toefl-premium-evidence/complete-home-fa-AF-"+width+".png",fullPage:true});
+    }
     assert.deepEqual(browserErrors,[],root+" "+width+" browser errors");
     // Full-card hit target: the visual tile, not only its small text link,
     // must open the right program on both mouse and touch-sized viewports.
