@@ -4,7 +4,8 @@
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const {chromium}=require("/tmp/toefl-short-browser/node_modules/playwright-core");
-const base=(process.env.TH_SHORT_BASE||"https://thaf.pages.dev").replace(/\/$/,"");
+const base=(process.env.TH_SHORT_BASE||"https://toeflhouse.pages.dev").replace(/\/$/,"");
+const isPreview=new URL(base).hostname!=="toeflhouse.pages.dev";
 
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
@@ -18,21 +19,26 @@ const base=(process.env.TH_SHORT_BASE||"https://thaf.pages.dev").replace(/\/$/,"
   for(const [path,lang] of [["/","fa-AF"],["/en/","en"],["/ps/","ps-AF"],["/fa/","fa-AF"]]){
    const r=await page.goto(base+path,{waitUntil:"networkidle",timeout:35000});
    assert.equal(r.status(),200,"public alias "+path);
-   assert.match(r.headers()["x-robots-tag"]||"",/noindex/,"avoid duplicate search indexing");
+   assert.equal(r.headers()["x-robots-tag"]||null,isPreview?"noindex, nofollow, noarchive":null,"only preview hosts are noindex");
    const view=await page.evaluate(()=>{
     const logo=document.querySelector(".brand img");
     return {lang:document.documentElement.lang,logo:logo?.naturalWidth||0,
       overflow:document.documentElement.scrollWidth>window.innerWidth+2,
-      title:document.querySelector("h1")?.textContent.trim()};
+      title:document.querySelector("h1")?.textContent.trim(),canonical:document.querySelector('link[rel="canonical"]')?.href,footerCta:!!document.querySelector(".footer-cta"),copy:document.body.innerText};
    });
    assert.equal(view.lang,lang,path+" language");
    assert.equal(view.overflow,false,path+" horizontal overflow");
    assert.ok(view.logo>=30,path+" image assets not loaded");
    assert.ok(view.title&&view.title.length>10,path+" empty page");
+   const expectedCanonical=path==="/" ? "https://toeflhouse.pages.dev/fa/" : "https://toeflhouse.pages.dev"+path;
+   assert.equal(view.canonical,expectedCanonical,path+" canonical host/path");
+   assert.ok(view.footerCta,path+" footer admissions CTA");
+   assert.doesNotMatch(view.copy,/صنف‌های آموزشی دارای فیس|رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست|Tuition applies to courses/i,path+" obsolete tuition disclaimer");
    await page.screenshot({path:"/tmp/toefl-short-evidence/home-"+lang+"-"+(path==="/"?"root":"localized")+".png"});
    checked++;
   }
   await page.goto(base+"/",{waitUntil:"networkidle",timeout:35000});
+  assert.equal(page.url(),base+"/","official root loads in place without redirect");
   await page.locator(".mobile-menu summary").click();
   await page.locator('.mobile-menu a[hreflang="en"]').click();
   await page.waitForURL(base+"/en/",{timeout:12000});
