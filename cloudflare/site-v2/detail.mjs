@@ -18,7 +18,7 @@ function v2SubpageResponse(request,html,locale){
  const preview=new URL(request.url).hostname!=="the-toefl-house.pages.dev";
  const h=new Headers({"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache, no-store, must-revalidate","Content-Language":V2_COPY[locale].lang,"X-Content-Type-Options":"nosniff","Referrer-Policy":"strict-origin-when-cross-origin","X-Frame-Options":"DENY","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://toefl-house-conversions.alfrotan2.workers.dev https://static.cloudflareinsights.com https://cloudflareinsights.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"});
  if(preview)h.set("X-Robots-Tag","noindex, nofollow, noarchive");
- return new Response(request.method==="HEAD"?null:html,{status:200,headers:h});
+ return new Response(request.method==="HEAD"?null:v2DariEditorial(html,locale),{status:200,headers:h});
 }
 function v2CoursePage(locale,cms,id){
  const c=V2_COPY[locale],l=V2_DETAIL_LABELS[locale],prefix=v2Prefix(locale);
