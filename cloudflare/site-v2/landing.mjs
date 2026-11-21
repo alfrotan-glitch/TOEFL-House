@@ -38,7 +38,7 @@ const V2_COPY={
   lang:"fa-AF",dir:"rtl",name:"THE TOEFL HOUSE",localName:"تافل هوس",tag:"آموزش تخصصی زبان انگلیسی · کابل",
   navPrograms:"برنامه‌ها",navGuides:"رهنماهای درسی",navWhy:"چرا تافل هوس؟",navOnline:"صنف‌های آنلاین",navFaq:"پرسش‌ها",navContact:"تماس",navMenu:"فهرست",
   navApply:"تعیین سطح رایگان",badge:"ثبت‌نام جریان دارد · تعیین سطح رایگان",
-  lead:"انگلیسی را هدفمند بیاموزید.",leadAccent:"با اطمینان پیش بروید.",subtitle:"برای مکالمهٔ روزمره، تحصیل در پوهنتون و آمادگی امتحان TOEFL، مهارت‌های زبان انگلیسی خود را تقویت کنید. با تعیین سطح رایگان، از سطح مناسب آغاز نمایید.",
+  lead:"انگلیسی را هدفمند بیاموزید.",leadAccent:"با اطمینان پیش بروید.",subtitle:"برای مکالمهٔ روزمره، تحصیل در دانشگاه و آمادگی امتحان TOEFL، مهارت‌های زبان انگلیسی خود را تقویت کنید. با تعیین سطح رایگان، از سطح مناسب آغاز نمایید.",
   heroCta:"درخواست تعیین سطح رایگان",heroSecondary:"دیدن برنامه‌های آموزشی",heroBottom:"صنف‌های حضوری در کابل · آموزش آنلاین انفرادی با هماهنگی قبلی",
   photoBadge:"یادگیری در کنار هم",photoSub:"دشت برچی · کابل",micro:"تافل هوس • از سال ۲۰۱۳",
   trustTitle:"آموزش برای فرصت‌های بیشتر",trustSub:"نگاهی به جامعهٔ آموزشی تافل هوس",
@@ -51,7 +51,7 @@ const V2_COPY={
   visitLabel:"آدرس ما",visitTitle:"از تافل هوس در کابل دیدن کنید.",visitText:"کابل، دشت برچی، ایستگاه مغازه، روبروی مرکز جلیلی، افغانستان.",hours:"صنف‌ها از شنبه تا پنج‌شنبه · جمعه رخصت · وقت دقیق صنف را از پذیرش بپرسید",phone:"تماس با پذیرش",wa:"واتساپ پذیرش",map:"پیدا کردن آدرس کورس",
   finalEyebrow:"گام بعدی شما",finalTitle:"برای پیشرفت، از سطح مناسب آغاز کنید.",finalText:"تعیین سطح رایگان انجام دهید و دربارهٔ صنف‌های موجود، فیس و تقسیم اوقات از پذیرش معلومات بگیرید.",finalCta:"درخواست تعیین سطح رایگان",
   footerLine:"با تافل، دریچه‌های تازه‌ای به جهان باز کنید.",footerRights:"تمام حقوق محفوظ است.",footerNote:"تعیین سطح رایگان · صنف‌های آموزشی دارای فیس",footPrograms:"برنامه‌ها",footJoin:"پذیرش",footTools:"ابزارهای درسی",
-  statsFallback:[["۶٬۰۰۰+","فارغ‌التحصیل از سال ۲۰۱۳"],["۵۰۰+","اشتراک‌کننده در تافل"],["۱۰۰+","پذیرش در پوهنتون‌های جهان"]],courseNames:["انگلیسی عمومی","انگلیسی اکادمیک","آمادگی تافل","مکالمهٔ ویژه","نگارش مسلکی","تربیهٔ استاد"],fallbackFaq:[["آیا تعیین سطح رایگان است؟","بلی، تعیین سطح رایگان است؛ فیس دوره‌های آموزشی جداگانه می‌باشد."],["آیا بدون ایمیل می‌توانم معلومات بگیرم؟","بلی. از طریق واتساپ یا تماس تلفونی با بخش پذیرش در ارتباط شوید."],["آیا صنف آنلاین دارید؟","صنف‌های آنلاین انفرادی مطابق ظرفیت استاد و منطقهٔ زمانی با هماهنگی برگزار می‌شود."]]
+  statsFallback:[["۶٬۰۰۰+","فارغ‌التحصیل از سال ۲۰۱۳"],["۵۰۰+","اشتراک‌کننده در تافل"],["۱۰۰+","پذیرش در دانشگاه‌های جهان"]],courseNames:["انگلیسی عمومی","انگلیسی اکادمیک","آمادگی تافل","مکالمهٔ ویژه","نگارش مسلکی","تربیهٔ استاد"],fallbackFaq:[["آیا تعیین سطح رایگان است؟","بلی، تعیین سطح رایگان است؛ فیس دوره‌های آموزشی جداگانه می‌باشد."],["آیا بدون ایمیل می‌توانم معلومات بگیرم؟","بلی. از طریق واتساپ یا تماس تلفونی با بخش پذیرش در ارتباط شوید."],["آیا صنف آنلاین دارید؟","صنف‌های آنلاین انفرادی مطابق ظرفیت استاد و منطقهٔ زمانی با هماهنگی برگزار می‌شود."]]
  },
  ps:{
   lang:"ps-AF",dir:"rtl",name:"THE TOEFL HOUSE",localName:"تافل هوس",tag:"د انګلیسي ژبې مسلکي زده‌کړه · کابل",
@@ -104,7 +104,7 @@ const V2_SEMESTER={
   "eyebrow": "ثبت‌نام سمستر جدید · قوس ۱۴۰۵",
   "title": "سمستر جدید؛",
   "accent": "آغاز یک مسیر روشن برای یادگیری انگلیسی.",
-  "lead": "برای مکالمهٔ روان‌تر، تحصیل در پوهنتون، نگارش مسلکی یا آمادگی TOEFL، برنامهٔ متناسب با هدف خود را انتخاب کنید. در تافل هوس شش برنامهٔ آموزشی ارائه می‌شود و تعیین سطح برای انتخاب سطح مناسب رایگان است.",
+  "lead": "برای مکالمهٔ روان‌تر، تحصیل در دانشگاه، نگارش مسلکی یا آمادگی TOEFL، برنامهٔ متناسب با هدف خود را انتخاب کنید. در تافل هوس شش برنامهٔ آموزشی ارائه می‌شود و تعیین سطح برای انتخاب سطح مناسب رایگان است.",
   "chips": [
    "General English",
    "Academic English · EAP",
@@ -155,6 +155,13 @@ function v2SemesterCampaign(locale){
 }
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
 function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
+// Present the Owner's selected university terminology only on Dari pages.
+// This also normalizes legacy, editable CMS copy at render time without
+// rewriting the database or altering Pashto's correct "پوهنتون".
+function v2DariEditorial(html,locale){
+ return locale!=="fa"?html:html.replace(/پوهنتونی/g,"دانشگاهی").replace(/پوهنتون/g,"دانشگاه");
+}
+
 function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
 async function v2Cms(env){
  if(!env?.CMS_DB)throw Error("CMS_DB missing");
@@ -203,7 +210,7 @@ function v2Stats(c,content,locale){
 }
 const V2_GOALS={
  en:{title:"What do you want to achieve?",hint:"Choose your goal to find a suitable learning path.",label:"Explore English programs by goal",items:[["general-english","Start with the foundations"],["special-speaking","Speak with confidence"],["academic-english","Prepare for university"],["toefl-preparation","Prepare for TOEFL"]]},
- fa:{title:"هدف شما از یادگیری انگلیسی چیست؟",hint:"هدف خود را انتخاب کنید و برنامهٔ مناسب را بشناسید.",label:"انتخاب برنامه بر اساس هدف آموزشی",items:[["general-english","از پایه شروع کنم"],["special-speaking","با اطمینان صحبت کنم"],["academic-english","برای پوهنتون آماده شوم"],["toefl-preparation","برای TOEFL آماده شوم"]]},
+ fa:{title:"هدف شما از یادگیری انگلیسی چیست؟",hint:"هدف خود را انتخاب کنید و برنامهٔ مناسب را بشناسید.",label:"انتخاب برنامه بر اساس هدف آموزشی",items:[["general-english","از پایه شروع کنم"],["special-speaking","با اطمینان صحبت کنم"],["academic-english","برای دانشگاه آماده شوم"],["toefl-preparation","برای TOEFL آماده شوم"]]},
  ps:{title:"له انګلیسي زده‌کړې موخه مو څه ده؟",hint:"خپله موخه وټاکئ او مناسب پروګرام ومومئ.",label:"د زده‌کړې د موخې له مخې د پروګرام ټاکنه",items:[["general-english","له بنسټ څخه پیل کوم"],["special-speaking","په ډاډه زړه خبرې کوم"],["academic-english","پوهنتون ته چمتو کېږم"],["toefl-preparation","TOEFL ته چمتو کېږم"]]}
 };
 function v2Programs(c,content,locale){
@@ -295,7 +302,7 @@ async function v2Home(request,env,locale){
  if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{"Allow":"GET, HEAD"}});
  try{
   const data=await v2Cms(env);
-  const html=v2Page(locale,data),preview=new URL(request.url).hostname!=="the-toefl-house.pages.dev";
+  const html=v2DariEditorial(v2Page(locale,data),locale),preview=new URL(request.url).hostname!=="the-toefl-house.pages.dev";
   const headers=new Headers({"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache, no-store, must-revalidate","X-Content-Type-Options":"nosniff","Referrer-Policy":"strict-origin-when-cross-origin","X-Frame-Options":"DENY","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Content-Language":V2_COPY[locale].lang,"Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self' https://d2ol7oe51mr4n9.cloudfront.net; connect-src 'self' https://toefl-house-conversions.alfrotan2.workers.dev https://static.cloudflareinsights.com https://cloudflareinsights.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"});
   if(preview)headers.set("X-Robots-Tag","noindex, nofollow, noarchive");
   return new Response(request.method==="HEAD"?null:html,{status:200,headers});
