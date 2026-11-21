@@ -1,0 +1,42 @@
+name: TOEFL House — Vendor licensed Persian font (one-time)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vendor-persian-font.yml'
+permissions:
+  contents: write
+jobs:
+  vendor-font:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Fetch official pinned open-source font and original license
+        run: |
+          set -euo pipefail
+          mkdir -p cloudflare/site-v2/vendor-font
+          curl --retry 3 --fail --location --silent --show-error \
+            'https://raw.githubusercontent.com/rastikerdar/vazirmatn/v33.003/fonts/webfonts/Vazirmatn%5Bwght%5D.woff2' \
+            -o /tmp/TH-Vazirmatn-33.003.woff2
+          curl --retry 3 --fail --location --silent --show-error \
+            'https://raw.githubusercontent.com/rastikerdar/vazirmatn/v33.003/OFL.txt' \
+            -o cloudflare/site-v2/vendor-font/OFL.txt
+          test "$(head -c 4 /tmp/TH-Vazirmatn-33.003.woff2)" = "wOF2"
+          bytes=$(wc -c </tmp/TH-Vazirmatn-33.003.woff2)
+          test "$bytes" -gt 80000 && test "$bytes" -lt 160000
+          base64 -w 0 /tmp/TH-Vazirmatn-33.003.woff2 > cloudflare/site-v2/vendor-font/Vazirmatn-33.003.woff2.base64
+          sha256sum /tmp/TH-Vazirmatn-33.003.woff2 > cloudflare/site-v2/vendor-font/sha256.txt
+          echo "Pinned OFL 1.1 typeface. Source: rastikerdar/vazirmatn v33.003." > cloudflare/site-v2/vendor-font/README.txt
+          cat cloudflare/site-v2/vendor-font/sha256.txt
+      - name: Commit auditable font source bytes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloudflare/site-v2/vendor-font
+          if ! git diff --cached --quiet; then
+            git commit -m "Vendor Vazirmatn 33.003 WOFF2 under OFL 1.1 for Dari typography repair"
+            git push origin HEAD:main
+          fi
