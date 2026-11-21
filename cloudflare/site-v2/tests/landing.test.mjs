@@ -654,3 +654,19 @@ test("Sticky navigation offsets preserve focused anchors and goal controls have 
  assert.ok(css.includes(".goal-finder-links a{min-height:44px"),"quick goals need large targets");
  assert.ok(css.includes(".goal-finder-links{display:grid;grid-template-columns:"),"mobile goals must reflow responsively");
 });
+
+test("International SEO declares the English fallback on every trilingual course and admissions page",async()=>{
+ for(const root of ["/","/fa/","/ps/"]){
+  for(const path of ["courses/special-speaking/","courses/toefl-preparation/","courses/academic-english/","admissions/"]){
+   const url="https://the-toefl-house.pages.dev"+root+path;
+   const response=await worker.fetch(new Request(url),env());
+   assert.equal(response.status,200,root+path);
+   const html=await response.text();
+   assert.ok(html.includes('<link rel="canonical" href="'+url+'">'),url+" canonical");
+   assert.ok(html.includes('<link rel="alternate" hreflang="x-default" href="https://the-toefl-house.pages.dev/'+path+'">'),url+" default international alternate");
+   for(const [tag,prefix] of [["en","/"],["fa-AF","/fa/"],["ps-AF","/ps/"]]){
+    assert.ok(html.includes('<link rel="alternate" hreflang="'+tag+'" href="https://the-toefl-house.pages.dev'+prefix+path+'">'),url+" locale "+tag);
+   }
+  }
+ }
+});
