@@ -1,4 +1,4 @@
-name: TOEFL House — Free short Cloudflare address acceptance
+name: TOEFL House — Free short address production acceptance
 on:
   push:
     branches: [main]
@@ -10,7 +10,7 @@ on:
       short_url:
         description: "Approved Cloudflare preview or production short link"
         required: false
-        default: "https://shortlink-preview.thaf.pages.dev"
+        default: "https://thaf.pages.dev"
 permissions:
   contents: read
 jobs:
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 9
     env:
-      TH_SHORT_BASE: ${{ inputs.short_url || 'https://shortlink-preview.thaf.pages.dev' }}
+      TH_SHORT_BASE: ${{ inputs.short_url || 'https://thaf.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
