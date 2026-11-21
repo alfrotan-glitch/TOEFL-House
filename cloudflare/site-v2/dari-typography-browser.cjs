@@ -31,7 +31,8 @@ async function checkFont(){
    page.on("pageerror",e=>errors.push(String(e)));
    const r=await page.goto(base+root+"#faq",{waitUntil:"networkidle",timeout:35000});
    assert.equal(r.status(),200);
-   await page.evaluate(()=>document.fonts.ready);
+   await page.evaluate(async()=>{await document.fonts.ready;document.documentElement.style.scrollBehavior="auto";document.querySelector("#faq").scrollIntoView({block:"start",behavior:"instant"});});
+   await page.waitForTimeout(160);
    const view=await page.evaluate(()=>{
     const h=document.querySelector(".site-header").getBoundingClientRect();
     const f=document.querySelector("#faq").getBoundingClientRect();
@@ -43,6 +44,7 @@ async function checkFont(){
    assert.equal(view.lang,locale==="fa"?"fa-AF":"ps-AF");
    assert.equal(view.overflow,false,root+" "+width+" horizontal overflow");
    assert.ok(view.headingY>=view.headerBottom+8,root+" "+width+" sticky header covers FAQ: "+JSON.stringify(view));
+   assert.ok(view.headingY<740,root+" "+width+" FAQ heading has not entered visible viewport: "+JSON.stringify(view));
    if(locale==="fa"){
     assert.ok(view.font.startsWith("THDari"),"Dari font must be selected: "+view.font);
     assert.equal(view.pehCp,0x067e);
