@@ -769,3 +769,64 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 @media(prefers-reduced-motion:reduce){.sp-page *{scroll-behavior:auto}}
 
 .sp-latin-title{display:inline-block;margin:0 0 12px;color:#a82541;font:800 11px/1.5 ui-sans-serif,system-ui,sans-serif;letter-spacing:.15em;text-align:start}
+
+
+/* 2026 brand experience: accessible, persistent action and editorial hierarchy. */
+.site-header{position:sticky;inset-block-start:0;z-index:80;background:#fffdfaef;backdrop-filter:blur(16px) saturate(135%);-webkit-backdrop-filter:blur(16px) saturate(135%);box-shadow:0 5px 22px #16262c08}
+.header-inner{min-width:0}
+.main-nav a{min-height:44px;display:inline-flex;align-items:center;position:relative}
+.main-nav a::after{content:"";position:absolute;inset-inline:0;inset-block-end:5px;height:2px;background:var(--red);transform:scaleX(0);transform-origin:center;transition:transform .2s ease}
+.main-nav a:hover::after,.main-nav a:focus-visible::after{transform:scaleX(1)}
+.brand{min-width:0}
+.brand strong{color:#1d2930}
+.mobile-quick-apply{display:none}
+.hero{background:linear-gradient(128deg,#fffefa 0%,#fcf9f5 57%,#f6eceb 100%)}
+.hero h1,.section-head h2,.final-inner h2,.eap-heading h2,.detail-intro h1{text-wrap:balance}
+.hero-lead{color:#475c65}
+.button-primary{box-shadow:0 9px 24px #b52b4630}
+.button-primary:hover{box-shadow:0 13px 29px #b52b4640}
+.course-card{border-radius:15px;box-shadow:0 8px 30px #142d3507}
+.course-card:hover{border-color:#cdb5ba;box-shadow:0 22px 48px #4d263020}
+.course-card .course-mark{transition:transform .22s ease,background .22s ease}
+.course-card:hover .course-mark,.course-card:focus-within .course-mark{transform:rotate(45deg);background:#faedf0;color:#ae2742}
+.course-featured{background:linear-gradient(150deg,#682136,#38222e 85%);border-color:#67243c;color:#fff}
+.course-featured .course-copy,.course-featured .course-bottom strong{color:#f3e5e8}
+.course-featured .course-top,.course-featured .course-bottom small{color:#f0d1d9}
+.course-featured .course-bottom{border-color:#ffffff3a}
+.course-featured .course-mark{color:#fff;border-color:#ffffff66}
+.course-featured:hover .course-mark,.course-featured:focus-within .course-mark{background:#fff;color:#8d2943}
+.online-panel{background:linear-gradient(125deg,#30202a 0%,#241f29 69%,#4f2637 100%);border-radius:16px}
+.online-symbol{color:#efd2d7}
+.online-copy p:not(.eyebrow){color:#ebdbe0}
+.final-cta{background:linear-gradient(110deg,#a91e3a,#cd304b 60%,#ae2641)}
+.footer{background:#221c24}
+.footer-brand p{color:#c9c0c5}
+.footer-hours{color:#d0c6cb}
+.footer-links a{color:#e7dce2}
+.footer-bottom{color:#bcaeb5}
+.faq-list summary:hover,.faq-list summary:focus-visible{color:#a52440}
+@media(max-width:760px){
+ .site-header{position:sticky;inset-block-start:0}
+ .header-inner{gap:10px}
+ .brand{flex:1;min-width:0}
+ .brand>span{min-width:0}
+ .mobile-quick-apply{display:inline-flex;align-items:center;justify-content:center;flex:none;min-height:44px;max-width:130px;padding:8px 13px;border:1px solid #a62643;border-radius:9px;background:#fff3f5;color:#98233e;font-size:11px;font-weight:850;line-height:1.45;text-align:center;text-wrap:balance}
+ .mobile-quick-apply:hover,.mobile-quick-apply:focus-visible{background:#ad2945;color:#fff}
+ .mobile-menu{flex:none}
+ .mobile-menu nav{max-height:min(76dvh,650px);overflow-y:auto;overscroll-behavior:contain}
+ .hero-grid{padding-block:38px 46px}
+ .course-card{border-radius:14px}
+}
+@media(max-width:390px){
+ .header-inner{gap:7px}
+ .brand{gap:5px}
+ .brand img{width:32px;height:32px}
+ .brand strong{font-size:10px;letter-spacing:0;max-width:85px}
+ .brand small{font-size:9px;margin-top:2px}
+ .mobile-quick-apply{padding:7px 9px;max-width:112px;font-size:10.5px}
+ .mobile-menu summary{width:44px;min-width:44px}
+}
+@media(forced-colors:active){
+ .mobile-quick-apply,.button-primary,.course-featured{border:1px solid ButtonText}
+ .main-nav a::after{background:LinkText}
+}
