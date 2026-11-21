@@ -87,7 +87,7 @@ html[dir=rtl] .section-head h2,html[dir=rtl] .faq-aside h2{line-height:1.6;lette
 .section-intro{max-width:335px;margin:0;color:#718084;font-size:13px;line-height:1.9}
 .programs-section{background:var(--paper)}
 .courses-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}
-.course-card{background:#fff;border:1px solid #e5e6e1;border-radius:8px;padding:27px 27px 22px;min-height:265px;display:flex;flex-direction:column;box-shadow:0 2px 0 #e6e7e300;transition:box-shadow .25s var(--ease),transform .25s var(--ease),border-color .25s}
+.course-card{position:relative;cursor:pointer;background:#fff;border:1px solid #e5e6e1;border-radius:8px;padding:27px 27px 22px;min-height:265px;display:flex;flex-direction:column;box-shadow:0 2px 0 #e6e7e300;transition:box-shadow .25s var(--ease),transform .25s var(--ease),border-color .25s}
 .course-card:hover{box-shadow:0 20px 55px #142e3512;transform:translateY(-3px);border-color:#ced8d2}
 .course-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;color:#b1b9b7}
 .course-number{font-family:ui-sans-serif,system-ui,sans-serif;font-size:13px;letter-spacing:.08em;font-weight:750}
@@ -99,7 +99,7 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
 .course-bottom>span{display:flex;flex-direction:column;gap:4px}
 .course-bottom small{font-size:10px;color:#8c9796;font-weight:650}
 .course-bottom strong{font-size:11px;color:#45595c;line-height:1.65}
-.course-bottom a{font-size:11px;color:var(--red);font-weight:800;white-space:nowrap}
+.course-bottom a{font-size:11px;color:var(--red);font-weight:800;white-space:nowrap}.course-bottom a::after{content:"";position:absolute;inset:0;z-index:1;cursor:pointer}
 .course-featured{background:var(--ink);border-color:var(--ink);color:#fff}
 .course-featured .course-top{color:#9bafb4}
 .course-featured .course-mark{border-color:#557079;color:#e1edef}
