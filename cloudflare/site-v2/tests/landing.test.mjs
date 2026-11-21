@@ -96,7 +96,7 @@ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
   assert.match(html,new RegExp('href="'+prefix+'admissions/'));
  });
  test("Admissions page offers no-email WhatsApp only funnel in "+prefix,async()=>{
-  const req=new Request("https://toeflhouse.pages.dev"+prefix+"admissions/");
+  const req=new Request("https://toeflhouse.pages.dev"+prefix+"admissions/?program=special-speaking");
   const r=await worker.fetch(req,env());
   assert.equal(r.status,200);
   const html=await r.text();
