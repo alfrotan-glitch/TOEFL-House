@@ -60,6 +60,22 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
      const audit=await page.evaluate(()=>window.axe.run(document,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21a","wcag21aa"]},rules:{"region":{enabled:false}}}));
      assert.deepEqual(audit.violations.filter(v=>["critical","serious"].includes(v.impact)).map(v=>({id:v.id,targets:v.nodes.map(n=>n.target)})),[],root+" "+width+" blocking accessibility");
     }
+    const goalLinks=page.locator(".goal-finder-links a");
+    assert.equal(await goalLinks.count(),4,root+" "+width+" must offer four goal choices");
+    for(const goal of ["general-english","special-speaking","academic-english","toefl-preparation"]){
+     assert.equal(await page.locator('.goal-finder-links a[href="#course-'+goal+'"]').count(),1,root+" "+width+" missing "+goal);
+     assert.equal(await page.locator("#course-"+goal).count(),1,root+" "+width+" anchor target absent");
+    }
+    if(width===390){
+     await page.locator(".goal-finder").screenshot({path:"/tmp/toefl-premium-evidence/goals-"+lang+"-390.png"});
+    }
+    await page.locator('.goal-finder-links a[href="#course-special-speaking"]').click();
+    assert.equal(await page.evaluate(()=>location.hash),"#course-special-speaking",root+" "+width+" goal anchor did not navigate");
+    const target=await page.locator("#course-special-speaking").evaluate(el=>({
+     y:el.getBoundingClientRect().top,bottom:el.getBoundingClientRect().bottom,outline:getComputedStyle(el).outlineStyle
+    }));
+    assert.ok(target.y>=d.headerHeight-18&&target.y<900,root+" "+width+" sticky header obscures program card: "+target.y);
+    assert.equal(target.outline,"solid",root+" "+width+" selected course is not highlighted");
     assert.deepEqual(browserErrors,[],root+" "+width+" browser errors");
     summaries.push({route:root,width,...d,sticky:true});
     checked++;
