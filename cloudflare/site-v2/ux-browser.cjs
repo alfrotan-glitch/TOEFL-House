@@ -4,7 +4,7 @@
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const {chromium}=require("/tmp/toefl-eap-browser/node_modules/playwright-core");
-const base=(process.env.TH_EAP_URL||"https://the-toefl-house.pages.dev").replace(/\/$/,"");
+const base=(process.env.TH_EAP_URL||"https://toeflhouse.pages.dev").replace(/\/$/,"");
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
  const results=[],errors=[],dir="/tmp/eap-browser-evidence";
