@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import worker from "../worker.mjs";
 
 const canonical="https://toeflhouse.pages.dev";
-const preview="https://v18upgrade.the-toefl-house.pages.dev";
-const pinned="https://0c14f299.the-toefl-house.pages.dev";
+const preview="https://f3d23a88.toeflhouse.pages.dev";
 
 const nativeFetch=globalThis.fetch;
 const nativeRewriter=globalThis.HTMLRewriter;
@@ -67,27 +66,22 @@ test("the same-origin event script avoids PII and supports click types",async()=
   });
 });
 
-test("main homepage HTML is original but enhanced without losing CSP",async()=>{
+test("unhandled homepage path returns a local 404 without contacting the retired origin",async()=>{
   await withMocks(async called=>{
     const r=await worker.fetch(new Request(canonical+"/"),{});
-    const h=await r.text();
-    assert.equal(r.status,200);
-    assert.equal(called[0].url,pinned+"/");
-    assert.match(h,/<h1>Preserved<\/h1>/);
-    assert.match(h,/engagement-v1\.js/);
-    assert.match(h,/engagement-v1\.css/);
-    assert.equal(r.headers.get("X-Robots-Tag"),null);
-    assert.match(r.headers.get("Content-Security-Policy"),/toefl-house-conversions\.alfrotan2\.workers\.dev/);
-    assert.equal(r.headers.get("Content-Length"),null);
-    assert.equal(r.headers.get("ETag"),null);
+    assert.equal(r.status,404);
+    assert.equal(called.length,0);
+    assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
+    assert.match(await r.text(),/Not found/);
   });
 });
 
-test("preview HTML is noindex and click JavaScript cannot count preview",async()=>{
+test("preview health response is noindex",async()=>{
   await withMocks(async()=>{
-    const r=await worker.fetch(new Request(preview+"/fa/"),{});
+    const r=await worker.fetch(new Request(preview+"/__th/health"),{});
+    assert.equal(r.status,200);
     assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
-    assert.match(await r.text(),/engagement-v1\.js/);
+    assert.match(await r.text(),/toefl-house-edge-upgrade/);
   });
 });
 
@@ -101,34 +95,26 @@ test("preview is read-only: no production CMS mutation",async()=>{
   });
 });
 
-test("production POST forwards original request path and full request body",async()=>{
+test("unknown production API paths fail locally instead of proxying to a deleted origin",async()=>{
   await withMocks(async called=>{
     const payload='{"test":true}';
     const r=await worker.fetch(new Request(canonical+"/api/private/action",{
       method:"POST",headers:{"Content-Type":"application/json"},body:payload
     }),{});
-    assert.equal(r.status,200);
-    assert.equal(called[0].url,pinned+"/api/private/action");
-    assert.equal(called[0].method,"POST");
-    assert.equal(called[0].body,payload);
+    assert.equal(r.status,404);
+    assert.equal(called.length,0);
+    assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
   });
 });
 
-test("strict no-script CSP is never weakened for SEO pages",async()=>{
-  let called=[];
-  const oldFetch=globalThis.fetch;
-  globalThis.fetch=async request=>{
-    called.push(request.url);
-    return new Response('<html><head></head><body>Course</body></html>',{
-      headers:{"Content-Type":"text/html","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'"}
-    });
-  };
-  try{
-    const r=await worker.fetch(new Request(canonical+"/courses/toefl-preparation/"),{});
-    assert.doesNotMatch(await r.text(),/engagement-v1/);
-    assert.match(r.headers.get("Content-Security-Policy"),/default-src 'none'/);
-    assert.equal(called.length,1);
-  }finally{globalThis.fetch=oldFetch;}
+test("unknown legacy paths return a local 404 without weakening or fetching CSP",async()=>{
+  await withMocks(async called=>{
+    const r=await worker.fetch(new Request(canonical+"/legacy-retired-page/"),{});
+    assert.equal(r.status,404);
+    assert.equal(called.length,0);
+    assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
+    assert.equal(r.headers.get("Content-Security-Policy"),null);
+  });
 });
 
 test("preserved static assets use local ASSETS storage",async()=>{
@@ -160,7 +146,10 @@ test("Legacy tools brand correction is scoped and does not touch data entry",asy
   assert.ok(script.includes("MutationObserver"));
   assert.ok(script.includes("script,style,noscript,textarea,option"));
   for(const forbidden of ["fetch(","XMLHttpRequest","sendBeacon","localStorage","sessionStorage"])assert.ok(!script.includes(forbidden));
-  const tools=await worker.fetch(new Request(canonical+"/fa/tools/"),{});
+  const tools=await worker.fetch(new Request(canonical+"/fa/tools/"),{
+   ASSETS:{fetch:async request=>new Response('<html><head><title>Student tools</title></head><body><main>Tools app</main></body></html>',{headers:{"Content-Type":"text/html; charset=utf-8"}})}
+  });
+  assert.equal(tools.status,200);
   assert.ok((await tools.text()).includes("tools-brand-v1.js"));
   const home=await worker.fetch(new Request(canonical+"/fa/"),{});
   assert.ok(!(await home.text()).includes("tools-brand-v1.js"));

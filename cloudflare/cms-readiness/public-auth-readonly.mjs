@@ -1,7 +1,7 @@
 // Scheduled production security monitoring: GET and HEAD requests ONLY.
 // POST/PUT/PATCH/PUBLISH/RESTORE are intentionally absent.
 import assert from "node:assert/strict";
-const base="https://the-toefl-house.pages.dev";
+const base=(process.env.TOEFL_QA_BASE||"https://toeflhouse.pages.dev").replace(/\/$/,"");
 const checks=[],errors=[];
 async function read(path){
  const url=new URL(path,base);

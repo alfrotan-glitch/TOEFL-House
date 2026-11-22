@@ -2,9 +2,7 @@
 // Proxy the immutable approved Nov 9 deployment and add only lightweight
 // anonymous aggregate CTA click tracking on permitted public HTML pages.
 // Do not introduce a second CMS or change staff auth/business API semantics.
-const UPSTREAM="https://0c14f299.the-toefl-house.pages.dev";
 const CANONICAL="toeflhouse.pages.dev";
-const COLLECTOR="https://toefl-house-conversions.alfrotan2.workers.dev";
 const JS_PATH="/__th/engagement-v1.js";
 const CSS_PATH="/__th/engagement-v1.css";
 // Self-origin font endpoint. The file itself is pinned, checksum-verified and
@@ -33,6 +31,49 @@ const STYLE=":where(a,button,input,select,textarea,[role=\"button\"]):focus-visi
 
 const GUIDE_A11Y_STYLE='a[href="#content"][style*="-9999px"]{left:0!important;top:0!important;width:1px!important;height:1px!important;overflow:hidden!important;clip-path:inset(50%)!important}a[href="#content"][style*="-9999px"]:focus{position:fixed!important;left:16px!important;top:16px!important;width:auto!important;height:auto!important;clip-path:none!important;overflow:visible!important;z-index:9999!important;padding:12px 18px!important;background:#fff!important;color:#112c35!important}';
 function noindex(host){return host!==CANONICAL;}
+const V2_PUBLIC_COURSES=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
+const V2_PUBLIC_GUIDES=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
+function v2PublicSitemap(request){
+  const paths=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
+  for(const prefix of ["","fa/","ps/"]){
+    for(const id of V2_PUBLIC_COURSES)paths.push("/"+prefix+"courses/"+id+"/");
+    paths.push("/"+prefix+"guides/");
+    for(const id of V2_PUBLIC_GUIDES)paths.push("/"+prefix+"guides/"+id+"/");
+  }
+  const xml='<?xml version="1.0" encoding="UTF-8"?>'+'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+paths.map(path=>'<url><loc>'+CANONICAL_ORIGIN+path+'</loc><changefreq>weekly</changefreq></url>').join("")+'</urlset>';
+  const headers={"Content-Type":"application/xml; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"};
+  if(noindex(new URL(request.url).hostname))headers["X-Robots-Tag"]="noindex, nofollow, noarchive";
+  return new Response(request.method==="HEAD"?null:xml,{status:200,headers});
+}
+function v2PublicRobots(request){
+  const preview=noindex(new URL(request.url).hostname);
+  const rules=preview?"User-agent: *\nDisallow: /\n":"User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nDisallow: /fa/tools/\nDisallow: /ps/tools/\nSitemap: "+CANONICAL_ORIGIN+"/sitemap.xml\n";
+  return new Response(request.method==="HEAD"?null:rules,{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}});
+}
+async function v2ServeLegacyTools(request,env){
+  if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{Allow:"GET, HEAD"}});
+  if(!env?.ASSETS)return new Response("Student tools are temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive"}});
+  const url=new URL(request.url);
+  const assetPath=url.pathname.startsWith("/fa/")?"/fa/index.html":url.pathname.startsWith("/ps/")?"/ps/index.html":"/index.html";
+  try{
+    const asset=await env.ASSETS.fetch(new Request(new URL(assetPath,url.origin),request));
+    if(!asset.ok)return new Response("Student tools are temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive"}});
+    const headers=new Headers(asset.headers);
+    headers.set("X-Robots-Tag","noindex, nofollow, noarchive");
+    headers.set("Cache-Control","no-store");
+    headers.set("X-Content-Type-Options","nosniff");
+    const shell=new Response(request.method==="HEAD"?null:asset.body,{status:asset.status,statusText:asset.statusText,headers});
+    return new HTMLRewriter()
+      .on("head",{element(element){element.append('<link rel="stylesheet" href="'+CSS_PATH+'">',{html:true});}})
+      .on("body",{element(element){element.append('<script defer src="'+JS_PATH+'"></script><script defer src="'+TOOLS_BRAND_PATH+'"></script>',{html:true});}})
+      .transform(shell);
+  }catch(error){
+    console.error("Local student tools asset unavailable",String(error));
+    return new Response("Student tools are temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive"}});
+  }
+}
+const CANONICAL_ORIGIN="https://toeflhouse.pages.dev";
+
 function staticResponse(request,content,type){
   if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{Allow:"GET, HEAD"}});
   return new Response(request.method==="HEAD"?null:content,{status:200,headers:{
@@ -43,83 +84,47 @@ function staticResponse(request,content,type){
     "X-Robots-Tag":"noindex, nofollow, noarchive"
   }});
 }
-function adjustCsp(csp){
-  if(!csp)return csp;
-  if(/(?:^|;)\s*connect-src\s+/i.test(csp)){
-    return csp.replace(/(?:^|;)\s*connect-src\s+([^;]+)/i,function(all,list){
-      return all.replace(list,list+" "+COLLECTOR);
-    });
-  }
-  return csp+"; connect-src 'self' "+COLLECTOR;
-}
-function eligible(path,csp){
-  if(path.startsWith("/admin")||path.startsWith("/api")||path.startsWith("/owner"))return false;
-  if(path.startsWith("/__th/"))return false;
-  if(/(?:^|;)\s*default-src\s+'none'/i.test(csp||""))return false;
-  return true;
-}
-function rewriteLocation(value){
-  if(!value)return value;
-  try{
-    const dest=new URL(value);
-    if(dest.origin===UPSTREAM)return "https://"+CANONICAL+dest.pathname+dest.search+dest.hash;
-  }catch(_){}
-  return value;
-}
-async function passThrough(request){
-  const incoming=new URL(request.url);
-  const target=new URL(incoming.pathname+incoming.search,UPSTREAM);
-  const headers=new Headers(request.headers);
-  headers.delete("Host");
-  const init={method:request.method,headers,redirect:"manual"};
-  if(!["GET","HEAD"].includes(request.method)&&request.body){init.body=request.body;init.duplex="half";}
-  const original=await fetch(new Request(target,init));
-  const outHeaders=new Headers(original.headers);
-  if(outHeaders.has("Location"))outHeaders.set("Location",rewriteLocation(outHeaders.get("Location")));
-  if(noindex(incoming.hostname))outHeaders.set("X-Robots-Tag","noindex, nofollow, noarchive");
-  else if(!incoming.pathname.startsWith("/admin")&&!incoming.pathname.startsWith("/owner")&&!incoming.pathname.startsWith("/api/admin")){
-    // The immutable deployment is correctly noindexed for its own versioned hostname.
-    // The stable canonical hostname must preserve its existing indexability.
-    if(outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");
-  }
-  const type=outHeaders.get("content-type")||"";
-  const csp=outHeaders.get("content-security-policy");
-  const inject=request.method==="GET"&&original.status===200&&/text\/html/i.test(type)&&eligible(incoming.pathname,csp);
-  if(!inject)return new Response(original.body,{status:original.status,statusText:original.statusText,headers:outHeaders});
-  outHeaders.delete("Content-Length");
-  outHeaders.delete("ETag");
-  if(csp)outHeaders.set("Content-Security-Policy",adjustCsp(csp));
-  const response=new Response(original.body,{status:original.status,statusText:original.statusText,headers:outHeaders});
-  const brandToolsPage=["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname);
-  const rewriter=new HTMLRewriter()
-    .on("head",{element(element){element.append('<link rel="stylesheet" href="'+CSS_PATH+'">',{html:true});}})
-    .on("body",{element(element){element.append('<script defer src="'+JS_PATH+'"></script>'+(brandToolsPage?'<script defer src="'+TOOLS_BRAND_PATH+'"></script>':""),{html:true});}});
-  if(incoming.pathname.includes("/guides/")){
-    // The historic guide navigation used the retired homepage section anchor.
-    rewriter.on('a[href*="#th-pathways"]',{element(element){
-      const href=element.getAttribute("href");
-      if(href)element.setAttribute("href",href.replace(/#th-pathways$/,"#programs"));
-    }});
-    // Keep article contents; only normalize the visitor-facing school name.
-    rewriter.on("body",{text(chunk){
-      if(/تافل هاوس|خانه موفقیت/.test(chunk.text))
-        chunk.replace(chunk.text.replace(/تافل هاوس|خانه موفقیت/g,"تافل هوس"));
-    }});
-  }
-  return rewriter.transform(response);
-}
 export default {
   async fetch(request,env,ctx){
     const url=new URL(request.url);
+    // Preview deployments are strictly read-only; enforce before every route, including internal CMS.
+    if(noindex(url.hostname)&&!["GET","HEAD","OPTIONS"].includes(request.method)){
+      return new Response("Preview is read-only",{status:403,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex"}});
+    }
+    if(url.pathname==="/robots.txt"&&["GET","HEAD"].includes(request.method))return v2PublicRobots(request);
+    if(url.pathname==="/sitemap.xml"&&["GET","HEAD"].includes(request.method))return v2PublicSitemap(request);
+    if(["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(url.pathname))return v2ServeLegacyTools(request,env);
+    const legacyCmsPath=/^\/(?:admin|api\/admin|api\/owner\/setup|owner\/setup|owner\/setup\.js)(?:\/|$)/i.test(url.pathname);
+    const legacyMediaPath=url.pathname.startsWith("/media/");
+    const legacyAssetPath=url.pathname.startsWith("/assets/");
+    if(legacyAssetPath&&["GET","HEAD"].includes(request.method)&&env?.ASSETS){
+      try{
+        const asset=await env.ASSETS.fetch(request);
+        if(asset.ok){
+          const headers=new Headers(asset.headers);
+          headers.set("Cache-Control","public, max-age=31536000, immutable");
+          headers.set("X-Content-Type-Options","nosniff");
+          headers.set("Cross-Origin-Resource-Policy","same-origin");
+          headers.delete("X-Robots-Tag");
+          return new Response(request.method==="HEAD"?null:asset.body,{status:asset.status,statusText:asset.statusText,headers});
+        }
+      }catch(error){console.error("Pages static asset lookup failed",String(error));}
+    }
+    if(legacyCmsPath||legacyMediaPath||legacyAssetPath){
+      if(!env.LEGACY_CMS)return new Response("The CMS service is temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","Retry-After":"300","X-Robots-Tag":"noindex, nofollow, noarchive","X-Content-Type-Options":"nosniff","Content-Type":"text/plain; charset=utf-8"}});
+      const legacyResponse=await env.LEGACY_CMS.fetch(request);
+      const headers=new Headers(legacyResponse.headers);
+      if(legacyCmsPath){headers.set("Cache-Control","private, no-store");headers.set("X-Robots-Tag","noindex, nofollow, noarchive");}
+      if(legacyAssetPath){headers.set("Cache-Control","public, max-age=31536000, immutable");headers.delete("X-Robots-Tag");}
+      headers.set("X-Content-Type-Options","nosniff");
+      return new Response(legacyResponse.body,{status:legacyResponse.status,statusText:legacyResponse.statusText,headers});
+    }
+
     if(url.pathname===DARI_FONT_PATH)return serveDariFont(request);
     if(url.pathname===JS_PATH)return staticResponse(request,CLIENT_JS,"application/javascript; charset=utf-8");
     if(url.pathname===CSS_PATH)return staticResponse(request,STYLE+GUIDE_A11Y_STYLE,"text/css; charset=utf-8");
     if(url.pathname===TOOLS_BRAND_PATH)return staticResponse(request,TOOLS_BRAND_JS,"application/javascript; charset=utf-8");
     if(url.pathname==="/__th/health")return staticResponse(request,JSON.stringify({service:"toefl-house-edge-upgrade",version:1,pinned:"2026-11-09"}),"application/json; charset=utf-8");
-    // Preview must never be able to submit authentic data to the original production CMS.
-    if(noindex(url.hostname)&&!["GET","HEAD","OPTIONS"].includes(request.method)){
-      return new Response("Preview is read-only",{status:403,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex"}});
-    }
     // Serve unchanged hashed static files locally; never proxy binary/font assets unnecessarily.
     if(["GET","HEAD"].includes(request.method)&&env&&env.ASSETS&&(
       url.pathname.startsWith("/assets/")||url.pathname==="/default-content.json"||
@@ -128,10 +133,7 @@ export default {
       const asset=await env.ASSETS.fetch(request);
       if(asset.ok)return asset;
     }
-    try{return await passThrough(request);}
-    catch(error){
-      console.error("Original site unavailable",String(error));
-      return new Response("Website temporarily unavailable",{status:503,headers:{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
-    }
+    // Never proxy to the retired Pages origin. Unknown paths now fail locally and predictably.
+    return new Response("Not found",{status:404,headers:{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Robots-Tag":"noindex","Content-Type":"text/plain; charset=utf-8"}});
   }
 };

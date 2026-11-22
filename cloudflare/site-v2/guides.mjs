@@ -1,50 +1,90 @@
-/* Preserve the existing publisher-reviewed learning guides and their URLs,
- * but present them within the same trilingual, accessible V2 design system.
- * Only requests to the pinned public guide source are permitted.
+/* Standalone, trilingual learning guides.
+ * These pages are intentionally self-contained: public guides must not depend
+ * on the retired Pages origin or on private CMS/auth services.
  */
 const V2_GUIDE_SLUGS=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
 const V2_GUIDE_UI={
- en:{section:"LEARNING RESOURCES",back:"Learning resources",read:"Explore our programs",start:"Request a free placement assessment"},
- fa:{section:"رهنماهای آموزشی",back:"رهنماهای درسی",read:"دیدن برنامه‌های آموزشی",start:"درخواست تعیین سطح رایگان"},
- ps:{section:"د زده‌کړې لارښودونه",back:"زده‌کړیز لارښودونه",read:"زموږ ښوونیز پروګرامونه",start:"د سویې د وړیا ارزونې غوښتنه"}
+ en:{section:"LEARNING RESOURCES",back:"Learning resources",open:"Read guide",start:"Request a free placement assessment",ctaTitle:"Choose the right next step",ctaText:"Tell us your goal and take the free placement assessment. Our team can help you identify the appropriate program.",indexTitle:"Learning guides",indexDescription:"Clear, practical guidance to help you choose an English program, understand the current TOEFL iBT format and build stronger speaking habits."},
+ fa:{section:"رهنماهای آموزشی",back:"رهنماهای آموزشی",open:"خواندن رهنما",start:"درخواست تعیین سطح رایگان",ctaTitle:"گام بعدی را درست انتخاب کنید",ctaText:"هدف خود را مشخص کنید و در ارزیابی رایگان سطح زبان شرکت کنید. تیم ما برای انتخاب برنامهٔ مناسب راهنمایی‌تان می‌کند.",indexTitle:"رهنماهای یادگیری زبان انگلیسی",indexDescription:"رهنماهای روشن و کاربردی برای انتخاب کورس انگلیسی، آشنایی با ساختار تازهٔ TOEFL iBT و تقویت مهارت مکالمه."},
+ ps:{section:"د زده‌کړې لارښودونه",back:"د زده‌کړې لارښودونه",open:"لارښود ولولئ",start:"د سویې د وړیا ارزونې غوښتنه",ctaTitle:"راتلونکی ګام په سمه توګه وټاکئ",ctaText:"خپل هدف روښانه کړئ او د انګلیسي ژبې په وړیا ارزونه کې ګډون وکړئ. زموږ ډله د مناسب پروګرام په ټاکلو کې لارښوونه کوي.",indexTitle:"د انګلیسي ژبې د زده‌کړې لارښودونه",indexDescription:"د انګلیسي کورس د ټاکلو، د TOEFL iBT د اوسني جوړښت د پېژندلو او د خبرو اترو د پیاوړتیا لپاره روښانه او عملي لارښوونې."}
 };
-function v2GuideText(text){
- return String(text||"").replace(/<[^>]*>/g,"").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;/g,"'").trim();
+const V2_GUIDE_DATA={
+ en:{
+  "english-courses-kabul":{title:"How to choose an English course in Kabul",description:"A practical way to match your current level, learning goal and available study time to an English program.",intro:"The best course is not simply the most advanced one. It is the program that matches your current ability and the reason you want to use English. Start with a level assessment, then choose a clear learning goal.",program:"",sections:[
+   {heading:"Begin with your current level",paragraphs:["A free placement assessment helps identify the skills you already have and the areas that need work. It is a starting point for course placement, not a guarantee of a particular result."],bullets:["Be ready to read, listen and answer simple questions.","Tell the academic team whether you need English for everyday communication, university study, work or an exam.","Ask which class level and schedule fit your current ability."]},
+   {heading:"Match the program to your goal",paragraphs:["General English builds the foundations of communication through structured levels. Academic English (EAP) focuses on the language needed for academic reading, listening, writing and study. Special Speaking places additional emphasis on spoken communication. TOEFL Preparation is a separate four-month program."],bullets:["General English: a progressive path from Pre-Starter and Starter through Prep levels.","Academic English (EAP): four levels designed for academic language development.","Special Speaking: a two-month semester with speaking practice and supporting learning materials.","TOEFL Preparation: four months of preparation for the current TOEFL iBT format."]},
+   {heading:"Check the practical details",paragraphs:["Before enrolling, confirm the class location or online option, available shift, course duration, tuition and any separate book costs. A free placement assessment does not mean that course tuition is free.","The TOEFL House is based in Kabul and also offers online learning options. Ask admissions to confirm the current schedule before making travel plans."]}
+  ]},
+  "toefl-ibt-2026":{title:"TOEFL iBT 2026: what learners should know",description:"A concise overview of the TOEFL iBT format effective from 21 January 2026 and how to plan a preparation course.",intro:"The TOEFL iBT changed on 21 January 2026. Learners should prepare for the current task types and score reporting system rather than relying only on older practice materials.",program:"toefl-preparation",sections:[
+   {heading:"Four skills, updated task types",paragraphs:["The test assesses Reading, Listening, Writing and Speaking. The 2026 format introduces updated task types, and Reading and Listening use adaptive elements. Preparation should therefore include practice with the current task formats, not only older sample questions."],bullets:["Reading: practise understanding and responding to different text types.","Listening: build comprehension across the current listening tasks.","Writing: practise clear, relevant responses for the updated tasks.","Speaking: organise ideas and deliver understandable spoken responses."]},
+   {heading:"Understand the score scale",paragraphs:["The updated score scale runs from 1 to 6 in half-point increments. During the two-year transition period, ETS also provides a comparable overall score on the former 0–120 scale. Always read the score report and the requirements of the institution to which you are applying."]},
+   {heading:"Build a realistic preparation plan",paragraphs:["The TOEFL Preparation program at The TOEFL House is four months long. A useful plan combines regular practice in all four skills, feedback on weak areas and timed work with current-format tasks. No course can guarantee a particular test score; progress depends on the learner's starting level, attendance and practice.","Check the official ETS test information for the latest task descriptions, registration details and score guidance."]}
+  ]},
+  "speaking-practice":{title:"Build stronger English speaking habits",description:"Simple, repeatable speaking activities for clearer communication, confidence and more useful feedback.",intro:"Speaking improves through regular, active use of English. Short practice sessions with a clear purpose are more useful than memorising long lists of phrases without using them.",program:"special-speaking",sections:[
+   {heading:"Use a short daily routine",paragraphs:["Choose one familiar topic and speak about it for one or two minutes. Record yourself, listen once, and select one point to improve. Repeat the task after practising the correction."],bullets:["Describe an event, explain an opinion or summarise something you read.","Practise complete ideas rather than isolated vocabulary.","Notice pronunciation, word stress, pauses and sentence clarity."]},
+   {heading:"Practise with another speaker",paragraphs:["Pair discussions help you respond naturally, ask follow-up questions and explain your ideas. Take turns speaking, listen carefully and give specific feedback. Try the same discussion again with clearer examples and better organisation."],bullets:["Ask open questions and respond with reasons or examples.","Summarise your partner's point before adding your own view.","Practise short presentations and answer questions afterwards."]},
+   {heading:"Use a structured course when you need it",paragraphs:["The TOEFL House Special Speaking program is a two-month semester. Its learning materials include the Master Speaking schedule and a separate 16-lesson Grammar book. The published semester tuition is AFN 2,000; confirm any separate book cost with admissions.","A structured class can provide guided practice and feedback, but fluency gains are not guaranteed. Consistent participation and practice between classes remain important."]}
+  ]}
+ },
+ fa:{
+  "english-courses-kabul":{title:"چگونه کورس مناسب انگلیسی را در کابل انتخاب کنیم؟",description:"راهی کاربردی برای هماهنگ‌کردن سطح فعلی، هدف آموزشی و زمان در دسترس با برنامهٔ مناسب انگلیسی.",intro:"بهترین کورس الزاماً پیشرفته‌ترین کورس نیست؛ برنامه‌ای است که با سطح فعلی و هدف شما هماهنگ باشد. نخست سطح خود را ارزیابی کنید و سپس هدف روشن آموزشی انتخاب نمایید.",program:"",sections:[
+   {heading:"از سطح فعلی خود آغاز کنید",paragraphs:["ارزیابی رایگان تعیین سطح کمک می‌کند توانایی‌های فعلی و بخش‌هایی را که به تمرین بیشتر نیاز دارند بشناسید. این ارزیابی برای تعیین سطح آغازین است و نتیجهٔ مشخصی را تضمین نمی‌کند."],bullets:["برای خواندن، شنیدن و پاسخ‌دادن به پرسش‌های ساده آماده باشید.","به بخش علمی بگویید انگلیسی را برای مکالمهٔ روزمره، تحصیل دانشگاهی، کار یا آزمون نیاز دارید.","دربارهٔ سطح صنف و زمان‌بندی مناسب پرس‌وجو کنید."]},
+   {heading:"برنامه را با هدف خود هماهنگ کنید",paragraphs:["General English پایه‌های ارتباط به زبان انگلیسی را در سطح‌های پیوسته تقویت می‌کند. Academic English یا EAP بر زبان مورد نیاز برای مطالعهٔ دانشگاهی تمرکز دارد. Special Speaking تمرین مکالمه را بیشتر مورد توجه قرار می‌دهد. TOEFL Preparation یک برنامهٔ جداگانهٔ چهارماهه است."],bullets:["General English: مسیر مرحله‌وار از Pre-Starter و Starter تا سطح‌های Prep.","Academic English (EAP): چهار سطح برای رشد مهارت‌های زبان دانشگاهی.","Special Speaking: سمستر دوماهه با تمرین مکالمه و مواد آموزشی تکمیلی.","TOEFL Preparation: برنامهٔ چهارماهه برای آمادگی با ساختار فعلی TOEFL iBT."]},
+   {heading:"جزئیات عملی را پیش از ثبت‌نام بررسی کنید",paragraphs:["پیش از ثبت‌نام، محل صنف یا گزینهٔ آنلاین، شیفت موجود، مدت کورس، فیس و هزینهٔ احتمالی جداگانهٔ کتاب را تأیید کنید. رایگان‌بودن ارزیابی تعیین سطح به معنای رایگان‌بودن کورس نیست.","تافل هوس در کابل فعالیت دارد و گزینه‌های آموزش آنلاین نیز ارائه می‌کند. پیش از رفت‌وآمد، برنامهٔ زمانی فعلی را از بخش پذیرش تأیید بگیرید."]}
+  ]},
+  "toefl-ibt-2026":{title:"TOEFL iBT در سال ۲۰۲۶: نکاتی که باید بدانید",description:"مروری کوتاه بر ساختار TOEFL iBT که از ۲۱ جنوری ۲۰۲۶ اجرا شده و شیوهٔ برنامه‌ریزی برای آمادگی آزمون.",intro:"ساختار TOEFL iBT از ۲۱ جنوری ۲۰۲۶ تغییر کرده است. داوطلبان باید با نوع سوال‌های فعلی و سیستم تازهٔ گزارش نمره تمرین کنند، نه این‌که تنها به منابع قدیمی تکیه نمایند.",program:"toefl-preparation",sections:[
+   {heading:"چهار مهارت با نوع سوال‌های تازه",paragraphs:["آزمون مهارت‌های Reading، Listening، Writing و Speaking را ارزیابی می‌کند. در ساختار ۲۰۲۶ نوع سوال‌ها به‌روزرسانی شده و بخش‌های Reading و Listening عناصر تطبیقی دارند. بنابراین تمرین باید با قالب فعلی آزمون انجام شود."],bullets:["Reading: درک متن‌ها و پاسخ‌گویی به نوع‌های مختلف متن را تمرین کنید.","Listening: مهارت فهم شنیداری را در قالب سوال‌های فعلی تقویت کنید.","Writing: پاسخ‌های روشن و مرتبط برای وظایف نوشتاری تازه بنویسید.","Speaking: ایده‌ها را منظم بسازید و پاسخ شفاهی قابل فهم ارائه کنید."]},
+   {heading:"مقیاس نمره را بشناسید",paragraphs:["مقیاس تازهٔ نمره از ۱ تا ۶ با فاصله‌های نیم‌نمره‌ای است. در دورهٔ انتقال دوساله، ETS نمرهٔ مجموعی قابل مقایسه با مقیاس قبلی ۰ تا ۱۲۰ را نیز ارائه می‌کند. همیشه گزارش نمره و شرایط دانشگاه مقصد را جداگانه بررسی کنید."]},
+   {heading:"برای آمادگی، برنامهٔ واقع‌بینانه بسازید",paragraphs:["برنامهٔ TOEFL Preparation در تافل هوس چهار ماه است. برنامهٔ مؤثر شامل تمرین منظم هر چهار مهارت، بازخورد دربارهٔ نقاط ضعف و کار با سوال‌های زمان‌دار مطابق قالب فعلی است. هیچ کورسی نمرهٔ مشخص آزمون را تضمین نمی‌کند؛ پیشرفت به سطح آغازین، حضور و تمرین زبان‌آموز وابسته است.","برای معلومات تازه دربارهٔ نوع سوال‌ها، ثبت‌نام و نمره‌دهی، معلومات رسمی ETS را بررسی کنید."]}
+  ]},
+  "speaking-practice":{title:"چگونه عادت‌های مکالمهٔ انگلیسی خود را تقویت کنیم؟",description:"تمرین‌های ساده و پیوسته برای مکالمهٔ روشن‌تر، اعتمادبه‌نفس و دریافت بازخورد مفید.",intro:"مهارت مکالمه با استفادهٔ فعال و منظم از زبان انگلیسی رشد می‌کند. تمرین کوتاه با هدف مشخص، از حفظ‌کردن عبارت‌های طولانی بدون استفادهٔ عملی مفیدتر است.",program:"special-speaking",sections:[
+   {heading:"یک برنامهٔ کوتاه روزانه داشته باشید",paragraphs:["یک موضوع آشنا انتخاب کنید و برای یک یا دو دقیقه دربارهٔ آن صحبت نمایید. صدای خود را ضبط کنید، یک‌بار گوش دهید و فقط یک نکته را برای اصلاح انتخاب کنید. پس از تمرین همان نکته، دوباره صحبت کنید."],bullets:["یک رویداد را شرح دهید، نظر خود را توضیح کنید یا مطلبی را خلاصه سازید.","به‌جای واژه‌های جداگانه، جمله‌ها و ایده‌های کامل بسازید.","به تلفظ، تکیهٔ واژه‌ها، مکث و روشنی جمله‌ها توجه کنید."]},
+   {heading:"با یک هم‌صحبت تمرین کنید",paragraphs:["گفت‌وگوی دونفره کمک می‌کند طبیعی پاسخ دهید، پرسش تکمیلی بپرسید و نظر خود را توضیح کنید. نوبتی صحبت کنید، با دقت گوش دهید و بازخورد مشخص بدهید. همان گفت‌وگو را بار دیگر با مثال‌های روشن‌تر انجام دهید."],bullets:["پرسش‌های باز بپرسید و با دلیل یا مثال پاسخ دهید.","پیش از بیان نظر خود، دیدگاه هم‌صحبت را خلاصه کنید.","ارائه‌های کوتاه انجام دهید و سپس به پرسش‌ها پاسخ دهید."]},
+   {heading:"در صورت نیاز از برنامهٔ منظم آموزشی استفاده کنید",paragraphs:["برنامهٔ Special Speaking در تافل هوس یک سمستر دوماهه است. مواد آموزشی آن شامل برنامهٔ Master Speaking و کتاب جداگانهٔ Grammar با ۱۶ درس می‌باشد. فیس مجموعی سمستر ۲٬۰۰۰ افغانی است؛ هزینهٔ احتمالی کتاب جداگانه را از بخش پذیرش تأیید کنید.","صنف منظم می‌تواند تمرین هدایت‌شده و بازخورد فراهم کند، اما پیشرفت در روانی مکالمه تضمین نمی‌شود. اشتراک پیوسته و تمرین میان جلسات نیز اهمیت دارد."]}
+  ]}
+ },
+ ps:{
+  "english-courses-kabul":{title:"په کابل کې د انګلیسي مناسب کورس څنګه وټاکئ؟",description:"د خپلې اوسنۍ کچې، زده‌کړیز هدف او شته وخت له مخې د مناسب انګلیسي پروګرام ټاکلو عملي لار.",intro:"تر ټولو ښه کورس حتمي نه ده چې تر ټولو لوړه کچه ولري؛ بلکې هغه پروګرام دی چې ستاسو له اوسني توان او موخې سره برابر وي. لومړی خپله کچه وارزوئ او وروسته روښانه زده‌کړیز هدف وټاکئ.",program:"",sections:[
+   {heading:"له خپلې اوسنۍ کچې پیل وکړئ",paragraphs:["د انګلیسي ژبې وړیا ارزونه ستاسو اوسني مهارتونه او د لا ډېر تمرین اړتیاوې څرګندوي. دا ارزونه د مناسبې کچې د ټاکلو لپاره ده، نه د یوې ځانګړې پایلې د تضمین لپاره."],bullets:["د لوستلو، اورېدو او ساده پوښتنو ته د ځواب ویلو لپاره چمتو اوسئ.","اکادمیک ټیم ته ووایاست چې انګلیسي د ورځني خبرو، پوهنتون، کار یا ازموینې لپاره غواړئ.","د خپلې کچې او مناسب مهالویش په اړه پوښتنه وکړئ."]},
+   {heading:"پروګرام له خپلې موخې سره برابر کړئ",paragraphs:["General English د پرله‌پسې کچو له لارې د اړیکو بنسټیز مهارتونه پیاوړي کوي. Academic English یا EAP د پوهنتوني لوست، اورېدو، لیکلو او زده‌کړې ژبې ته پام کوي. Special Speaking د خبرو اترو تمرین ته ځانګړې پاملرنه کوي. TOEFL Preparation جلا څلور میاشتنی پروګرام دی."],bullets:["General English: له Pre-Starter او Starter څخه تر Prep کچو پورې پړاویز مسیر.","Academic English (EAP): د اکادمیکې ژبې د ودې لپاره څلور کچې.","Special Speaking: دوه میاشتنی سمستر، د خبرو تمرین او مرستندویه زده‌کړیز مواد.","TOEFL Preparation: د اوسني TOEFL iBT لپاره څلور میاشتنی چمتووالی."]},
+   {heading:"له نوم‌لیکنې مخکې عملي جزئیات تایید کړئ",paragraphs:["د نوم‌لیکنې مخکې د ټولګي ځای یا آنلاین انتخاب، موجود وخت، د کورس موده، فیس او د کتاب احتمالي جلا لګښت تایید کړئ. د کچې وړیا ارزونه د کورس د وړیا کېدو معنا نه لري.","تافل هوس په کابل کې فعالیت کوي او آنلاین زده‌کړه هم وړاندې کوي. د تګ راتګ له پلان مخکې د نوم‌لیکنې له څانګې اوسنی مهالویش تایید کړئ."]}
+  ]},
+  "toefl-ibt-2026":{title:"د ۲۰۲۶ کال TOEFL iBT: څه باید پوه شئ؟",description:"د ۲۰۲۶ د جنورۍ له ۲۱مې نافذ TOEFL iBT جوړښت او د ازموینې د چمتووالي د پلان لنډه پېژندنه.",intro:"د TOEFL iBT جوړښت د ۲۰۲۶ کال د جنورۍ په ۲۱مه بدل شو. ګډونوال باید د اوسنیو پوښتنو او د نمرو د نوي راپور له سیستم سره تمرین وکړي، نه یوازې له پخوانیو موادو سره.",program:"toefl-preparation",sections:[
+   {heading:"څلور مهارتونه او نوي ډولونه",paragraphs:["ازموینه Reading، Listening، Writing او Speaking ارزوي. د ۲۰۲۶ په بڼه کې د پوښتنو ډولونه نوي شوي او Reading او Listening تطبیقي برخې لري. له همدې امله تمرین باید د ازموینې له اوسني جوړښت سره برابر وي."],bullets:["Reading: د بېلابېلو متنونو لوستل او پوهېدل تمرین کړئ.","Listening: د اوسنیو اورېدنیزو دندو د پوهېدو مهارت پیاوړی کړئ.","Writing: د نویو دندو لپاره روښانه او اړوند ځوابونه ولیکئ.","Speaking: خپل نظرونه منظم کړئ او روښانه شفاهي ځواب وړاندې کړئ."]},
+   {heading:"د نمرو له کچې سره بلد شئ",paragraphs:["د نمرو نوې کچه له ۱ تر ۶ پورې ده او نیمې نمرې هم لري. د دوو کلونو د لېږد په موده کې ETS د پخوانۍ ۰–۱۲۰ کچې سره د پرتله کولو وړ مجموعي نمره هم وړاندې کوي. د خپلې نمرې راپور او د اړوند پوهنتون شرطونه جلا وګورئ."]},
+   {heading:"د چمتووالي واقعي پلان جوړ کړئ",paragraphs:["په تافل هوس کې د TOEFL Preparation پروګرام څلور میاشتې دی. ګټور پلان د څلورو واړو مهارتونو منظم تمرین، د کمزورو برخو په اړه نظر او د اوسني جوړښت له مخې د وخت لرونکو تمرینونو ترکیب دی. هېڅ کورس د ځانګړې نمرې تضمین نه شي کولای؛ پرمختګ د زده‌کوونکي په لومړنۍ کچه، ګډون او تمرین پورې تړلی دی.","د پوښتنو، نوم‌لیکنې او نمرو د وروستیو معلوماتو لپاره د ETS رسمي معلومات وګورئ."]}
+  ]},
+  "speaking-practice":{title:"د انګلیسي خبرو اترو مهارت څنګه پیاوړی کړو؟",description:"د روښانه خبرو، باور او ګټورې ارزونې لپاره ساده او تکرارېدونکي تمرینونه.",intro:"د خبرو اترو مهارت د انګلیسي ژبې په منظم او فعال استعمال پیاوړی کېږي. لنډ تمرین چې روښانه موخه ولري، د اوږدو عبارتونو له بې‌کارې یادونې څخه ډېر ګټور دی.",program:"special-speaking",sections:[
+   {heading:"ورځنی لنډ تمرین جوړ کړئ",paragraphs:["یوه پېژندل شوې موضوع وټاکئ او یوه یا دوه دقیقې پرې خبرې وکړئ. خپل غږ ثبت کړئ، یو ځل یې واورئ او د اصلاح لپاره یوازې یوه نکته وټاکئ. له سمون وروسته هماغه تمرین بیا ترسره کړئ."],bullets:["یوه پېښه بیان کړئ، خپل نظر تشریح کړئ یا لوستل شوی مطلب لنډ کړئ.","د جلا لغتونو پر ځای بشپړې جملې او نظرونه جوړ کړئ.","تلفظ، د کلمو ټینګار، تم کېدل او د جملو روښانتیا وڅارئ."]},
+   {heading:"له بل ویونکي سره تمرین وکړئ",paragraphs:["دوه کسیزې خبرې اترې مرسته کوي چې طبیعي ځواب ورکړئ، تعقیبي پوښتنې وکړئ او خپل نظر تشریح کړئ. په وار سره خبرې وکړئ، په دقت واورئ او مشخصه ارزونه ورکړئ. هماغه بحث بیا د روښانه بېلګو او منظم نظرونو سره ترسره کړئ."],bullets:["پرانیستې پوښتنې وکړئ او د دلیل یا بېلګې په مرسته ځواب ورکړئ.","د خپل نظر له وړاندې کولو مخکې د مقابل لوري خبره لنډه کړئ.","لنډې ویناوې وکړئ او وروسته پوښتنو ته ځواب ووایاست."]},
+   {heading:"د اړتیا پر مهال منظم ښوونیز پروګرام وکاروئ",paragraphs:["د تافل هوس Special Speaking پروګرام دوه میاشتنی سمستر دی. په زده‌کړیزو موادو کې د Master Speaking مهالویش او د Grammar جلا ۱۶ درسي کتاب شامل دي. د سمستر ټول فیس ۲٬۰۰۰ افغانۍ دی؛ د کتاب احتمالي جلا بیه له نوم‌لیکنې سره تایید کړئ.","منظم ټولګی لارښوول شوی تمرین او ارزونه برابروي، خو د روانو خبرو پرمختګ نه تضمینوي. دوامداره ګډون او د ټولګي ترمنځ تمرین هم مهم دي."]}
+  ]}
+ }
+};
+function v2GuideSections(item){
+ return item.sections.map(section=>'<section><h2>'+v2T(section.heading,180)+'</h2>'+section.paragraphs.map(p=>'<p>'+v2T(p,900)+'</p>').join('')+(section.bullets?.length?'<ul>'+section.bullets.map(x=>'<li>'+v2T(x,360)+'</li>').join('')+'</ul>':'')+'</section>').join('');
 }
 async function v2Guides(request,env,locale,slug){
  if(slug&&!V2_GUIDE_SLUGS.includes(slug))return null;
  if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{Allow:"GET, HEAD"}});
  const p=v2Prefix(locale),route=p+"guides/"+(slug?slug+"/":"");
- let original,html,cms;
- try{
-  const url=new URL(route,UPSTREAM);
-  original=await fetch(new Request(url,{method:"GET",headers:{"Accept":"text/html"}}));
-  if(!original.ok||!(original.headers.get("Content-Type")||"").includes("text/html"))return null;
-  html=await original.text();
-  cms=await v2Cms(env);
- }catch(_){return null;}
- const header=html.match(/<header class="growth-hero">([\s\S]*?)<\/header>/i);
- const main=html.match(/<main id="content">([\s\S]*?)<\/main>/i);
- if(!header||!main)return null;
- const h1=header[1].match(/<h1>([\s\S]*?)<\/h1>/i);
- const paragraph=header[1].match(/<h1>[\s\S]*?<\/h1>\s*<p>([\s\S]*?)<\/p>/i);
- if(!h1||!paragraph)return null;
- const title=v2GuideText(h1[1]),description=v2GuideText(paragraph[1]);
- if(!title||!description||title.length>180||description.length>450)return null;
- const ui=V2_GUIDE_UI[locale],site=V2_COPY[locale],canon=V2_ORIGIN+route;
- const isArticle=Boolean(slug);
+ const ui=V2_GUIDE_UI[locale],site=V2_COPY[locale],item=slug?V2_GUIDE_DATA[locale][slug]:null;
+ const title=item?.title||ui.indexTitle,description=item?.description||ui.indexDescription;
+ const cms=await v2Cms(env).catch(()=>null);
+ const isArticle=Boolean(slug),canon=V2_ORIGIN+route;
  const record={"@context":"https://schema.org","@type":isArticle?"Article":"CollectionPage","name":title,"description":description,"inLanguage":site.lang,"url":canon,"publisher":{"@type":"EducationalOrganization","name":"The TOEFL House","url":V2_ORIGIN+"/"}};
  if(isArticle)record.headline=title;
  const breadcrumbs={"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":site.name,"item":V2_ORIGIN+p},{"@type":"ListItem","position":2,"name":ui.back,"item":V2_ORIGIN+p+"guides/"}]};
  if(isArticle)breadcrumbs.itemListElement.push({"@type":"ListItem","position":3,"name":title,"item":canon});
- let body=main[1];
- // The original article has a retired home-page #start link. Take visitors
- // directly to the active admission page while keeping the article unchanged.
- body=body.replace(/href="https:\/\/the-toefl-house\.pages\.dev\/(fa\/|ps\/)?#start"/g,(_,loc)=>'href="'+V2_ORIGIN+'/'+(loc||"")+'admissions/"');
- // Guide cards must expose actual headings, not only bold text.
- if(!isArticle)body=body.replace(/<strong>([^<]+)<\/strong>/g,'<h2>$1</h2>');
  const top=v2SubpageHead(locale,route,title+" | The TOEFL House",description,[record,breadcrumbs]);
  const crumb='<nav class="breadcrumbs" aria-label="'+v2T(v2BreadcrumbLabel(locale))+'"><a href="'+p+'">'+v2T(site.name)+'</a><span aria-hidden="true">/</span>'+(isArticle?'<a href="'+p+'guides/">'+v2T(ui.back)+'</a><span aria-hidden="true">/</span><span aria-current="page">'+v2T(title)+'</span>':'<span aria-current="page">'+v2T(ui.back)+'</span>')+'</nav>';
+ let body;
+ if(isArticle){
+  const target=p+"admissions/"+(item.program?"?program="+item.program:"");
+  body='<article class="growth-article"><p>'+v2T(item.intro,900)+'</p>'+v2GuideSections(item)+'<div class="growth-cta"><div><strong>'+v2T(ui.ctaTitle)+'</strong><p>'+v2T(ui.ctaText)+'</p></div><a class="growth-action" href="'+target+'">'+v2T(ui.start)+'</a></div></article>';
+ }else{
+  body='<div class="growth-card-grid">'+V2_GUIDE_SLUGS.map(id=>{const card=V2_GUIDE_DATA[locale][id];return '<a class="growth-card" href="'+p+'guides/'+id+'/"><small>'+v2T(ui.section)+'</small><h2>'+v2T(card.title)+'</h2><p>'+v2T(card.description)+'</p><span class="growth-arrow">'+v2T(ui.open)+' ↗</span></a>';}).join('')+'</div>';
+ }
  const page=top+'<main id="main" class="editorial-guides"><section class="guide-hero"><div class="shell">'+crumb+'<p class="eyebrow">'+v2T(ui.section)+'</p><h1>'+v2T(title)+'</h1><p>'+v2T(description)+'</p></div></section><section class="guide-body"><div class="shell">'+body+'</div></section></main>'+v2Footer(site,locale,cms);
  return v2SubpageResponse(request,page,locale);
 }
