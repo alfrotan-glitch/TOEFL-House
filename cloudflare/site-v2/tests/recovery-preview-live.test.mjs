@@ -8,17 +8,16 @@ for(const locale of ["","fa/","ps/"]){
  expected.push("/"+locale+"guides/");
  for(const id of guides)expected.push("/"+locale+"guides/"+id+"/");
 }
-const failures=[];
-const results=[];
+const failures=[],results=[];
 for(const path of expected){
  try{
   const r=await fetch(base+path,{redirect:"manual",signal:AbortSignal.timeout(20000)});
   const body=await r.text();
-  const title=body.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1]||"";
-  const row={path,status:r.status,type:r.headers.get("content-type"),robots:r.headers.get("x-robots-tag"),title:title.slice(0,90)};
-  results.push(row);
+  const title=body.includes("<title")?body.split("<title")[1].split("</title>")[0].replace(/^>/,"").trim():"";
+  const type=r.headers.get("content-type")||"";
+  results.push({path,status:r.status,type,robots:r.headers.get("x-robots-tag"),title:title.slice(0,90)});
   if(r.status!==200)failures.push(path+" HTTP "+r.status);
-  if(!/text\\/html/i.test(row.type||""))failures.push(path+" not HTML");
+  if(!type.includes("text/html"))failures.push(path+" not HTML");
   if(!title)failures.push(path+" missing title");
   if(r.headers.get("x-robots-tag")?.includes("noindex"))failures.push(path+" public route noindex");
  }catch(e){failures.push(path+" "+String(e))}
@@ -36,6 +35,6 @@ if(api.status!==200||!apiText.includes('"cmsStatus":"connected"'))failures.push(
 if(css.status!==200||js.status!==200)failures.push("V2 CSS/JS unavailable");
 if(tools.status!==200||!toolsText.includes("index-Ch3KjNPK")||!tools.headers.get("x-robots-tag")?.includes("noindex"))failures.push("legacy student tools unavailable or indexable");
 if(![200,301,302,303,307,308].includes(admin.status)||!admin.headers.get("x-robots-tag")?.includes("noindex"))failures.push("admin route unavailable or not protected");
-if(sitemap.status!==200||!sitemapText.includes("toeflhouse.pages.dev")||(sitemapText.match(/<loc>/g)||[]).length<39)failures.push("sitemap incomplete");
+if(sitemap.status!==200||!sitemapText.includes("toeflhouse.pages.dev")||sitemapText.split("<loc>").length-1<39)failures.push("sitemap incomplete");
 console.log(JSON.stringify({base,routeCount:results.length,failures,api:api.status,css:css.status,js:js.status,tools:tools.status,admin:admin.status,sitemap:sitemap.status,results},null,2));
 assert.deepEqual(failures,[]);
