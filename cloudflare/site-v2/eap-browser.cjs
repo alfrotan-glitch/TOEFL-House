@@ -33,6 +33,7 @@ const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
     }
    });
    assert.equal(d.lang,lang);
+   if(root==="/fa/"){const faText=await page.locator("body").innerText();assert.match(faText,/دانشگاه/);assert.doesNotMatch(faText,/پوهنتون/);}
    assert.equal(d.levels.length,4);
    assert.equal(d.books,3);
    assert.equal(d.goals,4);
