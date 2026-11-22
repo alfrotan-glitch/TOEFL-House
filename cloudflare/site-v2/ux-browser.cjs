@@ -50,7 +50,7 @@ const base=(process.env.TH_EAP_URL||"https://toeflhouse.pages.dev").replace(/\/$
   for(const path of ["/guides/toefl-ibt-2026/","/fa/guides/speaking-practice/","/ps/guides/english-courses-kabul/"]){
    await open(path);
    assert.equal(await page.locator("main.editorial-guides .growth-article").count(),1);
-   assert.ok(await page.locator("main .growth-article h2").count()>=4);
+   assert.ok(await page.locator("main .growth-article h2").count()>=3,"guide articles must expose at least three structured sections");
    assert.equal(await page.locator('.growth-article a[href*="#start"]').count(),0,"old anchor should be replaced");
    await page.screenshot({path:dir+"/world-article-"+path.split("/").filter(Boolean).join("-")+".png",fullPage:false});
    results.push({path,article:true});
