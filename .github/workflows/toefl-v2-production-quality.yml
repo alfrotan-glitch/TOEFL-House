@@ -58,8 +58,9 @@ jobs:
       - name: Enforce Cloudflare server-rendered Worker size budget
         run: |
           # Guide layouts, localization and CMS content are server-rendered; visitors download only compressed CSS/JS.
-          # The Worker embeds server-side editorial HTML/CSS and three-language curricula; visitors receive only the separate lightweight CSS/JS.
-          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 296000
+          # The Worker embeds reviewed EN/FA/PS editorial copy, course detail modules and learning guides.
+          # Keep a 400 KB source budget; client downloads remain the separately versioned CSS/JS below.
+          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 400000
           # Readable source includes goal-based navigation and is compacted before delivery.
           test $(wc -c < cloudflare/site-v2/site.css) -lt 74000
           test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
