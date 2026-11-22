@@ -24,9 +24,9 @@ const publicContent=await readFile(join(here,"public-content.mjs"),"utf8");
 const academicEnglishSource=await readFile(join(here,"academic-english.mjs"),"utf8");
 // Keep the three-language editorial source readable in Git, but compact its
 // static JSON data in the deployed Worker to stay below the safe Pages budget.
-const eapDataPattern=/const V2_EAP=(\{[\s\S]*?\});/;
-if(!eapDataPattern.test(academicEnglishSource))throw Error("EAP data shape changed; refusing unsafe build");
-const academicEnglish=academicEnglishSource.replace(eapDataPattern,(_,json)=>"const V2_EAP="+JSON.stringify(JSON.parse(json))+";");
+if(!/const V2_EAP=\{/.test(academicEnglishSource))throw Error("EAP data missing; refusing unsafe build");
+// academic-english.mjs already stores its three-language static data as compact JSON.
+const academicEnglish=academicEnglishSource;
 const specialPrograms=await readFile(join(here,"special-programs.mjs"),"utf8");
 // Remove CSS comments and layout-only whitespace in the published asset, while
 // retaining readable, separately version-controlled CSS source for editors.
