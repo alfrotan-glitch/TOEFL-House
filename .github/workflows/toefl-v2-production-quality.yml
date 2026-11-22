@@ -48,7 +48,7 @@ jobs:
           node --test cloudflare/analytics/tests/*.test.mjs
       - name: Verify the live recovery preview (read-only)
         env:
-          TOEFL_QA_BASE: https://restore-public-site-20261122.toeflhouse.pages.dev
+          TOEFL_QA_BASE: https://recovery-final-preview-20261.toeflhouse.pages.dev
         run: |
           node cloudflare/site-v2/production-full-acceptance.mjs
           node cloudflare/site-v2/final-production-navigation.mjs
@@ -77,7 +77,7 @@ jobs:
   production-site:
     name: Verify live content and security
     needs: build-and-unit
-    if: github.event_name != 'pull_request' || github.head_ref == 'restore-public-site-20261122'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
