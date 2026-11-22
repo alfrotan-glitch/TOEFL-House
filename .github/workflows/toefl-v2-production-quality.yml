@@ -55,6 +55,10 @@ jobs:
           node cloudflare/site-v2/general-english-live-acceptance.mjs
           node cloudflare/cms-readiness/public-auth-readonly.mjs
           node cloudflare/cms-readiness/legacy-dependency.mjs
+      - name: Audit the recovery preview for WCAG A and AA
+        run: |
+          npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+          TOEFL_QA_BASE=https://recovery-final-preview-20261.toeflhouse.pages.dev node cloudflare/site-v2/accessibility-audit.cjs
       - name: Enforce Cloudflare server-rendered Worker size budget
         run: |
           # Guide layouts, localization and CMS content are server-rendered; visitors download only compressed CSS/JS.
