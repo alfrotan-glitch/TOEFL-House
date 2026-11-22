@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-const base=process.env.TOEFL_PREVIEW_URL||"https://restore-public-site-20261122.toeflhouse.pages.dev";
+const base=process.env.TOEFL_PREVIEW_URL||"https://recovery-final-preview-20261.toeflhouse.pages.dev";
 const expected=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
 const courses=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
 const guides=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
