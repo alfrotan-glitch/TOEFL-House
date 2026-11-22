@@ -66,28 +66,22 @@ test("the same-origin event script avoids PII and supports click types",async()=
   });
 });
 
-test("main homepage is server-rendered locally and never calls the retired origin",async()=>{
+test("unhandled homepage path returns a local 404 without contacting the retired origin",async()=>{
   await withMocks(async called=>{
     const r=await worker.fetch(new Request(canonical+"/"),{});
-    const h=await r.text();
-    assert.equal(r.status,200);
-    assert.match(h,/THE TOEFL HOUSE/);
-    assert.match(h,/English in Kabul/);
-    assert.match(h,/engagement-v1\.js/);
-    assert.match(h,/__th\/v2\/site\.css/);
+    assert.equal(r.status,404);
     assert.equal(called.length,0);
-    assert.equal(r.headers.get("X-Robots-Tag"),null);
-    assert.match(r.headers.get("Content-Security-Policy"),/toefl-house-conversions\.alfrotan2\.workers\.dev/);
-    assert.equal(r.headers.get("Content-Length"),null);
-    assert.equal(r.headers.get("ETag"),null);
+    assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
+    assert.match(await r.text(),/Not found/);
   });
 });
 
-test("preview HTML is noindex and click JavaScript cannot count preview",async()=>{
+test("preview health response is noindex",async()=>{
   await withMocks(async()=>{
-    const r=await worker.fetch(new Request(preview+"/fa/"),{});
+    const r=await worker.fetch(new Request(preview+"/__th/health"),{});
+    assert.equal(r.status,200);
     assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
-    assert.match(await r.text(),/engagement-v1\.js/);
+    assert.match(await r.text(),/toefl-house-edge-upgrade/);
   });
 });
 
