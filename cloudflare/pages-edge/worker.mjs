@@ -64,7 +64,11 @@ async function v2ServeLegacyTools(request,env){
     headers.set("X-Robots-Tag","noindex, nofollow, noarchive");
     headers.set("Cache-Control","no-store");
     headers.set("X-Content-Type-Options","nosniff");
-    return new Response(request.method==="HEAD"?null:asset.body,{status:asset.status,statusText:asset.statusText,headers});
+    const shell=new Response(request.method==="HEAD"?null:asset.body,{status:asset.status,statusText:asset.statusText,headers});
+    return new HTMLRewriter()
+      .on("head",{element(element){element.append('<link rel="stylesheet" href="'+CSS_PATH+'">',{html:true});}})
+      .on("body",{element(element){element.append('<script defer src="'+JS_PATH+'"></script><script defer src="'+TOOLS_BRAND_PATH+'"></script>',{html:true});}})
+      .transform(shell);
   }catch(error){
     console.error("Local student tools asset unavailable",String(error));
     return new Response("Student tools are temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive"}});
