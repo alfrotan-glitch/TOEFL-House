@@ -155,7 +155,7 @@ function assertDocument(doc,defaults){
  });
  return {locales,media,timetable};
 }
-async async function defaults(env,base){
+async function defaults(env,base){
  if(!env.CMS_DB)throw Error('CMS_DB binding is missing');
  const row=await env.CMS_DB.prepare("SELECT body FROM content WHERE id='main'").first();
  if(!row?.body)throw Error('Published CMS content is unavailable');
