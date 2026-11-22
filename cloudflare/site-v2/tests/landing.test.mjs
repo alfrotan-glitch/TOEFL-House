@@ -785,6 +785,6 @@ test("Dari font is localized and mobile FAQ has a readable compact layout",async
  const css=await r.text();
  assert.match(css,/font-family:THDari;src:url\("\/__th\/v2\/font\/vazirmatn-33\.003\.woff2"\)/);
  assert.ok(css.includes("html[lang=fa-AF] body{font-family:THDari"),"Dari only");
- assert.ok(css.includes("html[dir=rtl] body{font-family:THArabic"),"Pashto unchanged");
+ assert.ok(css.includes('html[dir=rtl] body{font-family:Tahoma,"Noto Sans Arabic",Arial,sans-serif'),"Pashto uses a stable Arabic-script fallback");
  assert.ok(css.includes(".faq-section.section{padding:54px 0 64px}"),"FAQ section compact on phones");
 });
