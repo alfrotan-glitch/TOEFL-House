@@ -96,7 +96,20 @@ export default {
     if(["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(url.pathname))return v2ServeLegacyTools(request,env);
     const legacyCmsPath=/^\/(?:admin|api\/admin|api\/owner\/setup|owner\/setup|owner\/setup\.js)(?:\/|$)/i.test(url.pathname);
     const legacyMediaPath=url.pathname.startsWith("/media/");
-    const legacyAssetPath=url.pathname.startsWith("/assets/aistudio/");
+    const legacyAssetPath=url.pathname.startsWith("/assets/");
+    if(legacyAssetPath&&["GET","HEAD"].includes(request.method)&&env?.ASSETS){
+      try{
+        const asset=await env.ASSETS.fetch(request);
+        if(asset.ok){
+          const headers=new Headers(asset.headers);
+          headers.set("Cache-Control","public, max-age=31536000, immutable");
+          headers.set("X-Content-Type-Options","nosniff");
+          headers.set("Cross-Origin-Resource-Policy","same-origin");
+          headers.delete("X-Robots-Tag");
+          return new Response(request.method==="HEAD"?null:asset.body,{status:asset.status,statusText:asset.statusText,headers});
+        }
+      }catch(error){console.error("Pages static asset lookup failed",String(error));}
+    }
     if(legacyCmsPath||legacyMediaPath||legacyAssetPath){
       if(!env.LEGACY_CMS)return new Response("The CMS service is temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","Retry-After":"300","X-Robots-Tag":"noindex, nofollow, noarchive","X-Content-Type-Options":"nosniff","Content-Type":"text/plain; charset=utf-8"}});
       const legacyResponse=await env.LEGACY_CMS.fetch(request);
