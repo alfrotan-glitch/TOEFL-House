@@ -36,7 +36,6 @@ const js=await readFile(join(here,"site.js"),"utf8");
 const assetRevision=createHash("sha256").update(css).update(js).digest("hex").slice(0,12);
 const entry="export default {\n  async fetch(request,env,ctx){";
 const matching="    const url=new URL(request.url);";
-const target="  const target=new URL(incoming.pathname+incoming.search,UPSTREAM);";
 const render=[
 '    if(noindex(url.hostname)&&!["GET","HEAD","OPTIONS"].includes(request.method))return new Response("Preview is read-only",{status:403,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex"}});',
 '    if(url.pathname==="/api/content"&&["GET","HEAD"].includes(request.method)){',
@@ -66,13 +65,7 @@ const render=[
 '    if(["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(url.pathname)&&!["GET","HEAD"].includes(request.method))',
 '      return new Response("Method not allowed",{status:405,headers:{"Allow":"GET, HEAD"}});',
 ].join("\n")+"\n";
-if(!main.includes(entry)||!main.includes(matching)||!main.includes(target))throw Error("Original Worker changed: abort unsafe build");
-const rewrittenTarget=[
-'  const isTools=["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname);',
-'  const upstreamPath=!isTools?incoming.pathname:incoming.pathname.startsWith("/fa/")?"/fa/":incoming.pathname.startsWith("/ps/")?"/ps/":"/";',
-'  const target=new URL(upstreamPath+incoming.search,UPSTREAM);'
-].join("\n");
-main=main.replace(target,rewrittenTarget);
+if(!main.includes(entry)||!main.includes(matching))throw Error("Original Worker changed: abort unsafe build");
 main=main.replace(entry,landing+"\n"+generalEnglish+"\n"+academicEnglish+"\n"+specialPrograms+"\n"+detail+"\n"+guides+"\n"+publicContent+"\nconst V2_REV="+JSON.stringify(assetRevision)+";\nconst V2_CSS="+JSON.stringify(css)+";\nconst V2_JS="+JSON.stringify(js)+";\n"+entry);
 const at=main.lastIndexOf(matching);
 if(at<0)throw Error("fetch entry missing");
@@ -83,7 +76,7 @@ main=main.replace(headerFlag,'if(noindex(incoming.hostname)||["/tools","/tools/"
 const undo='if(outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");';
 if(!main.includes(undo))throw Error("Existing noindex behavior moved");
 main=main.replace(undo,'if(!["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname) && outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");');
-if(!main.includes("function v2GeneralEnglish")||!main.includes("function v2AcademicEnglishPage")||!main.includes("function v2SpecialProgramPage")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("const upstreamPath=")||!main.includes("function v2Guides")||!main.includes("function v2PublicContent")||!main.includes("function v2PublicSitemap")||!main.includes("async function v2ServeLegacyTools")||!main.includes("env.LEGACY_CMS.fetch"))throw Error("Build missing new routes");
+if(!main.includes("function v2GeneralEnglish")||!main.includes("function v2AcademicEnglishPage")||!main.includes("function v2SpecialProgramPage")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("function v2Guides")||!main.includes("function v2PublicContent")||!main.includes("function v2PublicSitemap")||!main.includes("async function v2ServeLegacyTools")||!main.includes("env.LEGACY_CMS.fetch"))throw Error("Build missing new routes");
 await mkdir(join(here,"dist"),{recursive:true});
 await writeFile(join(here,"dist/_worker.js"),main);
 console.log(JSON.stringify({output:"dist/_worker.js",bytes:Buffer.byteLength(main),assetRevision,cssBytes:Buffer.byteLength(css),clientBytes:Buffer.byteLength(js),legacyPreserved:true}));
