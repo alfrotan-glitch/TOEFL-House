@@ -37,8 +37,9 @@ const [api,css,js,admin,adminApi,campus,poster,tools,sitemap,robots]=await Promi
  fetch(base+"/robots.txt",{signal:AbortSignal.timeout(20000)})
 ]);
 const apiText=await api.text(),adminText=await admin.text(),adminApiText=await adminApi.text(),sitemapText=await sitemap.text(),robotsText=await robots.text(),toolsText=await tools.text();
+const cssText=await css.text(),jsText=await js.text();
 if(api.status!==200||!apiText.includes('"cmsStatus":"connected"'))failures.push("published CMS unavailable");
-if(css.status!==200||js.status!==200)failures.push("V2 CSS/JS unavailable");
+if(css.status!==200||js.status!==200||!cssText.includes(".site-header")||!jsText.includes("mobile-menu")||cssText.startsWith("H4sIA")||jsText.startsWith("H4sIA"))failures.push("V2 CSS/JS unavailable or gzip payload was not decoded");
 if(admin.status!==200||!adminText.includes("TOEFL"))failures.push("CMS admin UI unavailable");
 if(![401,403].includes(adminApi.status))failures.push("CMS API is not rejecting anonymous admin access");
 if(campus.status!==200||!(campus.headers.get("content-type")||"").includes("image/jpeg"))failures.push("campus photo unavailable");
@@ -46,5 +47,5 @@ if(poster.status!==200||!(poster.headers.get("content-type")||"").includes("imag
 if(tools.status!==503||!tools.headers.get("x-robots-tag")?.includes("noindex")||!toolsText.includes("temporarily unavailable"))failures.push("retired tools endpoint is not safely disabled");
 if(sitemap.status!==200||!sitemapText.includes("toeflhouse.pages.dev")||sitemapText.split("<loc>").length-1!==39)failures.push("sitemap incomplete");
 if(robots.status!==200||!robotsText.includes("Disallow: /"))failures.push("preview robots policy missing");
-console.log(JSON.stringify({base,routeCount:results.length,failures,api:api.status,css:css.status,js:js.status,admin:admin.status,adminApi:adminApi.status,campus:campus.status,poster:poster.status,tools:tools.status,sitemap:sitemap.status,robots:robots.status,knownLimitations:["Student tools remain safely disabled; the public admissions assessment link remains available."],results},null,2));
+console.log(JSON.stringify({base,routeCount:results.length,failures,api:api.status,css:css.status,js:js.status,cssBytes:cssText.length,jsBytes:jsText.length,admin:admin.status,adminApi:adminApi.status,campus:campus.status,poster:poster.status,tools:tools.status,sitemap:sitemap.status,robots:robots.status,knownLimitations:["Student tools remain safely disabled; the public admissions assessment link remains available."],results},null,2));
 assert.deepEqual(failures,[]);
