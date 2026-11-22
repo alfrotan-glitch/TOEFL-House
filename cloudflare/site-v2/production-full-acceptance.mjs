@@ -28,6 +28,7 @@ for(const path of paths){
   if(production&&noindex)failures.push("NOINDEX PUBLIC "+path);
   if(!production&&!noindex)failures.push("Preview route indexable "+path);
   if(!title)failures.push("No title "+path);
+  if(path.startsWith("/fa/")&&body.includes("پوهنتون"))failures.push("Pashto university term leaked into Persian page "+path);
   if(isV2){
    if(!body.includes("/__th/v2/site.css"))failures.push("V2 style not loaded "+path);
    if((body.match(/<h1(?:\s|>)/gi)||[]).length!==1)failures.push("H1 count "+path);
