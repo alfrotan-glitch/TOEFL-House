@@ -16,14 +16,18 @@ async function v2PublicContent(request,env){
   if(!main?.body||!ps?.body||!Number.isInteger(main.revision)||!Number.isInteger(ps.revision))throw Error("Missing published CMS revision");
   const published=JSON.parse(main.body),pashto=JSON.parse(ps.body);
   if(!Array.isArray(published?.locales?.en?.programs)||!Array.isArray(published?.locales?.fa?.programs)||!Array.isArray(pashto?.programs))throw Error("Invalid published content structure");
-  const psPublic=Object.fromEntries(Object.entries(pashto).filter(([key])=>key!=="editor"));
-  const payload={locales:{en:published.locales.en,fa:published.locales.fa,ps:psPublic},
-   media:published.media||{},timetable:published.timetable||{},
-   revision:main.revision,psRevision:ps.revision,updatedAt:main.updated_at||"" ,cmsStatus:"connected"};
-  if(Object.values(payload.locales).some(locale=>locale.programs.length!==7))throw Error("Unapproved public program count");
   const forbidden=new Set(["password","password_hash","password_salt","totp_secret","token_hash",
    "session_token","session_cookie","private_key","api_key","onboarding_invites",
-   "staff_users","login_attempts","drafts","cms_draft_recovery_archive","authorization"]);
+   "staff_users","login_attempts","drafts","cms_draft_recovery_archive","authorization","editor"]);
+  function publicOnly(value){
+   if(Array.isArray(value))return value.map(publicOnly);
+   if(!value||typeof value!=="object")return value;
+   return Object.fromEntries(Object.entries(value).filter(([key])=>!forbidden.has(key.toLowerCase())).map(([key,item])=>[key,publicOnly(item)]));
+  }
+  const payload=publicOnly({locales:{en:published.locales.en,fa:published.locales.fa,ps:pashto},
+   media:published.media||{},timetable:published.timetable||{},
+   revision:main.revision,psRevision:ps.revision,updatedAt:main.updated_at||"",cmsStatus:"connected"});
+  if(Object.values(payload.locales).some(locale=>!Array.isArray(locale?.programs)||locale.programs.length!==7))throw Error("Unapproved public program count");
   function verify(value){
    if(Array.isArray(value)){for(const item of value)verify(item);return;}
    if(!value||typeof value!=="object")return;
