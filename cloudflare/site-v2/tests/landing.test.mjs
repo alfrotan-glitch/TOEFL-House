@@ -36,7 +36,7 @@ for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","
   assert.match(html,/https:\/\/toeflhouse\.pages\.dev/);
   assert.match(html,/footer-cta/);
   assert.doesNotMatch(html,/صنف‌های آموزشی دارای فیس|درسی ټولګي فیس لري|Tuition applies to courses|course tuition is separate|It does not make course tuition free/i);
-  assert.match(html,/href="\/(?:fa\/|ps\/)?tools\/"/);
+  assert.doesNotMatch(html,/href="\/(?:fa\/|ps\/)?tools\/"/);
   assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/"/);
   assert.match(html,/<script type="application\/ld\+json">/);
   assert.doesNotMatch(html,/500 Internal Server Error/);
