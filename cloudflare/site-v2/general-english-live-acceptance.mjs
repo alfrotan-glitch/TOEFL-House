@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-const base="https://toeflhouse.pages.dev";
+const base=(process.env.TOEFL_QA_BASE||"https://toeflhouse.pages.dev").replace(/\/$/,"");
+const production=base==="https://toeflhouse.pages.dev";
 const cases=[
  {path:"/courses/general-english/",lang:"en",two:"2 instructors",month:"500 AFN",semester:"1,000 AFN",total:"4,500 AFN"},
  {path:"/fa/courses/general-english/",lang:"fa-AF",two:"۲ استاد",month:"۵۰۰ افغانی",semester:"۱٬۰۰۰ افغانی",total:"۴٬۵۰۰ افغانی"},
@@ -9,7 +10,8 @@ const results=[];
 for(const c of cases){
  const res=await fetch(base+c.path,{signal:AbortSignal.timeout(20000)});
  assert.equal(res.status,200,"General English public route "+c.path);
- assert.ok(!(res.headers.get("x-robots-tag")||"").includes("noindex"),"Public course should be indexable");
+ if(production)assert.ok(!(res.headers.get("x-robots-tag")||"").includes("noindex"),"Public course should be indexable");
+ else assert.ok((res.headers.get("x-robots-tag")||"").includes("noindex"),"Preview course should be noindex");
  const html=await res.text();
  assert.ok(html.includes('<html lang="'+c.lang+'"'),"wrong language on "+c.path);
  assert.equal((html.match(/id="general-english-details"/g)||[]).length,1,"Missing unique editorial section");
