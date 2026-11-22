@@ -69,7 +69,16 @@ const render=[
 '      return new Response("Method not allowed",{status:405,headers:{"Allow":"GET, HEAD"}});',
 ].join("\n")+"\n";
 if(!main.includes(entry)||!main.includes(matching))throw Error("Original Worker changed: abort unsafe build");
-const compressedRuntime="const V2_REV="+JSON.stringify(assetRevision)+";\nconst V2_CSS_GZIP_B64="+JSON.stringify(cssGzip)+";\nconst V2_JS_GZIP_B64="+JSON.stringify(jsGzip)+";\nlet V2_CSS_TEXT=null,V2_JS_TEXT=null;\nasync function v2DecompressAsset(encoded){const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream(\"gzip\"));return new Response(stream).text();}\nasync function v2CssText(){if(!V2_CSS_TEXT)V2_CSS_TEXT=v2DecompressAsset(V2_CSS_GZIP_B64);return V2_CSS_TEXT;}\nasync function v2JsText(){if(!V2_JS_TEXT)V2_JS_TEXT=v2DecompressAsset(V2_JS_GZIP_B64);return V2_JS_TEXT;}\n";\nmain=main.replace(entry,landing+"\n"+generalEnglish+"\n"+academicEnglish+"\n"+specialPrograms+"\n"+detail+"\n"+guides+"\n"+publicContent+"\n"+compressedRuntime+entry);
+const compressedRuntime=[
+ 'const V2_REV='+JSON.stringify(assetRevision)+';',
+ 'const V2_CSS_GZIP_B64='+JSON.stringify(cssGzip)+';',
+ 'const V2_JS_GZIP_B64='+JSON.stringify(jsGzip)+';',
+ 'let V2_CSS_TEXT=null,V2_JS_TEXT=null;',
+ 'async function v2DecompressAsset(encoded){const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));return new Response(stream).text();}',
+ 'async function v2CssText(){if(!V2_CSS_TEXT)V2_CSS_TEXT=v2DecompressAsset(V2_CSS_GZIP_B64);return V2_CSS_TEXT;}',
+ 'async function v2JsText(){if(!V2_JS_TEXT)V2_JS_TEXT=v2DecompressAsset(V2_JS_GZIP_B64);return V2_JS_TEXT;}'
+].join("\\n")+"\\n";
+main=main.replace(entry,landing+"\n"+generalEnglish+"\n"+academicEnglish+"\n"+specialPrograms+"\n"+detail+"\n"+guides+"\n"+publicContent+"\n"+compressedRuntime+entry);
 const at=main.lastIndexOf(matching);
 if(at<0)throw Error("fetch entry missing");
 main=main.slice(0,at+matching.length)+"\n"+render+main.slice(at+matching.length);
