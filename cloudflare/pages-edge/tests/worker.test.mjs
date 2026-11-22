@@ -160,7 +160,10 @@ test("Legacy tools brand correction is scoped and does not touch data entry",asy
   assert.ok(script.includes("MutationObserver"));
   assert.ok(script.includes("script,style,noscript,textarea,option"));
   for(const forbidden of ["fetch(","XMLHttpRequest","sendBeacon","localStorage","sessionStorage"])assert.ok(!script.includes(forbidden));
-  const tools=await worker.fetch(new Request(canonical+"/fa/tools/"),{});
+  const tools=await worker.fetch(new Request(canonical+"/fa/tools/"),{
+   ASSETS:{fetch:async request=>new Response('<html><head><title>Student tools</title></head><body><main>Tools app</main></body></html>',{headers:{"Content-Type":"text/html; charset=utf-8"}})}
+  });
+  assert.equal(tools.status,200);
   assert.ok((await tools.text()).includes("tools-brand-v1.js"));
   const home=await worker.fetch(new Request(canonical+"/fa/"),{});
   assert.ok(!(await home.text()).includes("tools-brand-v1.js"));
