@@ -39,7 +39,7 @@ const [api,css,js,admin,adminApi,campus,poster,tools,sitemap,robots]=await Promi
 const apiText=await api.text(),adminText=await admin.text(),adminApiText=await adminApi.text(),sitemapText=await sitemap.text(),robotsText=await robots.text(),toolsText=await tools.text();
 const cssText=await css.text(),jsText=await js.text();
 if(api.status!==200||!apiText.includes('"cmsStatus":"connected"'))failures.push("published CMS unavailable");
-if(css.status!==200||js.status!==200||!cssText.includes(".site-header")||!jsText.includes("mobile-menu")||cssText.startsWith("H4sIA")||jsText.startsWith("H4sIA"))failures.push("V2 CSS/JS unavailable or gzip payload was not decoded");
+if(css.status!==200||js.status!==200||!cssText.includes(".site-header")||!jsText.includes("mobile-menu")||cssText.startsWith("H4sIA")||jsText.startsWith("H4sIA"))failures.push("V2 CSS/JS unavailable or gzip payload was not decoded: "+JSON.stringify({cssStatus:css.status,jsStatus:js.status,cssLength:cssText.length,jsLength:jsText.length,cssStart:cssText.slice(0,80),jsStart:jsText.slice(0,80),hasCss:cssText.includes(".site-header"),hasJs:jsText.includes("mobile-menu")}));
 if(admin.status!==200||!adminText.includes("TOEFL"))failures.push("CMS admin UI unavailable");
 if(![401,403].includes(adminApi.status))failures.push("CMS API is not rejecting anonymous admin access");
 if(campus.status!==200||!(campus.headers.get("content-type")||"").includes("image/jpeg"))failures.push("campus photo unavailable");
