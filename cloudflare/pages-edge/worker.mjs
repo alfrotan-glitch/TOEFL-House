@@ -32,7 +32,46 @@ const CLIENT_JS="(function(){\n\"use strict\";\nif(location.hostname!==\"toeflho
 const STYLE=":where(a,button,input,select,textarea,[role=\"button\"]):focus-visible{outline:3px solid #D51F3E;outline-offset:3px}\n:target{scroll-margin-top:6.5rem}\n@media(prefers-reduced-motion:reduce){html:focus-within{scroll-behavior:auto!important}*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}\n";
 
 const GUIDE_A11Y_STYLE='a[href="#content"][style*="-9999px"]{left:0!important;top:0!important;width:1px!important;height:1px!important;overflow:hidden!important;clip-path:inset(50%)!important}a[href="#content"][style*="-9999px"]:focus{position:fixed!important;left:16px!important;top:16px!important;width:auto!important;height:auto!important;clip-path:none!important;overflow:visible!important;z-index:9999!important;padding:12px 18px!important;background:#fff!important;color:#112c35!important}';
-function noindex(host){return host!==CANONICAL;}
+function noindex(host){return host!==CANONICAL;}\n
+const V2_PUBLIC_COURSES=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
+const V2_PUBLIC_GUIDES=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
+function v2PublicSitemap(request){
+  const paths=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
+  for(const prefix of ["","fa/","ps/"]){
+    for(const id of V2_PUBLIC_COURSES)paths.push("/"+prefix+"courses/"+id+"/");
+    paths.push("/"+prefix+"guides/");
+    for(const id of V2_PUBLIC_GUIDES)paths.push("/"+prefix+"guides/"+id+"/");
+  }
+  const xml='<?xml version="1.0" encoding="UTF-8"?>'+'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+paths.map(path=>'<url><loc>'+CANONICAL_ORIGIN+path+'</loc><changefreq>weekly</changefreq></url>').join("")+'</urlset>';
+  const headers={"Content-Type":"application/xml; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"};
+  if(noindex(new URL(request.url).hostname))headers["X-Robots-Tag"]="noindex, nofollow, noarchive";
+  return new Response(request.method==="HEAD"?null:xml,{status:200,headers});
+}
+function v2PublicRobots(request){
+  const preview=noindex(new URL(request.url).hostname);
+  const rules=preview?"User-agent: *\nDisallow: /\n":"User-agent: *\nAllow: /\nDisallow: /admin/\nDisallow: /cms/\nDisallow: /login\nDisallow: /logout\nDisallow: /dashboard/\nDisallow: /api/\nDisallow: /tools/\nDisallow: /fa/tools/\nDisallow: /ps/tools/\nSitemap: "+CANONICAL_ORIGIN+"/sitemap.xml\n";
+  return new Response(request.method==="HEAD"?null:rules,{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}});
+}
+async function v2ServeLegacyTools(request,env){
+  if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{Allow:"GET, HEAD"}});
+  if(!env?.ASSETS)return new Response("Student tools are temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive"}});
+  const url=new URL(request.url);
+  const assetPath=url.pathname.startsWith("/fa/")?"/fa/index.html":url.pathname.startsWith("/ps/")?"/ps/index.html":"/index.html";
+  try{
+    const asset=await env.ASSETS.fetch(new Request(new URL(assetPath,url.origin),request));
+    if(!asset.ok)return new Response("Student tools are temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive"}});
+    const headers=new Headers(asset.headers);
+    headers.set("X-Robots-Tag","noindex, nofollow, noarchive");
+    headers.set("Cache-Control","no-store");
+    headers.set("X-Content-Type-Options","nosniff");
+    return new Response(request.method==="HEAD"?null:asset.body,{status:asset.status,statusText:asset.statusText,headers});
+  }catch(error){
+    console.error("Local student tools asset unavailable",String(error));
+    return new Response("Student tools are temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive"}});
+  }
+}
+const CANONICAL_ORIGIN="https://toeflhouse.pages.dev";
+
 function staticResponse(request,content,type){
   if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{Allow:"GET, HEAD"}});
   return new Response(request.method==="HEAD"?null:content,{status:200,headers:{
@@ -111,6 +150,13 @@ async function passThrough(request){
 export default {
   async fetch(request,env,ctx){
     const url=new URL(request.url);
+    if(url.pathname==="/robots.txt"&&["GET","HEAD"].includes(request.method))return v2PublicRobots(request);
+    if(url.pathname==="/sitemap.xml"&&["GET","HEAD"].includes(request.method))return v2PublicSitemap(request);
+    if(["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(url.pathname))return v2ServeLegacyTools(request,env);
+    if(/^\/(?:admin|cms|login|logout|dashboard)(?:\/|$)/i.test(url.pathname)){
+      return new Response("The staff CMS sign-in is temporarily unavailable while its original authentication service is recovered.",{status:503,headers:{"Cache-Control":"no-store","Retry-After":"300","X-Robots-Tag":"noindex, nofollow, noarchive","X-Content-Type-Options":"nosniff","Content-Type":"text/plain; charset=utf-8"}});
+    }
+
     if(url.pathname===DARI_FONT_PATH)return serveDariFont(request);
     if(url.pathname===JS_PATH)return staticResponse(request,CLIENT_JS,"application/javascript; charset=utf-8");
     if(url.pathname===CSS_PATH)return staticResponse(request,STYLE+GUIDE_A11Y_STYLE,"text/css; charset=utf-8");
