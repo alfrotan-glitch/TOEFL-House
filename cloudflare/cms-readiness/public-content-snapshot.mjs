@@ -9,7 +9,7 @@
 import {createHash} from "node:crypto";
 import {mkdir,readFile,writeFile} from "node:fs/promises";
 import assert from "node:assert/strict";
-const origin="https://the-toefl-house.pages.dev";
+const origin="https://toeflhouse.pages.dev";
 const response=await fetch(origin+"/api/content",{
   headers:{Accept:"application/json"},
   signal:AbortSignal.timeout(20000)
