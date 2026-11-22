@@ -22,7 +22,7 @@ for(const path of expected){
   if(!r.headers.get("x-robots-tag")?.includes("noindex"))failures.push(path+" preview must be noindex");
  }catch(e){failures.push(path+" "+String(e))}
 }
-const [api,css,js,tools,admin,sitemap,robots]=await Promise.all([
+const [api,css,js,tools,admin,sitemap,robots,rootIndex,faIndex,bundle]=await Promise.all([
  fetch(base+"/api/content",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/__th/v2/site.css",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/__th/v2/site.js",{signal:AbortSignal.timeout(20000)}),
@@ -38,5 +38,5 @@ if(tools.status!==200||!toolsText.includes("index-Ch3KjNPK")||!tools.headers.get
 if(admin.status!==503||!admin.headers.get("x-robots-tag")?.includes("noindex"))failures.push("admin route is not safely blocked");
 if(sitemap.status!==200||!sitemapText.includes("toeflhouse.pages.dev")||sitemapText.split("<loc>").length-1!==39)failures.push("sitemap must expose exactly 39 public URLs");
 if(robots.status!==200||!robotsText.includes("Disallow: /"))failures.push("preview robots policy must block indexing");
-console.log(JSON.stringify({base,routeCount:results.length,failures,api:api.status,css:css.status,js:js.status,tools:tools.status,admin:admin.status,sitemap:sitemap.status,robots:robots.status,results},null,2));
+console.log(JSON.stringify({base,routeCount:results.length,failures,api:api.status,css:css.status,js:js.status,tools:tools.status,toolsBody:toolsText.slice(0,160),toolsRobots:tools.headers.get("x-robots-tag"),rootIndex:rootIndex.status,faIndex:faIndex.status,bundle:bundle.status,admin:admin.status,sitemap:sitemap.status,robots:robots.status,results},null,2));
 assert.deepEqual(failures,[]);
