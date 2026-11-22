@@ -187,10 +187,7 @@ export default {
       const asset=await env.ASSETS.fetch(request);
       if(asset.ok)return asset;
     }
-    try{return await passThrough(request);}
-    catch(error){
-      console.error("Original site unavailable",String(error));
-      return new Response("Website temporarily unavailable",{status:503,headers:{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
-    }
+    // Never proxy to the retired Pages origin. Unknown paths now fail locally and predictably.
+    return new Response("Not found",{status:404,headers:{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Robots-Tag":"noindex","Content-Type":"text/plain; charset=utf-8"}});
   }
 };
