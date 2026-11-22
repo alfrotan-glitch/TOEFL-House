@@ -46,6 +46,15 @@ jobs:
           node --test cloudflare/site-v2/tests/*.test.mjs
           node --test cloudflare/pages-edge/tests/*.test.mjs
           node --test cloudflare/analytics/tests/*.test.mjs
+      - name: Verify the live recovery preview (read-only)
+        env:
+          TOEFL_QA_BASE: https://recovery-final-preview-20261.toeflhouse.pages.dev
+        run: |
+          node cloudflare/site-v2/production-full-acceptance.mjs
+          node cloudflare/site-v2/final-production-navigation.mjs
+          node cloudflare/site-v2/general-english-live-acceptance.mjs
+          node cloudflare/cms-readiness/public-auth-readonly.mjs
+          node cloudflare/cms-readiness/legacy-dependency.mjs
       - name: Enforce Cloudflare server-rendered Worker size budget
         run: |
           # Guide layouts, localization and CMS content are server-rendered; visitors download only compressed CSS/JS.
@@ -71,12 +80,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check all published URLs, indexing, CMS and preserved tools
+      - name: Check published URLs, indexing, CMS and safe tools isolation
         run: |
           node cloudflare/site-v2/production-full-acceptance.mjs
           node cloudflare/site-v2/final-production-navigation.mjs
           node cloudflare/site-v2/general-english-live-acceptance.mjs
-      - name: Check anonymous auth, restore/publish refusal and immutable legacy dependencies
+      - name: Check anonymous auth, publish refusal and no retired-origin dependency
         run: |
           node cloudflare/cms-readiness/public-auth-readonly.mjs
           node cloudflare/cms-readiness/legacy-dependency.mjs
