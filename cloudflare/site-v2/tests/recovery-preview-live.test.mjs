@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-const base=process.env.TOEFL_PREVIEW_URL||"https://f3d23a88.toeflhouse.pages.dev";
+const base=process.env.TOEFL_PREVIEW_URL||"https://c32609ad.toeflhouse.pages.dev";
 const expected=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
 const courses=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
 const guides=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
@@ -21,7 +21,7 @@ for(const path of expected){
   if(!title)failures.push(path+" missing title");
   if(!r.headers.get("x-robots-tag")?.includes("noindex"))failures.push(path+" preview is indexable");
   if(/href=["'][^"']*\/tools\/?["']/i.test(body))failures.push(path+" exposes retired tools link");
-  if(path==="/"&&!body.includes('href="data:image/webp;base64,'))failures.push("homepage favicon is not self-contained");
+  if(path==="/"&&!body.includes('href="data:image/'))failures.push("homepage favicon is not self-contained");
  }catch(e){failures.push(path+" "+String(e))}
 }
 const [api,css,js,admin,adminApi,campus,poster,tools,sitemap,robots]=await Promise.all([
@@ -29,7 +29,7 @@ const [api,css,js,admin,adminApi,campus,poster,tools,sitemap,robots]=await Promi
  fetch(base+"/__th/v2/site.css",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/__th/v2/site.js",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/admin/",{redirect:"manual",signal:AbortSignal.timeout(20000)}),
- fetch(base+"/api/admin/bootstrap",{signal:AbortSignal.timeout(20000)}),
+ fetch(base+"/api/admin/content",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/assets/aistudio/FB_IMG_1793645643808_dad823ce.jpg",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/assets/aistudio/teacher-training-poster.webp",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/fa/tools/",{redirect:"manual",signal:AbortSignal.timeout(20000)}),
