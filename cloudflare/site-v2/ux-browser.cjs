@@ -22,6 +22,7 @@ const base=(process.env.TH_EAP_URL||"https://toeflhouse.pages.dev").replace(/\/$
   for(const [prefix,lang] of locales){
    await open(prefix);
    assert.equal(await page.locator("html").getAttribute("lang"),lang);
+   if(lang==="fa-AF")assert.doesNotMatch(await page.locator("body").innerText(),/پوهنتون/);
    assert.equal(await page.locator(".course-card").count(),6);
    const d=await page.evaluate(()=>{
     const px=s=>parseFloat(getComputedStyle(document.querySelector(s)).fontSize);
@@ -38,6 +39,7 @@ const base=(process.env.TH_EAP_URL||"https://toeflhouse.pages.dev").replace(/\/$
    const route=prefix+"guides/";
    await open(route);
    assert.equal(await page.locator("html").getAttribute("lang"),lang);
+   if(lang==="fa-AF")assert.doesNotMatch(await page.locator("body").innerText(),/پوهنتون/);
    assert.equal(await page.locator("main.editorial-guides").count(),1,route+" must use canonical site shell");
    assert.equal(await page.locator(".site-header").count(),1);
    assert.equal(await page.locator(".growth-card h2").count(),3,"guide cards must expose headings");
@@ -60,11 +62,13 @@ const base=(process.env.TH_EAP_URL||"https://toeflhouse.pages.dev").replace(/\/$
   assert.equal(fields,3);
   assert.ok(await page.locator("#v2-enquiry-form").isVisible());
   await open("/fa/courses/academic-english/");
+  const eapFaText=await page.locator("body").innerText();assert.match(eapFaText,/دانشگاه/);assert.doesNotMatch(eapFaText,/پوهنتون/);
   const fact=await page.locator(".eap-fact span").first().evaluate(x=>parseFloat(getComputedStyle(x).fontSize));
   assert.ok(fact>=13, "EAP facts must not be rendered at 10px");
   const books=await page.locator(".eap-assigned-books li").first().evaluate(x=>parseFloat(getComputedStyle(x).fontSize));
   assert.ok(books>=13,"EAP textbook labels must be legible");
   results.push({path:"/fa/courses/academic-english/",factTextSize:fact,bookTextSize:books});
+  for(const path of ["/fa/courses/special-speaking/","/fa/courses/toefl-preparation/"]){await open(path);const text=await page.locator("body").innerText();assert.doesNotMatch(text,/پوهنتون/);if(path.includes("toefl"))assert.match(text,/دانشگاه/);results.push({path,persianTerminology:"PASS"});}
   await page.setViewportSize({width:1440,height:900});
   for(const path of ["/fa/","/fa/guides/","/fa/guides/speaking-practice/","/fa/courses/academic-english/"]){
    await open(path);
