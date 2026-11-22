@@ -10,7 +10,7 @@ on:
       target_url:
         description: 'Target Cloudflare Pages Preview or canonical website URL'
         required: false
-        default: 'https://the-toefl-house.pages.dev'
+        default: 'https://toeflhouse.pages.dev'
 permissions:
   contents: read
 jobs:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      TH_EAP_URL: ${{ inputs.target_url || (github.ref_name == 'main' && 'https://the-toefl-house.pages.dev' || (github.ref_name == 'editorial-trilingual-2026-11-20' && 'https://ae6b8ef5.the-toefl-house.pages.dev' || (github.ref_name == 'global-ux-a11y-guides-20261120' && 'https://00a79910.the-toefl-house.pages.dev' || 'https://7e6c3612.the-toefl-house.pages.dev'))) }}
+      TH_EAP_URL: ${{ inputs.target_url || 'https://toeflhouse.pages.dev' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
