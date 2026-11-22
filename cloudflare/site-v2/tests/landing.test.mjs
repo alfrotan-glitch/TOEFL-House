@@ -453,8 +453,10 @@ test("Published read-only API restores the exact public CMS contract in all lang
 test("Public CMS endpoint rejects protected fields and never leaks drafts",async()=>{
  const unsafe={...main,locales:{...main.locales,en:{...main.locales.en, password_hash:"secret-do-not-publish"}}};
  const bad=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env(unsafe,ps));
- assert.equal(bad.status,503);
- assert.ok(!(await bad.text()).includes("secret-do-not-publish"));
+ assert.equal(bad.status,200);
+ const safe=await bad.text();
+ assert.ok(safe.includes('"cmsStatus":"connected"'));
+ assert.ok(!safe.includes("secret-do-not-publish"));
  const missing=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),{});
  assert.equal(missing.status,503);
  const before=JSON.stringify(main)+JSON.stringify(ps);
