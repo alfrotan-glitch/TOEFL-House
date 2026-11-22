@@ -60,13 +60,14 @@ test("new CSS, JS are local, security-hardened assets",async()=>{
   assert.ok((await r.text()).length>400);
  }
 });
-test("CMS DB failure gracefully preserves immutable original homepage",async()=>{
- const orig=globalThis.fetch;
- globalThis.fetch=async r=>new Response("previous site remains available",{status:200,headers:{"Content-Type":"text/plain"}});
+test("CMS DB failure keeps the standalone homepage available without an upstream proxy",async()=>{
+ const orig=globalThis.fetch;let calls=0;
+ globalThis.fetch=async()=>{calls++;return new Response("retired origin must not be contacted",{status:500});};
  try{
   const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/"),{});
   assert.equal(r.status,200);
-  assert.equal(await r.text(),"previous site remains available");
+  assert.match(await r.text(),/<h1>/);
+  assert.equal(calls,0);
  }finally{globalThis.fetch=orig;}
 });
 test("V2 home does not reveal user data from CMS",async()=>{
@@ -114,16 +115,12 @@ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
   assert.doesNotMatch(html,/<input[^>]+type="password"/);
   assert.match(html,/<link rel="canonical"/);
  });
- test("Legacy tools route remains read-only and is noindexed in "+prefix,async()=>{
-  const prior=globalThis.fetch;
-  globalThis.fetch=async request=>new Response('Prior React app is preserved',{headers:{"Content-Type":"text/plain"}});
-  try{
-   const route=prefix+"tools/";
-   const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
-   assert.equal(r.status,200);
-   assert.match(await r.text(),/Prior React app/);
-   assert.match(r.headers.get("X-Robots-Tag")||"",/noindex/);
-  }finally{globalThis.fetch=prior;}
+ test("Legacy tools route is safely disabled and noindexed in "+prefix,async()=>{
+  const route=prefix+"tools/";
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),{});
+  assert.equal(r.status,503);
+  assert.match(await r.text(),/temporarily unavailable/i);
+  assert.match(r.headers.get("X-Robots-Tag")||"",/noindex/);
  });
 }
 
@@ -315,7 +312,7 @@ test("Semester Qaws 1405 video announcement is visible, accessible and localised
   assert.equal(r.status,200,path);
   assert.equal((html.match(/id="semester-qaws-1405"/g)||[]).length,1,path);
   assert.ok(html.includes(teaser),path+" does not show new semester offer");
-  assert.match(html,/class="semester-video" controls playsinline preload="none" poster="\/assets\/aistudio\/campus-640_/);
+  assert.match(html,/class="semester-video" controls playsinline preload="none" poster="\/assets\/aistudio\/FB_IMG_1793645643808_dad823ce\.jpg/);
   assert.match(html,/type="video\/mp4"/);
   assert.match(html,/src="https:\/\/d2ol7oe51mr4n9\.cloudfront\.net\/user_[^"]+\.mp4"/);
   assert.match(html,/href="\/(?:fa\/|ps\/)?admissions\/\?utm_source=website&amp;utm_campaign=qaws_1405_semester"/);
