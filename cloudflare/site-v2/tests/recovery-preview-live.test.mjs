@@ -29,7 +29,10 @@ const [api,css,js,tools,admin,sitemap,robots,rootIndex,faIndex,bundle]=await Pro
  fetch(base+"/fa/tools/",{signal:AbortSignal.timeout(20000)}),
  fetch(base+"/admin/",{redirect:"manual",signal:AbortSignal.timeout(20000)}),
  fetch(base+"/sitemap.xml",{signal:AbortSignal.timeout(20000)}),
- fetch(base+"/robots.txt",{signal:AbortSignal.timeout(20000)})
+ fetch(base+"/robots.txt",{signal:AbortSignal.timeout(20000)}),
+ fetch(base+"/index.html",{signal:AbortSignal.timeout(20000)}),
+ fetch(base+"/fa/index.html",{signal:AbortSignal.timeout(20000)}),
+ fetch(base+"/assets/index-Ch3KjNPK.js",{signal:AbortSignal.timeout(20000)})
 ]);
 const apiText=await api.text(),toolsText=await tools.text(),sitemapText=await sitemap.text(),robotsText=await robots.text();
 if(api.status!==200||!apiText.includes('"cmsStatus":"connected"'))failures.push("published CMS unavailable");
