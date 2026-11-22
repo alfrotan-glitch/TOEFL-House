@@ -161,16 +161,27 @@ function v2DariEditorial(html,locale){
 }
 
 function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
+async function v2FallbackCms(){
+ const ids=V2_COURSE_IDS;
+ const duration={en:["Pre-Starter: 1 month; other levels: 2 months","2 months per level","4 months","2 months","2 months","2 months"],fa:["Pre-Starter: یک ماه؛ سایر سطح‌ها: دو ماه","دو ماه برای هر سطح","چهار ماه","دو ماه","دو ماه","دو ماه"],ps:["Pre-Starter: یوه میاشت؛ نورې کچې: دوه میاشتې","د هرې کچې لپاره دوه میاشتې","څلور میاشتې","دوه میاشتې","دوه میاشتې","دوه میاشتې"]};
+ const programs=locale=>ids.map((id,i)=>({id,title:V2_COPY[locale].courseNames[i]||id,summary:V2_COPY[locale].subtitle,duration:duration[locale][i]||""}));
+ return {main:{locales:{en:{programs:programs("en")},fa:{programs:programs("fa")}},media:{},timetable:{}},pashto:{programs:programs("ps")},revision:0,psRevision:0,cmsStatus:"fallback"};
+}
 async function v2Cms(env){
- if(!env?.CMS_DB)throw Error("CMS_DB missing");
- const [main,ps]=await Promise.all([
+ if(!env?.CMS_DB)return v2FallbackCms();
+ try{
+  const [main,ps]=await Promise.all([
    env.CMS_DB.prepare("SELECT body,revision FROM content WHERE id='main'").first(),
    env.CMS_DB.prepare("SELECT body,revision FROM pashto_content WHERE id='main'").first()
- ]);
- if(!main?.body||!ps?.body)throw Error("Published CMS not available");
- const parsed=JSON.parse(main.body),pashto=JSON.parse(ps.body);
- if(!parsed?.locales?.en?.programs||!parsed?.locales?.fa?.programs||!pashto?.programs)throw Error("Unexpected CMS schema");
- return {main:parsed,pashto,revision:main.revision,psRevision:ps.revision};
+  ]);
+  if(!main?.body||!ps?.body)throw Error("Published CMS not available");
+  const parsed=JSON.parse(main.body),pashto=JSON.parse(ps.body);
+  if(!parsed?.locales?.en?.programs||!parsed?.locales?.fa?.programs||!pashto?.programs)throw Error("Unexpected CMS schema");
+  return {main:parsed,pashto,revision:main.revision,psRevision:ps.revision};
+ }catch(error){
+  console.error("Published CMS read failed; serving reviewed static fallback",String(error));
+  return v2FallbackCms();
+ }
 }
 function v2Prefix(locale){return locale==="en"?"/":"/"+locale+"/";}
 function v2BreadcrumbLabel(locale){return locale==="fa"?"مسیر دسترسی به صفحه":locale==="ps"?"د پاڼې د لاسرسي لاره":"Breadcrumb";}
