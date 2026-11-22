@@ -2,9 +2,7 @@
 // Proxy the immutable approved Nov 9 deployment and add only lightweight
 // anonymous aggregate CTA click tracking on permitted public HTML pages.
 // Do not introduce a second CMS or change staff auth/business API semantics.
-const UPSTREAM="https://0c14f299.the-toefl-house.pages.dev";
 const CANONICAL="toeflhouse.pages.dev";
-const COLLECTOR="https://toefl-house-conversions.alfrotan2.workers.dev";
 const JS_PATH="/__th/engagement-v1.js";
 const CSS_PATH="/__th/engagement-v1.css";
 // Self-origin font endpoint. The file itself is pinned, checksum-verified and
@@ -85,71 +83,6 @@ function staticResponse(request,content,type){
     "Cross-Origin-Resource-Policy":"same-origin",
     "X-Robots-Tag":"noindex, nofollow, noarchive"
   }});
-}
-function adjustCsp(csp){
-  if(!csp)return csp;
-  if(/(?:^|;)\s*connect-src\s+/i.test(csp)){
-    return csp.replace(/(?:^|;)\s*connect-src\s+([^;]+)/i,function(all,list){
-      return all.replace(list,list+" "+COLLECTOR);
-    });
-  }
-  return csp+"; connect-src 'self' "+COLLECTOR;
-}
-function eligible(path,csp){
-  if(path.startsWith("/admin")||path.startsWith("/api")||path.startsWith("/owner"))return false;
-  if(path.startsWith("/__th/"))return false;
-  if(/(?:^|;)\s*default-src\s+'none'/i.test(csp||""))return false;
-  return true;
-}
-function rewriteLocation(value){
-  if(!value)return value;
-  try{
-    const dest=new URL(value);
-    if(dest.origin===UPSTREAM)return "https://"+CANONICAL+dest.pathname+dest.search+dest.hash;
-  }catch(_){}
-  return value;
-}
-async function passThrough(request){
-  const incoming=new URL(request.url);
-  const target=new URL(incoming.pathname+incoming.search,UPSTREAM);
-  const headers=new Headers(request.headers);
-  headers.delete("Host");
-  const init={method:request.method,headers,redirect:"manual"};
-  if(!["GET","HEAD"].includes(request.method)&&request.body){init.body=request.body;init.duplex="half";}
-  const original=await fetch(new Request(target,init));
-  const outHeaders=new Headers(original.headers);
-  if(outHeaders.has("Location"))outHeaders.set("Location",rewriteLocation(outHeaders.get("Location")));
-  if(noindex(incoming.hostname))outHeaders.set("X-Robots-Tag","noindex, nofollow, noarchive");
-  else if(!incoming.pathname.startsWith("/admin")&&!incoming.pathname.startsWith("/owner")&&!incoming.pathname.startsWith("/api/admin")){
-    // The immutable deployment is correctly noindexed for its own versioned hostname.
-    // The stable canonical hostname must preserve its existing indexability.
-    if(outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");
-  }
-  const type=outHeaders.get("content-type")||"";
-  const csp=outHeaders.get("content-security-policy");
-  const inject=request.method==="GET"&&original.status===200&&/text\/html/i.test(type)&&eligible(incoming.pathname,csp);
-  if(!inject)return new Response(original.body,{status:original.status,statusText:original.statusText,headers:outHeaders});
-  outHeaders.delete("Content-Length");
-  outHeaders.delete("ETag");
-  if(csp)outHeaders.set("Content-Security-Policy",adjustCsp(csp));
-  const response=new Response(original.body,{status:original.status,statusText:original.statusText,headers:outHeaders});
-  const brandToolsPage=["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname);
-  const rewriter=new HTMLRewriter()
-    .on("head",{element(element){element.append('<link rel="stylesheet" href="'+CSS_PATH+'">',{html:true});}})
-    .on("body",{element(element){element.append('<script defer src="'+JS_PATH+'"></script>'+(brandToolsPage?'<script defer src="'+TOOLS_BRAND_PATH+'"></script>':""),{html:true});}});
-  if(incoming.pathname.includes("/guides/")){
-    // The historic guide navigation used the retired homepage section anchor.
-    rewriter.on('a[href*="#th-pathways"]',{element(element){
-      const href=element.getAttribute("href");
-      if(href)element.setAttribute("href",href.replace(/#th-pathways$/,"#programs"));
-    }});
-    // Keep article contents; only normalize the visitor-facing school name.
-    rewriter.on("body",{text(chunk){
-      if(/تافل هاوس|خانه موفقیت/.test(chunk.text))
-        chunk.replace(chunk.text.replace(/تافل هاوس|خانه موفقیت/g,"تافل هوس"));
-    }});
-  }
-  return rewriter.transform(response);
 }
 export default {
   async fetch(request,env,ctx){
