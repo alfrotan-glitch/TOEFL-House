@@ -70,13 +70,7 @@ main=main.replace(entry,landing+"\n"+generalEnglish+"\n"+academicEnglish+"\n"+sp
 const at=main.lastIndexOf(matching);
 if(at<0)throw Error("fetch entry missing");
 main=main.slice(0,at+matching.length)+"\n"+render+main.slice(at+matching.length);
-const headerFlag='if(noindex(incoming.hostname))outHeaders.set("X-Robots-Tag","noindex, nofollow, noarchive");';
-if(!main.includes(headerFlag))throw Error("Preview robots guard moved");
-main=main.replace(headerFlag,'if(noindex(incoming.hostname)||["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname))outHeaders.set("X-Robots-Tag","noindex, nofollow, noarchive");');
-const undo='if(outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");';
-if(!main.includes(undo))throw Error("Existing noindex behavior moved");
-main=main.replace(undo,'if(!["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(incoming.pathname) && outHeaders.get("X-Robots-Tag")==="noindex, nofollow, noarchive")outHeaders.delete("X-Robots-Tag");');
-if(!main.includes("function v2GeneralEnglish")||!main.includes("function v2AcademicEnglishPage")||!main.includes("function v2SpecialProgramPage")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("function v2Guides")||!main.includes("function v2PublicContent")||!main.includes("function v2PublicSitemap")||!main.includes("async function v2ServeLegacyTools")||!main.includes("env.LEGACY_CMS.fetch"))throw Error("Build missing new routes");
+if(!main.includes("function v2GeneralEnglish")||!main.includes("function v2AcademicEnglishPage")||!main.includes("function v2SpecialProgramPage")||!main.includes("async function v2Home")||!main.includes("const homeLocale=")||!main.includes("function v2Guides")||!main.includes("function v2PublicContent")||!main.includes("function v2PublicSitemap")||!main.includes("async function v2ServeLegacyTools")||!main.includes("env.LEGACY_CMS.fetch")||!main.includes("Never proxy to the retired Pages origin"))throw Error("Build missing new routes");
 await mkdir(join(here,"dist"),{recursive:true});
 await writeFile(join(here,"dist/_worker.js"),main);
-console.log(JSON.stringify({output:"dist/_worker.js",bytes:Buffer.byteLength(main),assetRevision,cssBytes:Buffer.byteLength(css),clientBytes:Buffer.byteLength(js),legacyPreserved:true}));
+console.log(JSON.stringify({output:"dist/_worker.js",bytes:Buffer.byteLength(main),assetRevision,cssBytes:Buffer.byteLength(css),clientBytes:Buffer.byteLength(js),retiredOriginProxy:false}));
