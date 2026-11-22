@@ -163,11 +163,13 @@ export default {
     if(["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(url.pathname))return v2ServeLegacyTools(request,env);
     const legacyCmsPath=/^\/(?:admin|api\/admin|api\/owner\/setup|owner\/setup|owner\/setup\.js)(?:\/|$)/i.test(url.pathname);
     const legacyMediaPath=url.pathname.startsWith("/media/");
-    if(legacyCmsPath||legacyMediaPath){
+    const legacyAssetPath=url.pathname.startsWith("/assets/aistudio/");
+    if(legacyCmsPath||legacyMediaPath||legacyAssetPath){
       if(!env.LEGACY_CMS)return new Response("The CMS service is temporarily unavailable.",{status:503,headers:{"Cache-Control":"no-store","Retry-After":"300","X-Robots-Tag":"noindex, nofollow, noarchive","X-Content-Type-Options":"nosniff","Content-Type":"text/plain; charset=utf-8"}});
       const legacyResponse=await env.LEGACY_CMS.fetch(request);
       const headers=new Headers(legacyResponse.headers);
       if(legacyCmsPath){headers.set("Cache-Control","private, no-store");headers.set("X-Robots-Tag","noindex, nofollow, noarchive");}
+      if(legacyAssetPath){headers.set("Cache-Control","public, max-age=31536000, immutable");headers.delete("X-Robots-Tag");}
       headers.set("X-Content-Type-Options","nosniff");
       return new Response(legacyResponse.body,{status:legacyResponse.status,statusText:legacyResponse.statusText,headers});
     }
