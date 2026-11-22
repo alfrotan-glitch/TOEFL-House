@@ -1,7 +1,7 @@
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const {chromium}=require("/tmp/toefl-eap-browser/node_modules/playwright-core");
-const base=(process.env.TH_EAP_URL||"https://d627d7c2.the-toefl-house.pages.dev").replace(/\/$/,"");
+const base=(process.env.TH_EAP_URL||"https://toeflhouse.pages.dev").replace(/\/$/,"");
 const locales=[["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]];
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
