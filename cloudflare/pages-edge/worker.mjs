@@ -154,6 +154,10 @@ async function passThrough(request){
 export default {
   async fetch(request,env,ctx){
     const url=new URL(request.url);
+    // Preview deployments are strictly read-only; enforce before every route, including internal CMS.
+    if(noindex(url.hostname)&&!["GET","HEAD","OPTIONS"].includes(request.method)){
+      return new Response("Preview is read-only",{status:403,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex"}});
+    }
     if(url.pathname==="/robots.txt"&&["GET","HEAD"].includes(request.method))return v2PublicRobots(request);
     if(url.pathname==="/sitemap.xml"&&["GET","HEAD"].includes(request.method))return v2PublicSitemap(request);
     if(["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(url.pathname))return v2ServeLegacyTools(request,env);
@@ -173,10 +177,6 @@ export default {
     if(url.pathname===CSS_PATH)return staticResponse(request,STYLE+GUIDE_A11Y_STYLE,"text/css; charset=utf-8");
     if(url.pathname===TOOLS_BRAND_PATH)return staticResponse(request,TOOLS_BRAND_JS,"application/javascript; charset=utf-8");
     if(url.pathname==="/__th/health")return staticResponse(request,JSON.stringify({service:"toefl-house-edge-upgrade",version:1,pinned:"2026-11-09"}),"application/json; charset=utf-8");
-    // Preview must never be able to submit authentic data to the original production CMS.
-    if(noindex(url.hostname)&&!["GET","HEAD","OPTIONS"].includes(request.method)){
-      return new Response("Preview is read-only",{status:403,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex"}});
-    }
     // Serve unchanged hashed static files locally; never proxy binary/font assets unnecessarily.
     if(["GET","HEAD"].includes(request.method)&&env&&env.ASSETS&&(
       url.pathname.startsWith("/assets/")||url.pathname==="/default-content.json"||
