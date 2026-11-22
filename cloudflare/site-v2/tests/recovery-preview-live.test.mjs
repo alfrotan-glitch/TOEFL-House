@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-const base="https://d4db8101.toeflhouse.pages.dev";
+const base="https://7b9bac5b.toeflhouse.pages.dev";
 const expected=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
 const courses=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
 const guides=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
