@@ -883,3 +883,12 @@ html[lang=fa-AF] body{font-family:THDari,THArabic,Tahoma,sans-serif;line-height:
 html[lang=fa-AF] .brand small{font-family:THDari,THArabic,Tahoma,sans-serif}
 @media(max-width:760px){.faq-section.section{padding:54px 0 64px}.faq-aside{margin-bottom:26px}.faq-aside>p:not(.eyebrow){font-size:14px;line-height:1.8}.faq-section .text-link{font-size:14px;line-height:1.55}.faq-list summary{font-size:15px;padding:18px 0;line-height:1.65;gap:15px}.faq-list details p{font-size:14px;line-height:1.9;margin-bottom:21px}html[dir=rtl] .faq-section .faq-aside h2{font-size:clamp(26px,6.4vw,30px);line-height:1.5}}
 @media(max-width:760px){html{scroll-behavior:auto}}
+
+.notfound-section{padding:76px 0 88px;text-align:center}
+.notfound-inner{max-width:640px;margin-inline:auto}
+.notfound-code{display:block;font-size:clamp(72px,14vw,118px);font-weight:900;line-height:1;color:var(--red);letter-spacing:-.02em}
+.notfound-section h1{font-size:clamp(28px,4vw,38px);line-height:1.35;margin:20px 0 12px}
+html[dir=rtl] .notfound-section h1{line-height:1.55}
+.notfound-section p{color:var(--muted);font-size:15px;line-height:1.9;margin:0 auto 30px;max-width:520px}
+.notfound-actions{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
+@media(max-width:760px){.notfound-section{padding:56px 0 66px}.notfound-actions .button{width:100%}}

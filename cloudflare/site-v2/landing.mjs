@@ -32,7 +32,7 @@ const V2_COPY={
   faqLabel:"GOOD TO KNOW",faqTitle:"Questions before you enroll?",faqLead:"Essential information about placement, tuition and available classes.",faqMore:"More questions? Message our team",
   visitLabel:"VISIT US",visitTitle:"Visit The TOEFL House in Kabul.",visitText:"Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi, Kabul, Afghanistan.",hours:"Classes Saturday–Thursday · Friday closed · Confirm class times with admissions",phone:"Call admissions",wa:"WhatsApp admissions",map:"Find our campus",
   finalEyebrow:"YOUR NEXT CHAPTER",finalTitle:"Your next step begins with the right level.",finalText:"Request a free placement assessment and ask our admissions team about current programs, fees and class times.",finalCta:"Request your free assessment",
-  footerRights:"All rights reserved.",footPrograms:"Programs",footTools:"Student tools",
+  footerRights:"All rights reserved.",footPrograms:"Programs",footTools:"Student tools",notFoundTitle:"Page not found",notFoundText:"The page you were looking for may have moved, or the address may be incorrect. You can return to the homepage or explore our programs.",notFoundHome:"Back to the homepage",
   statsFallback:[["6,000+","Graduates since 2013"],["500+","TOEFL test-takers guided"],["100+","University admissions worldwide"]],courseNames:["General English","Academic English","TOEFL Preparation","Special Speaking","Professional Writing","Teacher Training"],fallbackFaq:[["Is the placement assessment free?","Yes. The placement assessment is free and helps identify a suitable starting level."],["Can I enroll without an email?","Yes. You may contact admissions through WhatsApp or by phone."],["Are online classes available?","Private online classes can be arranged based on teacher availability and time zones."]]
  },
  fa:{
@@ -51,7 +51,7 @@ const V2_COPY={
   faqLabel:"معلومات ضروری",faqTitle:"پرسش‌های مهم پیش از ثبت‌نام",faqLead:"معلومات روشن دربارهٔ تعیین سطح، فیس و شیوهٔ اشتراک در صنف‌ها.",faqMore:"پرسش دیگری دارید؟ در واتساپ پیام بدهید",
   visitLabel:"نشانی مرکز",visitTitle:"تافل هوس در کابل",visitText:"کابل، دشت برچی، ایستگاه مغازه، روبروی مرکز جلیلی، افغانستان.",hours:"صنف‌ها از شنبه تا پنج‌شنبه · جمعه رخصت · وقت دقیق صنف را از پذیرش بپرسید",phone:"تماس با پذیرش",wa:"واتساپ پذیرش",map:"مسیریابی تا مرکز",
   finalEyebrow:"گام بعدی شما",finalTitle:"برای پیشرفت، از سطح مناسب آغاز کنید.",finalText:"تعیین سطح رایگان انجام دهید و دربارهٔ صنف‌های موجود، فیس و تقسیم اوقات از پذیرش معلومات بگیرید.",finalCta:"درخواست تعیین سطح رایگان",
-  footerRights:"تمام حقوق محفوظ است.",footPrograms:"برنامه‌ها",footTools:"ابزارهای درسی",
+  footerRights:"تمام حقوق محفوظ است.",footPrograms:"برنامه‌ها",footTools:"ابزارهای درسی",notFoundTitle:"صفحه پیدا نشد",notFoundText:"ممکن است این صفحه منتقل شده باشد یا نشانی آن را اشتباه وارد کرده باشید. می‌توانید به صفحهٔ اصلی برگردید یا برنامه‌های آموزشی را ببینید.",notFoundHome:"بازگشت به صفحهٔ اصلی",
   statsFallback:[["۶٬۰۰۰+","فارغ‌التحصیل از سال ۲۰۱۳"],["۵۰۰+","اشتراک‌کننده در تافل"],["۱۰۰+","پذیرش در دانشگاه‌های جهان"]],courseNames:["انگلیسی عمومی","انگلیسی اکادمیک","آمادگی تافل","مکالمهٔ ویژه","نگارش مسلکی","تربیهٔ استاد"],fallbackFaq:[["آیا تعیین سطح رایگان است؟","بلی، تعیین سطح رایگان است و برای انتخاب سطح مناسب کمک می‌کند."],["آیا بدون ایمیل می‌توانم معلومات بگیرم؟","بلی. از طریق واتساپ یا تماس تلفونی با بخش پذیرش در ارتباط شوید."],["آیا صنف آنلاین دارید؟","صنف‌های آنلاین انفرادی مطابق ظرفیت استاد و منطقهٔ زمانی با هماهنگی برگزار می‌شود."]]
  },
  ps:{
@@ -70,7 +70,7 @@ const V2_COPY={
   faqLabel:"اړین معلومات",faqTitle:"له نوم‌لیکنې مخکې مهمې پوښتنې",faqLead:"د سویې ارزونې، فیس او د ټولګیو د ګډون په اړه روښانه ځوابونه.",faqMore:"نورې پوښتنې لرئ؟ موږ ته په واټساپ پیغام واستوئ",
   visitLabel:"زموږ پته",visitTitle:"په کابل کې تافل هوس ته راشئ.",visitText:"کابل، دشت برچي، مغازه تمځای، د جلیلي مرکز مخامخ، افغانستان.",hours:"ټولګي له شنبې تر پنجشنبې · جمعه رخصتي · د ټولګي دقیق وخت له ادارې وپوښتئ",phone:"له ادارې سره اړیکه",wa:"د واټساپ اړیکه",map:"زموږ ځای ومومئ",
   finalEyebrow:"ستاسو راتلونکی ګام",finalTitle:"خپل پرمختګ له مناسبې کچې پیل کړئ.",finalText:"د سویې وړیا ارزونه وغواړئ او د شته ټولګیو، فیس او مهالوېش په اړه له ادارې معلومات واخلئ.",finalCta:"د وړیا سویې معلومولو غوښتنه",
-  footerRights:"ټول حقونه خوندي دي.",footPrograms:"پروګرامونه",footTools:"د زده‌کړې وسایل",
+  footerRights:"ټول حقونه خوندي دي.",footPrograms:"پروګرامونه",footTools:"د زده‌کړې وسایل",notFoundTitle:"پاڼه ونه موندل شوه",notFoundText:"کېدای شي دا پاڼه لېږدول شوې وي، یا یې پته غلطه لیکل شوې وي. تاسې کولای شئ کورپاڼې ته بېرته لاړ شئ یا پروګرامونه وګورئ.",notFoundHome:"کورپاڼې ته لاړ شئ",
   statsFallback:[["۶٬۰۰۰+","له ۲۰۱۳ کال راهیسې فارغان"],["۵۰۰+","د TOEFL ازموینې لارښوونه ترلاسه کوونکي"],["۱۰۰+","په نړیوالو پوهنتونونو کې منل شوي"]],courseNames:["عمومي انګلیسي","اکاډمیکه انګلیسي","د TOEFL چمتووالی","ځانګړې خبرې","مسلکي لیکنه","د ښوونکو روزنه"],fallbackFaq:[["آیا د سویې معلومول وړیا دي؟","هو. د سویې ارزونه وړیا ده او د مناسبې کچې په ټاکلو کې مرسته کوي."],["له ایمیل پرته نوم‌لیکنه کېدای شي؟","هو. له ادارې سره په واټساپ یا ټیلیفون اړیکه ونیسئ."],["آنلاین ټولګي شته؟","انفرادي آنلاین ټولګي د ښوونکي د وخت او ظرفیت له مخې همغږي کېږي."]]
  }
 };
@@ -359,4 +359,19 @@ async function v2Home(request,env,locale){
   console.error("V2 CMS page render unavailable; retaining original",String(error));
   return null;
  }
+}
+// Branded 404 page. No CMS dependency, so it renders even when the CMS is down.
+// Locale comes from the URL prefix (/fa/, /ps/); anything else is English.
+// No canonical or hreflang: a missing page must not present itself as a real URL.
+function v2NotFound(request){
+ const url=new URL(request.url);
+ const locale=url.pathname==="/fa"||url.pathname.startsWith("/fa/")?"fa":url.pathname==="/ps"||url.pathname.startsWith("/ps/")?"ps":"en";
+ const c=V2_COPY[locale],prefix=v2Prefix(locale);
+ const title=c.notFoundTitle+" | The TOEFL House";
+ const html='<!doctype html><html lang="'+c.lang+'" dir="'+c.dir+'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>'+v2T(title,200)+'</title><meta name="description" content="'+v2T(c.notFoundText,400)+'"><meta name="robots" content="noindex, nofollow"><meta name="theme-color" content="#f7f6f2"><link rel="icon" href="'+V2_LOGO+'"><link rel="stylesheet" href="/__th/v2/site.css?v='+V2_REV+'"><script defer src="/__th/v2/site.js?v='+V2_REV+'"></script><script defer src="/__th/engagement-v1.js"></script></head><body>'
+ +v2Header(c,locale,"404/")
+ +'<main id="main"><section class="notfound-section"><div class="shell"><div class="notfound-inner"><span class="notfound-code" dir="ltr" aria-hidden="true">404</span><h1>'+v2T(c.notFoundTitle)+'</h1><p>'+v2T(c.notFoundText)+'</p><div class="notfound-actions"><a class="button button-primary button-xl" href="'+prefix+'">'+v2T(c.notFoundHome)+'</a><a class="button button-quiet button-xl" href="'+prefix+'#programs">'+v2T(c.navPrograms)+'</a></div></div></div></section></main>'
+ +v2Footer(c,locale,undefined)+'</body></html>';
+ const headers=new Headers({"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache, no-store, must-revalidate","X-Content-Type-Options":"nosniff","Referrer-Policy":"strict-origin-when-cross-origin","X-Frame-Options":"DENY","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Content-Language":c.lang,"X-Robots-Tag":"noindex, nofollow, noarchive","Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://toefl-house-conversions.alfrotan2.workers.dev https://static.cloudflareinsights.com https://cloudflareinsights.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"});
+ return new Response(request.method==="HEAD"?null:v2DariEditorial(html,locale),{status:404,headers});
 }

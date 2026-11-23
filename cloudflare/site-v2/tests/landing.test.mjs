@@ -817,3 +817,70 @@ test("Dari font is localized and mobile FAQ has a readable compact layout",async
  assert.ok(css.includes('html[dir=rtl] body{font-family:Tahoma,"Noto Sans Arabic",Arial,sans-serif'),"Pashto uses a stable Arabic-script fallback");
  assert.ok(css.includes(".faq-section.section{padding:54px 0 64px}"),"FAQ section compact on phones");
 });
+
+test("Unknown paths return a branded trilingual 404 page, not bare text",async()=>{
+ const cases=[["/no-such-page/","en","Page not found","Back to the homepage","/"],["/fa/no-such-page/","fa-AF","صفحه پیدا نشد","بازگشت به صفحهٔ اصلی","/fa/"],["/ps/no-such-page/","ps-AF","پاڼه ونه موندل شوه","کورپاڼې ته لاړ شئ","/ps/"]];
+ for(const [path,lang,title,home,homeHref] of cases){
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
+  assert.equal(r.status,404,path);
+  assert.match(r.headers.get("Content-Type"),/text\/html/);
+  assert.equal(r.headers.get("Content-Language"),lang,path);
+  assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
+  const html=await r.text();
+  assert.ok(html.length>2000,path+" 404 must be a full page, not bare text");
+  assert.equal((html.match(/<h1>/g)||[]).length,1,path+" must have exactly one h1");
+  assert.ok(html.includes(title),path+" missing localized title");
+  assert.ok(html.includes('class="site-header"'),path+" missing branded header");
+  assert.ok(html.includes('href="'+homeHref+'"'),path+" missing home link");
+  assert.ok(html.includes(home),path+" missing home button label");
+  assert.ok(html.includes('class="notfound-code"'),path+" missing 404 mark");
+  assert.ok(html.includes('href="/404/"')&&html.includes('href="/fa/404/"')&&html.includes('href="/ps/404/"'),path+" language switcher must stay on the 404 page");
+  assert.doesNotMatch(html,/<link rel="canonical"/,path+" 404 must not carry a canonical URL");
+  assert.doesNotMatch(html,/the-toefl-house\\.pages\\.dev/,path+" 404 must not reference the retired address");
+ }
+});
+
+test("HEAD and non-GET unknown paths still fail safely",async()=>{
+ const head=await worker.fetch(new Request("https://toeflhouse.pages.dev/no-such-page/",{method:"HEAD"}),env());
+ assert.equal(head.status,404);
+ assert.equal(await head.text(),"");
+ const post=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/private/action",{method:"POST",headers:{"Content-Type":"application/json"},body:'{"test":true}'}),env());
+ assert.equal(post.status,404);
+ assert.equal(await post.text(),"Not found");
+});
+
+test("Retired anchor-only routes show the branded 404",async()=>{
+ for(const path of ["/online/","/contact/","/faq/"]){
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
+  assert.equal(r.status,404,path);
+  const html=await r.text();
+  assert.ok(html.includes('class="site-header"'),path+" must show the branded 404");
+  assert.ok(html.includes("Page not found"),path+" must carry the 404 heading");
+ }
+});
+
+test("Sitemap carries a truthful lastmod on every URL",async()=>{
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml"),env());
+ assert.equal(r.status,200);
+ const xml=await r.text();
+ assert.equal((xml.match(/<loc>/g)||[]).length,39);
+ const lastmods=xml.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g)||[];
+ assert.equal(lastmods.length,39,"every sitemap URL must carry lastmod");
+ assert.equal(new Set(lastmods).size,1,"all lastmod dates must be the single build date");
+ const date=lastmods[0].replace(/<\/?lastmod>/g,"");
+ assert.ok(!Number.isNaN(Date.parse(date+"T00:00:00Z")),"lastmod must be a valid date");
+ assert.ok(Date.parse(date+"T00:00:00Z")<=Date.now(),"lastmod must not be in the future");
+});
+
+test("TOEFL Listening tasks render as separate lines in English; FA/PS bilingual lines unchanged",async()=>{
+ const en=await worker.fetch(new Request("https://toeflhouse.pages.dev/courses/toefl-preparation/"),env());
+ assert.equal(en.status,200);
+ const enHtml=await en.text();
+ assert.ok(enHtml.includes("<li>Listen to an Announcement</li>"),"Announcement must be its own list item");
+ assert.ok(enHtml.includes("<li>Listen to an Academic Talk</li>"),"Academic Talk must be its own list item");
+ assert.doesNotMatch(enHtml,/Listen to an Announcement; Listen to an Academic Talk/,"the semicolon join must be gone");
+ const fa=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/courses/toefl-preparation/"),env());
+ assert.ok((await fa.text()).includes("Listen to an Announcement و Listen to an Academic Talk"),"FA bilingual line must be untouched");
+ const ps=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/courses/toefl-preparation/"),env());
+ assert.ok((await ps.text()).includes("Listen to an Announcement او Listen to an Academic Talk"),"PS bilingual line must be untouched");
+});
