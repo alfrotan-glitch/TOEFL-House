@@ -129,7 +129,8 @@ if(enquiry){
    var refLabel=current==="fa"?"\nکُد کمپاین: ":current==="ps"?"\nد کمپاین کوډ: ":"\nCampaign reference: ";
    message+=refLabel+refParts.join(" / ");
   }
-  var number=enquiry.getAttribute("data-number")||"93794357509";
+  var configuredNumber=enquiry.getAttribute("data-number")||"";
+  var number=/^[1-9][0-9]{7,14}$/.test(configuredNumber)?configuredNumber:"93794357509";
   // A real anchor click is recorded by the site's existing anonymous WhatsApp
   // click tracker before navigation. No personal form fields are sent to analytics.
   var link=document.createElement("a");
