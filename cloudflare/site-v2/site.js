@@ -33,7 +33,16 @@ if(isHome&&known&&!document.getElementById(known)){
 var menu=document.querySelector(".mobile-menu");
 if(menu){
   menu.querySelectorAll('nav a').forEach(function(a){a.addEventListener("click",function(){menu.open=false;});});
-  document.addEventListener("keydown",function(event){if(event.key==="Escape")menu.open=false;});
+  document.addEventListener("keydown",function(event){
+   if(event.key==="Escape"&&menu.open){
+    var focusWasInside=menu.contains(document.activeElement);
+    menu.open=false;
+    if(focusWasInside){
+     var toggle=menu.querySelector("summary");
+     if(toggle)toggle.focus();
+    }
+   }
+  });
   document.addEventListener("click",function(event){if(menu.open&&!menu.contains(event.target))menu.open=false;});
 }
 var enquiry=document.getElementById("v2-enquiry-form");
