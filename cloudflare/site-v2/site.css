@@ -1,4 +1,4 @@
-/* The TOEFL House 2026 / Design system 2.0 — clean, mobile-first, RTL-native */
+
 :root{--paper:#f7f6f2;--white:#fff;--ink:#112c35;--muted:#596973;--red:#ce3046;--red-dark:#af243a;--line:#e5e6e1;--sage:#e9efea;--ease:cubic-bezier(.19,1,.22,1);font-synthesis:none}
 *,*::before,*::after{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:110px}
@@ -232,7 +232,7 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.001ms!important;transition-duration:.001ms!important}}
 
-/* Compact proof point */
+
 @media(max-width:460px){
  .stat-grid{grid-template-columns:1fr;gap:0}
  .stat-item{flex-direction:row;justify-content:space-between;align-items:center;gap:24px;min-height:66px;padding:11px 0;border-inline-start:0;border-bottom:1px solid #eef0eb}
@@ -243,7 +243,7 @@ html[dir=rtl] .course-card h3{font-weight:700;letter-spacing:-.01em}
 }
 
 
-/* V2 program details: editorial, legible, same visual language as the homepage. */
+
 .breadcrumbs{display:flex;align-items:center;flex-wrap:wrap;gap:10px;color:#85928e;font-size:11px;font-weight:700;margin-bottom:65px}
 .breadcrumbs a:hover{color:var(--red)}
 .breadcrumbs [aria-current]{color:#334b52}
@@ -277,7 +277,7 @@ html[dir=rtl] .detail-intro h1{line-height:1.65;letter-spacing:0}
 .related-course{padding:22px 25px;background:#fff;border:1px solid #e2e5df;border-radius:6px;display:flex;gap:14px;justify-content:space-between;align-items:center;font-size:14px;font-weight:800;transition:box-shadow .2s}
 .related-course:hover{box-shadow:0 15px 25px #20383914}
 .related-course span{color:var(--red)}
-/* Admissions: three-step human enquiry, not an unverified registration promise. */
+
 .admissions-hero{background:linear-gradient(120deg,#f8f8f4 0%,#f2f3ed 100%);padding:85px 0 100px}
 .admissions-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,.85fr);gap:95px;align-items:start}
 .admissions-copy h1{font-size:clamp(38px,4.4vw,61px);line-height:1.4;letter-spacing:-.045em;margin:0 0 24px}
@@ -337,7 +337,7 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 }
 
 
-/* WCAG 2.1 AA refinem */
+
 .stat-head p{color:#53656b}
 .stat-item span{color:#53656b}
 .section-intro{color:#52636a}
@@ -356,7 +356,7 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .admission-help-inner p:not(.eyebrow){color:#52636a}
 
 
-/* Finish AA contrast */
+
 .course-copy{color:#52636a}
 .journey-step p{color:#52636a}
 .tools-content p{color:#52636a}
@@ -366,7 +366,7 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .detail-aside p{color:#52636a}
 
 
-/* General English edi */
+
 .ge-section{padding-block:90px 96px;background:#f7f8f5}
 .ge-section h2,.ge-section h3,.ge-section h4{color:var(--ink)}
 .ge-heading{max-width:920px;margin-bottom:29px}
@@ -448,7 +448,7 @@ html[dir=rtl] .ge-stage h4{align-self:flex-start;text-align:start}
 @media(max-width:760px){.ge-section{padding-block:60px 68px}.ge-heading h2{font-size:30px}.ge-heading>p:not(.eyebrow){font-size:13px}.ge-facts{gap:8px;margin-bottom:46px}.ge-fact{padding:16px;min-height:98px}.ge-fact strong{font-size:17px}.ge-fact span{font-size:11px}.ge-stages{grid-template-columns:1fr;gap:9px}.ge-stage{padding:16px}.ge-stages-block{margin-bottom:46px}.ge-columns{margin-bottom:46px}.ge-side{display:grid;grid-template-columns:1fr}.ge-panel{padding:24px 20px}.ge-fees{padding:25px 15px;margin-bottom:45px}.ge-fee-table th,.ge-fee-table td{font-size:11px;padding:13px 6px}.ge-fee-table tbody td strong{font-size:12px}.schedule-table th,.schedule-table td{font-size:12px;padding:13px 8px}.schedule-table tbody td strong{font-size:13px}.schedule-popular,.schedule-full{margin-inline-start:0;margin-top:6px}.ge-fee-total{padding:17px 15px}.ge-questions{margin-bottom:38px}.ge-references{padding:19px 17px}.ge-cta{display:flex;flex-direction:column;align-items:stretch;padding:21px}.ge-cta .button{width:100%}}
 
 
-/* Seasonal enrollment */
+
 .semester-hero-pill{display:inline-flex;align-items:center;gap:10px;max-width:100%;margin:0 0 17px;padding:9px 15px;border:1px solid #e8c5cd;border-radius:999px;background:#fff8f9;color:#991933;font-size:12px;font-weight:800;line-height:1.65;transition:transform .22s var(--ease),box-shadow .22s var(--ease)}
 .semester-hero-pill:hover{transform:translateY(-2px);box-shadow:0 7px 24px #98263b15}
 .semester-mini-dot,.semester-dot{width:8px;height:8px;border-radius:50%;background:#ce3046;flex:none}
@@ -493,7 +493,7 @@ html[dir=rtl] .semester-chips li{font-size:12px}
 @media(prefers-reduced-motion:reduce){.semester-play-circle{transition:none}.semester-video-cover:hover .semester-play-circle{transform:none}}
 
 
-/* New semester → EAP */
+
 .semester-eap-spotlight{display:flex;align-items:center;gap:22px;min-height:112px;margin-top:16px;padding:19px 27px;border:1px solid #efd6dc;border-radius:16px;background:#fffafc;color:#632033;box-shadow:0 4px 25px #6916290c;transition:border-color .2s,transform .2s}
 .semester-eap-spotlight:hover{border-color:#ce3046;transform:translateY(-2px)}
 .semester-eap-mark{display:grid;place-items:center;min-width:75px;min-height:75px;background:#a51e3b;color:#fff;border-radius:14px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:23px;font-weight:900;letter-spacing:.06em}
@@ -504,7 +504,7 @@ html[dir=rtl] .semester-chips li{font-size:12px}
 .semester-eap-link{margin-inline-start:auto;color:#a01837;font-size:12px;font-weight:800;white-space:nowrap}
 @media(max-width:760px){.semester-eap-spotlight{flex-wrap:wrap;padding:20px;gap:14px}.semester-eap-mark{min-width:58px;min-height:58px;font-size:19px}.semester-eap-copy{flex:1 1 180px}.semester-eap-copy strong{font-size:15px}.semester-eap-link{width:100%;margin-inline-start:72px;white-space:normal}}
 @media(max-width:460px){.semester-eap-spotlight{gap:12px}.semester-eap-copy small{font-size:10px}.semester-eap-copy strong{font-size:14px}.semester-eap-link{margin-inline-start:0}}
-/* EAP program: clean */
+
 .eap-page{background:#fff}
 .eap-page .section{padding-block:88px}
 .eap-hero{background:linear-gradient(137deg,#faf9f5 0%,#f6efed 73%,#f1e5e4 100%);border-bottom:1px solid #ebdfe0;padding:35px 0 63px;overflow:hidden}
@@ -595,7 +595,7 @@ html[dir=rtl] .eap-hero-copy h1{font-size:clamp(35px,4vw,55px);letter-spacing:-.
 @media(max-width:760px){.eap-page .section{padding-block:58px}.eap-hero{padding:26px 0 45px}.eap-hero .breadcrumbs{margin-bottom:30px}.eap-hero-grid{grid-template-columns:1fr;gap:30px}.eap-hero-copy h1{font-size:36px}.eap-hero-visual{min-height:255px;aspect-ratio:1.5}.eap-hero-visual>strong{font-size:100px}.eap-facts{margin-top:30px;grid-template-columns:repeat(2,minmax(0,1fr))}.eap-mission-grid,.eap-teachers-grid,.eap-faq-grid{grid-template-columns:1fr;gap:20px}.eap-goals-grid,.eap-levels,.eap-books-grid,.eap-fee-grid{grid-template-columns:1fr}.eap-hero-copy h1,.eap-heading h2{font-size:32px}.eap-mission-grid>p,.eap-lead{font-size:13px}.eap-teacher-badge{min-height:145px}.eap-teacher-badge strong{font-size:74px}.eap-bottom-inner{flex-direction:column;align-items:stretch;gap:25px}.eap-bottom-actions{align-items:stretch;min-width:0}.eap-bottom-actions .button{width:100%}}
 @media(max-width:460px){.eap-hero-copy h1{font-size:30px!important}.eap-hero-visual{aspect-ratio:1.36}.eap-visual-kicker,.eap-visual-small{font-size:8px}.eap-fact{padding:14px 12px}.eap-fact strong{font-size:18px}.eap-fact span{font-size:10px}.eap-goal,.eap-book{padding:21px 18px}.eap-level{grid-template-columns:25px minmax(0,1fr);gap:8px;padding:19px 13px}.eap-fee-card{padding:20px 22px}.eap-fee-card strong{font-size:29px}}
 
-/* EAP textbook mapping */
+
 .eap-assigned-books{margin:16px 0;padding:15px;border-radius:10px;background:#f8eef0;border:1px solid #f1dce2}
 .eap-assigned-books>span{display:block;color:#7d253c;font-size:12px;font-weight:850;line-height:1.7}
 .eap-assigned-books ul{list-style:none;display:grid;gap:7px;margin:9px 0 0;padding:0}
@@ -604,7 +604,7 @@ html[dir=rtl] .eap-hero-copy h1{font-size:clamp(35px,4vw,55px);letter-spacing:-.
 .eap-assigned-books .eap-fourth-note{margin:10px 0 0;font-size:12px;line-height:1.8}
 
 
-/* Afghan Dari/Pashto editorial accessibility */
+
 :root{--reading:#314a54;--on-paper:#152f38;--surface:#fff;--focus-ring:#b2223e}
 body{font-size:16px}
 a,button,summary,select{touch-action:manipulation}
@@ -703,7 +703,7 @@ html[dir=rtl] .eap-level li li,html[dir=rtl] .eap-book li{line-height:2}
  .eap-book h3{font-size:21px}
 }
 
-/* Unified editorial g */
+
 .editorial-guides{background:#fff;color:#17333c}
 .guide-hero{background:linear-gradient(130deg,#faf8f4 0%,#f5f0ec 65%,#f0e2e3 100%);border-bottom:1px solid #e9dedc;padding:38px 0 76px}
 .guide-hero .breadcrumbs{margin-bottom:48px}
@@ -755,7 +755,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .course-card{position:relative}.course-bottom a::after{content:"";position:absolute;inset:0}
 
 
-/* Special Speaking & 2026 TOEFL: consistent V2 editorial component system. */
+
 .sp-page .eap-hero{background:linear-gradient(135deg,#fffefa,#f7f1ef 60%,#f0e2e4)}
 .sp-page .eap-hero-visual{background:radial-gradient(circle at 30% 25%,#e55b6c 0,#bb2b46 47%,#78233a 100%);border:1px solid #d67a87;isolation:isolate}
 .sp-page .eap-hero-visual::before{content:"";position:absolute;inset:12%;border:1px solid #ffffff35;border-radius:50%;pointer-events:none}
@@ -776,7 +776,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .sp-latin-title{display:inline-block;margin:0 0 12px;color:#a82541;font:800 11px/1.5 ui-sans-serif,system-ui,sans-serif;letter-spacing:.15em;text-align:start}
 
 
-/* 2026 brand experience: accessible, persistent action and editorial hierarchy. */
+
 .site-header{position:sticky;inset-block-start:0;z-index:80;background:#fffdfaef;backdrop-filter:blur(16px) saturate(135%);-webkit-backdrop-filter:blur(16px) saturate(135%);box-shadow:0 5px 22px #16262c08}
 .header-inner{min-width:0}
 .main-nav a{min-height:44px;display:inline-flex;align-items:center;position:relative}
@@ -837,7 +837,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 }
 
 
-/* Goal-first discover */
+
 html{scroll-padding-top:112px}
 #main,#programs,#why-us,#online,#faq,#contact,.course-card[id]{scroll-margin-top:112px}
 .goal-finder{display:grid;grid-template-columns:minmax(210px,.72fr) minmax(0,1.4fr);gap:22px;align-items:center;padding:21px 25px;margin:0 0 24px;border:1px solid #e9d8da;border-inline-start:4px solid #bd2945;border-radius:14px;background:#fff;box-shadow:0 8px 30px #6b26300a}
@@ -854,14 +854,14 @@ html{scroll-padding-top:112px}
 @media(max-width:390px){.brand strong{max-width:108px;font-size:10px;line-height:1.22}.brand img{width:36px;height:36px}.goal-finder-links{grid-template-columns:1fr}.goal-finder-links a{justify-content:space-between;text-align:start}}
 
 
-/* Honest price-and-duration detail at the point of admissions selection. */
+
 .program-preview{margin:10px 0 18px;padding:14px 17px;border:1px solid #e8d6db;border-inline-start:4px solid #b52b46;border-radius:8px;background:#fff8fa;color:#512b3b;font-size:14px;line-height:1.85;font-weight:650;overflow-wrap:anywhere}
 .program-preview[hidden]{display:none}
 html[dir=rtl] .program-preview{font-size:15px;line-height:1.95}
 @media(forced-colors:active){.program-preview{border:2px solid CanvasText}}
 
 
-/* Mobile admissions: */
+
 @media(max-width:760px){
  .admissions-hero{padding:24px 0 58px}
  .admissions-grid{gap:18px}
@@ -877,7 +877,7 @@ html[dir=rtl] .program-preview{font-size:15px;line-height:1.95}
  .admissions-formbox label{margin:5px 0 6px}
 }
 
-/* Dari font and mobile FAQ legibility; Pashto retains its original typeface. */
+
 @font-face{font-family:THDari;src:url("/__th/v2/font/vazirmatn-33.003.woff2") format("woff2");font-style:normal;font-weight:100 900;font-display:swap}
 html[lang=fa-AF] body{font-family:THDari,THArabic,Tahoma,sans-serif;line-height:1.8}
 html[lang=fa-AF] .brand small{font-family:THDari,THArabic,Tahoma,sans-serif}
