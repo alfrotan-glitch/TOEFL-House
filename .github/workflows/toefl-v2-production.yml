@@ -1,9 +1,11 @@
 name: TOEFL House V2 Production Full Acceptance
 on:
   push:
-    branches: [website-v2-redesign-20261118]
+    branches: [main]
     paths:
-      - 'cloudflare/site-v2/production-full-acceptance.mjs'
+      - 'cloudflare/site-v2/**'
+      - 'cloudflare/pages-edge/**'
+      - 'cloudflare/cms-readiness/**'
       - '.github/workflows/toefl-v2-production.yml'
   workflow_dispatch:
 permissions:
