@@ -412,6 +412,16 @@ html[dir=rtl] .ge-stage h4{align-self:flex-start;text-align:start}
 .ge-fee-table thead th{font-size:12px;font-weight:800;background:#eef3ef;color:#2a454a}
 .ge-fee-table tbody th{font-weight:800}
 .ge-fee-table tbody td strong{font-size:14px;color:#18393f}
+.schedule-table-wrap{overflow-x:auto}
+.schedule-table{width:100%;border-collapse:collapse}
+.schedule-table th,.schedule-table td{padding:16px 14px;text-align:start;border-bottom:1px solid #e3e8e4;vertical-align:middle;font-size:14px;color:#304b53}
+.schedule-table thead th{font-size:12px;font-weight:800;background:#eef3ef;color:#2a454a}
+.schedule-table tbody th{font-weight:800;width:26%}
+.schedule-table tbody td strong{font-size:15px;color:#18393f;white-space:nowrap}
+.schedule-popular{display:inline-block;margin-inline-start:8px;padding:3px 10px;border-radius:999px;background:#fdeef0;color:#b1344c;font-size:11px;font-weight:800;white-space:nowrap}
+.schedule-full{display:inline-block;margin-inline-start:8px;padding:3px 10px;border-radius:999px;background:#eef3ef;color:#5b6f73;font-size:11px;font-weight:800;white-space:nowrap}
+.schedule-table tr.is-closed{opacity:.6}
+.schedule-note{margin:18px 0 0;color:#718084;font-size:13px;line-height:1.9}
 .ge-fee-total{margin-top:18px;padding:22px 24px;background:#173944;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:18px;border-radius:11px}
 .ge-fee-total>div{display:flex;flex-direction:column;gap:5px}
 .ge-fee-total>div strong{font-size:15px}
@@ -435,7 +445,7 @@ html[dir=rtl] .ge-stage h4{align-self:flex-start;text-align:start}
 .ge-cta span{font-size:12px;color:#54696e;line-height:1.85}
 .ge-cta .button{white-space:normal;min-width:215px;text-align:center}
 @media(max-width:1020px){.ge-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.ge-columns{grid-template-columns:1fr}.ge-side{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto}.ge-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:760px){.ge-section{padding-block:60px 68px}.ge-heading h2{font-size:30px}.ge-heading>p:not(.eyebrow){font-size:13px}.ge-facts{gap:8px;margin-bottom:46px}.ge-fact{padding:16px;min-height:98px}.ge-fact strong{font-size:17px}.ge-fact span{font-size:11px}.ge-stages{grid-template-columns:1fr;gap:9px}.ge-stage{padding:16px}.ge-stages-block{margin-bottom:46px}.ge-columns{margin-bottom:46px}.ge-side{display:grid;grid-template-columns:1fr}.ge-panel{padding:24px 20px}.ge-fees{padding:25px 15px;margin-bottom:45px}.ge-fee-table th,.ge-fee-table td{font-size:11px;padding:13px 6px}.ge-fee-table tbody td strong{font-size:12px}.ge-fee-total{padding:17px 15px}.ge-questions{margin-bottom:38px}.ge-references{padding:19px 17px}.ge-cta{display:flex;flex-direction:column;align-items:stretch;padding:21px}.ge-cta .button{width:100%}}
+@media(max-width:760px){.ge-section{padding-block:60px 68px}.ge-heading h2{font-size:30px}.ge-heading>p:not(.eyebrow){font-size:13px}.ge-facts{gap:8px;margin-bottom:46px}.ge-fact{padding:16px;min-height:98px}.ge-fact strong{font-size:17px}.ge-fact span{font-size:11px}.ge-stages{grid-template-columns:1fr;gap:9px}.ge-stage{padding:16px}.ge-stages-block{margin-bottom:46px}.ge-columns{margin-bottom:46px}.ge-side{display:grid;grid-template-columns:1fr}.ge-panel{padding:24px 20px}.ge-fees{padding:25px 15px;margin-bottom:45px}.ge-fee-table th,.ge-fee-table td{font-size:11px;padding:13px 6px}.ge-fee-table tbody td strong{font-size:12px}.schedule-table th,.schedule-table td{font-size:12px;padding:13px 8px}.schedule-table tbody td strong{font-size:13px}.schedule-popular,.schedule-full{margin-inline-start:0;margin-top:6px}.ge-fee-total{padding:17px 15px}.ge-questions{margin-bottom:38px}.ge-references{padding:19px 17px}.ge-cta{display:flex;flex-direction:column;align-items:stretch;padding:21px}.ge-cta .button{width:100%}}
 
 
 /* Seasonal enrollment */

@@ -25,7 +25,7 @@ const V2_COPY={
   photoBadge:"Learning together",photoSub:"Dasht-e-Barchi · Kabul",micro:"THE TOEFL HOUSE • EST. 2013",
   trustTitle:"Learning that opens doors",trustSub:"The TOEFL House community at a glance",
   courseEyebrow:"EXPLORE OUR PROGRAMS",coursesTitle:"Find the program that",coursesAccent:"fits your goals.",coursesLead:"Six English language programs, from foundational learning to academic and professional communication. Confirm fees, class times and availability with admissions.",
-  courseDetail:"View program",courseDuration:"Duration",onlineLabel:"Private online learning",onlineTitle:"Personalized English lessons, wherever you are.",onlineText:"Live, one-to-one Zoom lessons can be arranged for learners in Kabul or abroad, including Europe and Canada. The curriculum, teacher availability, time zone and fees are confirmed before registration.",onlineCta:"Ask about online classes",
+  courseDetail:"View program",courseDuration:"Duration",scheduleEyebrow:"CLASS SCHEDULE",scheduleTitle:"Seven shifts a day, six days a week.",scheduleLead:"Seventy-minute sessions, Saturday–Thursday. Friday is closed.",scheduleShift:"Shift",scheduleMen:"Men",scheduleWomen:"Women",schedulePopular:"Popular",scheduleFull:"Full",scheduleNote:"Women's morning shifts start 10 minutes later and afternoon shifts 10 minutes earlier than men's.",onlineLabel:"Private online learning",onlineTitle:"Personalized English lessons, wherever you are.",onlineText:"Live, one-to-one Zoom lessons can be arranged for learners in Kabul or abroad, including Europe and Canada. The curriculum, teacher availability, time zone and fees are confirmed before registration.",onlineCta:"Ask about online classes",
   whyLabel:"A CLEAR WAY FORWARD",whyTitle:"A clear route to your next class.",whyLead:"Choose your goal, assess your current level and confirm the class that suits you.",
   steps:[["01","Tell us your goal","Share what you want to improve—speaking, academic English, TOEFL or everyday communication."],["02","Find your level, free","Our team helps you select a suitable starting level through a free assessment."],["03","Join the right class","Confirm available shifts, teaching format and tuition with our admissions team."]],
   toolsLabel:"ADMISSIONS SUPPORT",toolsTitle:"Need help choosing your next step?",toolsText:"Our admissions team can help you choose a suitable English program and arrange your free placement assessment.",toolsCta:"Request guidance",
@@ -44,7 +44,7 @@ const V2_COPY={
   photoBadge:"یادگیری در کنار هم",photoSub:"دشت برچی · کابل",micro:"تافل هوس • از سال ۲۰۱۳",
   trustTitle:"آموزش برای فرصت‌های بیشتر",trustSub:"نگاهی به جامعهٔ آموزشی تافل هوس",
   courseEyebrow:"برنامه‌های آموزشی",coursesTitle:"برنامه‌ای متناسب با",coursesAccent:"هدف شما.",coursesLead:"شش برنامهٔ آموزشی، از انگلیسی عمومی تا مهارت‌های اکادمیک و مسلکی. برای دریافت معلومات دقیق دربارهٔ فیس، تقسیم اوقات و ظرفیت صنف‌ها با پذیرش تماس بگیرید.",
-  courseDetail:"معرفی کامل برنامه",courseDuration:"مدت دوره",onlineLabel:"صنف‌های آنلاین انفرادی",onlineTitle:"آموزش خصوصی انگلیسی، مطابق هدف و وقت شما.",onlineText:"صنف‌های زنده و انفرادی از طریق Zoom برای علاقه‌مندان داخل و خارج از کابل، به‌شمول اروپا و کانادا، با هماهنگی قبلی برگزار می‌شوند. محتوای آموزشی، وقت صنف، دسترسی استاد و فیس پیش از ثبت‌نام تأیید می‌گردد.",onlineCta:"معلومات دربارهٔ صنف‌های آنلاین",
+  courseDetail:"معرفی کامل برنامه",courseDuration:"مدت دوره",scheduleEyebrow:"تقسیم اوقات صنف‌ها",scheduleTitle:"هفت شیفت در روز، شش روز در هفته.",scheduleLead:"هر جلسه ۷۰ دقیقه، شنبه تا پنج‌شنبه. جمعه رخصت است.",scheduleShift:"شیفت",scheduleMen:"برادران",scheduleWomen:"خواهران",schedulePopular:"پرتقاضا",scheduleFull:"تکمیل ظرفیت",scheduleNote:"شیفت‌های صبح خواهران ۱۰ دقیقه دیرتر و شیفت‌های عصر ۱۰ دقیقه زودتر شروع می‌شوند.",onlineLabel:"صنف‌های آنلاین انفرادی",onlineTitle:"آموزش خصوصی انگلیسی، مطابق هدف و وقت شما.",onlineText:"صنف‌های زنده و انفرادی از طریق Zoom برای علاقه‌مندان داخل و خارج از کابل، به‌شمول اروپا و کانادا، با هماهنگی قبلی برگزار می‌شوند. محتوای آموزشی، وقت صنف، دسترسی استاد و فیس پیش از ثبت‌نام تأیید می‌گردد.",onlineCta:"معلومات دربارهٔ صنف‌های آنلاین",
   whyLabel:"مسیر روشن ثبت‌نام",whyTitle:"با یک انتخاب آگاهانه آغاز کنید.",whyLead:"از تعیین هدف تا انتخاب صنف مناسب، سه گام مشخص پیش روی شماست.",
   steps:[["۰۱","هدف‌تان را بگویید","مکالمه، انگلیسی اکادمیک، تافل یا انگلیسی روزمره؛ بگویید کدام مهارت را می‌خواهید بهتر سازید."],["۰۲","سطح زبان خود را رایگان تعیین کنید","با رهنمایی تیم آموزشی، صنف و سطح مناسب خود را پیدا کنید."],["۰۳","در صنف مناسب شامل شوید","تقسیم اوقات، شیوهٔ تدریس و فیس را با پذیرش تأیید کنید."]],
   toolsLabel:"رهنمایی پذیرش",toolsTitle:"برای انتخاب گام بعدی راهنمایی بگیرید.",toolsText:"بخش پذیرش در انتخاب برنامهٔ مناسب انگلیسی و هماهنگی ارزیابی رایگان سطح شما کمک می‌کند.",toolsCta:"درخواست راهنمایی",
@@ -63,7 +63,7 @@ const V2_COPY={
   photoBadge:"په ګډه زده کړه",photoSub:"دشت برچي · کابل",micro:"تافل هوس • له ۲۰۱۳ کال راهیسې",
   trustTitle:"د لا ډېرو فرصتونو لپاره زده‌کړه",trustSub:"د تافل هوس د زده‌کړې ټولنې پېژندنه",
   courseEyebrow:"زموږ ښوونیز پروګرامونه",coursesTitle:"د خپلې موخې لپاره",coursesAccent:"مناسب پروګرام وټاکئ.",coursesLead:"د انګلیسي شپږ پروګرامونه، له بنسټیزې زده‌کړې تر اکاډمیکو او مسلکي مهارتونو پورې. د فیس، مهالوېش او شته ځایونو په اړه له نوم‌لیکنې څانګې سره اړیکه ونیسئ.",
-  courseDetail:"د پروګرام بشپړ معلومات",courseDuration:"د کورس موده",onlineLabel:"انفرادي آنلاین زده‌کړه",onlineTitle:"انفرادي آنلاین زده‌کړه؛ ستاسو د موخې او وخت له مخې.",onlineText:"د Zoom له لارې ژوندۍ انفرادي ټولګي په کابل او بهر کې، د اروپا او کاناډا په ګډون، د مخکینۍ همغږۍ له مخې برابرېږي. درسي مواد، د ښوونکي شتون، وخت او فیس تر نوم‌لیکنې مخکې تاییدېږي.",onlineCta:"د آنلاین ټولګیو معلومات",
+  courseDetail:"د پروګرام بشپړ معلومات",courseDuration:"د کورس موده",scheduleEyebrow:"ورځنی مهالوېش",scheduleTitle:"خپل مناسب وخت وټاکئ",scheduleLead:"هره درسي غونډه ۷۰ دقیقې ده او درسي ورځې له شنبې تر پنجشنبې دي. جمعه د مرکز اوونیزه رخصتي ده.",scheduleShift:"شفټ",scheduleMen:"وروڼه",scheduleWomen:"خویندې",schedulePopular:"ډېر غوښتل شوی",scheduleFull:"ډک شوی",scheduleNote:"د خویندو د سهار شفټونه ۱۰ دقیقې وروسته او د ماسپښین شفټونه ۱۰ دقیقې مخکې پیلېږي.",onlineLabel:"انفرادي آنلاین زده‌کړه",onlineTitle:"انفرادي آنلاین زده‌کړه؛ ستاسو د موخې او وخت له مخې.",onlineText:"د Zoom له لارې ژوندۍ انفرادي ټولګي په کابل او بهر کې، د اروپا او کاناډا په ګډون، د مخکینۍ همغږۍ له مخې برابرېږي. درسي مواد، د ښوونکي شتون، وخت او فیس تر نوم‌لیکنې مخکې تاییدېږي.",onlineCta:"د آنلاین ټولګیو معلومات",
   whyLabel:"روښانه پیل",whyTitle:"په روښانه پلان زده‌کړه پیل کړئ.",whyLead:"خپله موخه وټاکئ، سویه مو معلومه کړئ او مناسب ټولګی تایید کړئ.",
   steps:[["۰۱","خپل هدف ووایئ","خبرې کول، اکاډمیکه انګلیسي، TOEFL یا ورځنۍ انګلیسي؛ خپل هدف راسره شریک کړئ."],["۰۲","خپله سویه وړیا معلومه کړئ","زموږ ښوونیز ټیم له تاسو سره د مناسبې سویې په ټاکلو کې مرسته کوي."],["۰۳","مناسب ټولګي ته لاړ شئ","مهالوېش، د زده‌کړې بڼه او فیس له ادارې سره تایید کړئ."]],
   toolsLabel:"د نوم‌لیکنې لارښوونه",toolsTitle:"د خپل راتلونکي ګام په ټاکلو کې مرسته وغواړئ.",toolsText:"زموږ د نوم‌لیکنې ډله د مناسب انګلیسي پروګرام په ټاکلو او د سویې د وړیا ارزونې په تنظیم کې مرسته کوي.",toolsCta:"لارښوونه وغواړئ",
@@ -247,6 +247,40 @@ function v2Programs(c,content,locale){
  }).join("");
  return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div>'+goalNav+'<div class="courses-grid">'+cards+'</div></div></section>';
 }
+function v2ShiftParts(shift,locale){
+ const raw=locale==="fa"?(shift.timeFa||shift.timeEn||""):(shift.timeEn||"");
+ const parts=String(raw).split("·").map(x=>x.trim());
+ if(parts.length<2)return null;
+ const men=parts[0].replace(/^(Men|برادران:)\s*/,"");
+ const women=parts[1].replace(/^(Women|خواهران:)\s*/,"");
+ return men&&women?{men,women}:null;
+}
+function v2PsDigits(s){return String(s).replace(/[0-9]/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);}
+function v2PsTime(part){
+ const m=/^(\d{1,2}):(\d{2})\s*–\s*(\d{1,2}):(\d{2})\s*(AM|PM)$/.exec(String(part).trim());
+ if(!m)return v2PsDigits(part);
+ const h24=parseInt(m[1],10)%12+(m[5]==="PM"?12:0);
+ const word=h24<12?"سهار":h24<16?"ماسپښین":"ماښام";
+ return v2PsDigits(m[1]+":"+m[2]+" – "+m[3]+":"+m[4])+" "+word;
+}
+function v2Schedule(c,content,locale){
+ const shifts=content?.main?.timetable;
+ if(!Array.isArray(shifts)||!shifts.length)return "";
+ const rows=shifts.map((shift,i)=>{
+  const num=locale==="en"?String(i+1):v2PsDigits(i+1);
+  const badge=shift.open===false?'<span class="schedule-full">'+v2T(c.scheduleFull)+'</span>':shift.popular?'<span class="schedule-popular">'+v2T(c.schedulePopular)+'</span>':"";
+  const parts=v2ShiftParts(shift,locale);
+  const closed=shift.open===false?' is-closed':"";
+  if(!parts){
+   const raw=locale==="fa"?(shift.timeFa||shift.timeEn||""):(shift.timeEn||"");
+   return '<tr class="schedule-row'+closed+'"><th scope="row">'+v2T(c.scheduleShift+" "+num)+badge+'</th><td colspan="2"><strong>'+v2T(raw)+'</strong></td></tr>';
+  }
+  const men=locale==="ps"?v2PsTime(parts.men):parts.men;
+  const women=locale==="ps"?v2PsTime(parts.women):parts.women;
+  return '<tr class="schedule-row'+closed+'"><th scope="row">'+v2T(c.scheduleShift+" "+num)+badge+'</th><td><strong>'+v2T(men)+'</strong></td><td><strong>'+v2T(women)+'</strong></td></tr>';
+ }).join("");
+ return '<section class="schedule-section section" id="schedule"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.scheduleEyebrow)+'</p><h2>'+v2T(c.scheduleTitle)+'</h2></div><p class="section-intro">'+v2T(c.scheduleLead)+'</p></div><div class="schedule-table-wrap"><table class="schedule-table"><thead><tr><th scope="col">'+v2T(c.scheduleShift)+'</th><th scope="col">'+v2T(c.scheduleMen)+'</th><th scope="col">'+v2T(c.scheduleWomen)+'</th></tr></thead><tbody>'+rows+'</tbody></table></div><p class="schedule-note">'+v2T(c.scheduleNote)+'</p></div></section>';
+}
 function v2CleanFaqAnswer(value){
  return String(value||"").replace(/\s*(?:رایگان‌بودن تعیین سطح به معنای رایگان‌بودن صنف‌ها نیست|It does not make course tuition free|د سویې وړیا ارزونه د دې معنا نه لري چې درسي ټولګي هم وړیا دي)\.?/gi,"").trim();
 }
@@ -306,6 +340,7 @@ function v2Page(locale,content){
  +v2SemesterCampaign(locale)
  +v2Stats(c,content,locale)
  +v2Programs(c,content,locale)
+ +v2Schedule(c,content,locale)
  +'<section class="online-section section" id="online"><div class="shell"><div class="online-panel"><div class="online-symbol" aria-hidden="true"><span>1:1</span><svg viewBox="0 0 70 70" fill="none" aria-hidden="true"><circle cx="35" cy="35" r="31" stroke="currentColor" stroke-width="1.5"/><path d="M15 35h40M35 15v40" stroke="currentColor" stroke-width="1.5"/></svg></div><div class="online-copy"><p class="eyebrow">'+v2T(c.onlineLabel)+'</p><h2>'+v2T(c.onlineTitle)+'</h2><p>'+v2T(c.onlineText)+'</p></div><a class="button button-light" href="'+prefix+'admissions/?program=online-individual-zoom">'+v2T(c.onlineCta)+' <span aria-hidden="true">↗</span></a></div></div></section>'
  +'<section class="journey-section section" id="why-us"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.whyLabel)+'</p><h2>'+v2T(c.whyTitle)+'</h2></div><p class="section-intro">'+v2T(c.whyLead)+'</p></div><div class="journey-grid">'+c.steps.map(([n,h,p])=>'<article class="journey-step"><span class="step-no">'+v2T(n)+'</span><div class="step-line"></div><h3>'+v2T(h)+'</h3><p>'+v2T(p)+'</p></article>').join("")+'</div><div class="tools-strip"><div class="tools-glyph" aria-hidden="true">✳</div><div class="tools-content"><span class="eyebrow">'+v2T(c.toolsLabel)+'</span><h3>'+v2T(c.toolsTitle)+'</h3><p>'+v2T(c.toolsText)+'</p></div><a class="text-link" href="'+prefix+'admissions/">'+v2T(c.toolsCta)+' <span aria-hidden="true">↗</span></a></div></div></section>'
  +v2Faq(c,content,locale)

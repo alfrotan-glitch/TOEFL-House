@@ -305,6 +305,36 @@ test("Legacy published timetable blurbs use a consistent, verifiable public sche
  assert.match(await page.text(),/CMS_EDITED_HOURS/);
 });
 
+test("Homepage renders the published seven-shift timetable from CMS in all languages",async()=>{
+ const shifts=[
+  {id:"shift-1",timeEn:"Men 6:20 – 7:30 AM · Women 6:30 – 7:40 AM",timeFa:"برادران: ۶:۲۰ – ۷:۳۰ صبح · خواهران: ۶:۳۰ – ۷:۴۰ صبح",open:true,popular:true},
+  {id:"shift-2",timeEn:"Men 7:50 – 9:00 AM · Women 8:00 – 9:10 AM",timeFa:"برادران: ۷:۵۰ – ۹:۰۰ صبح · خواهران: ۸:۰۰ – ۹:۱۰ صبح",open:true,popular:true},
+  {id:"shift-3",timeEn:"Men 9:10 – 10:20 AM · Women 9:20 – 10:30 AM",timeFa:"برادران: ۹:۱۰ – ۱۰:۲۰ قبل از ظهر · خواهران: ۹:۲۰ – ۱۰:۳۰ قبل از ظهر",open:true,popular:false},
+  {id:"shift-4",timeEn:"Men 10:30 – 11:40 AM · Women 10:40 – 11:50 AM",timeFa:"برادران: ۱۰:۳۰ – ۱۱:۴۰ قبل از ظهر · خواهران: ۱۰:۴۰ – ۱۱:۵۰ قبل از ظهر",open:true,popular:false},
+  {id:"shift-5",timeEn:"Men 2:00 – 3:10 PM · Women 1:50 – 3:00 PM",timeFa:"برادران: ۲:۰۰ – ۳:۱۰ بعد از ظهر · خواهران: ۱:۵۰ – ۳:۰۰ بعد از ظهر",open:true,popular:true},
+  {id:"shift-6",timeEn:"Men 3:20 – 4:30 PM · Women 3:10 – 4:20 PM",timeFa:"برادران: ۳:۲۰ – ۴:۳۰ عصر · خواهران: ۳:۱۰ – ۴:۲۰ عصر",open:true,popular:true},
+  {id:"shift-7",timeEn:"Men 4:40 – 5:50 PM · Women 4:30 – 5:40 PM",timeFa:"برادران: ۴:۴۰ – ۵:۵۰ شام · خواهران: ۴:۳۰ – ۵:۴۰ شام",open:false,popular:true}
+ ];
+ const e=structuredClone(main);e.timetable=shifts;
+ const cases=[
+  ["/",["6:20 – 7:30 AM","6:30 – 7:40 AM","4:40 – 5:50 PM","4:30 – 5:40 PM","Shift 1","Shift 7"]],
+  ["/fa/",["۶:۲۰ – ۷:۳۰ صبح","۶:۳۰ – ۷:۴۰ صبح","۴:۴۰ – ۵:۵۰ شام","۴:۳۰ – ۵:۴۰ شام","شیفت ۱","شیفت ۷"]],
+  ["/ps/",["۶:۲۰ – ۷:۳۰ سهار","۶:۳۰ – ۷:۴۰ سهار","۴:۴۰ – ۵:۵۰ ماښام","۴:۳۰ – ۵:۴۰ ماښام","شفټ ۱","شفټ ۷"]]
+ ];
+ for(const [path,terms] of cases){
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env(e,ps));
+  assert.equal(r.status,200,path);
+  const html=await r.text();
+  assert.equal((html.match(/id="schedule"/g)||[]).length,1,path+" needs exactly one timetable section");
+  assert.equal((html.match(/class="schedule-row/g)||[]).length,7,path+" needs seven shifts");
+  assert.equal((html.match(/class="schedule-popular"/g)||[]).length,4,path+" needs four popular badges (closed shift 7 shows full instead)");
+  assert.equal((html.match(/class="schedule-full"/g)||[]).length,1,path+" needs one closed shift");
+  for(const term of terms)assert.ok(html.includes(term),path+" missing "+term);
+ }
+ const absent=await worker.fetch(new Request("https://toeflhouse.pages.dev/"),env());
+ assert.doesNotMatch(await absent.text(),/id="schedule"/,"No timetable section without CMS timetable data");
+});
+
 test("Semester Qaws 1405 video announcement is visible, accessible and localised without autoplay",async()=>{
  for(const [path,lang,teaser] of [["/","en","New semester"],["/fa/","fa","سمستر قوس ۱۴۰۵"],["/ps/","ps","قوس ۱۴۰۵"]]){
   const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
