@@ -7,6 +7,12 @@ on:
       - 'cloudflare/pages-edge/**'
       - 'cloudflare/cms-readiness/**'
       - '.github/workflows/toefl-v2-production.yml'
+  pull_request:
+    paths:
+      - 'cloudflare/site-v2/**'
+      - 'cloudflare/pages-edge/**'
+      - 'cloudflare/cms-readiness/**'
+      - '.github/workflows/toefl-v2-production.yml'
   workflow_dispatch:
 permissions:
   contents: read
