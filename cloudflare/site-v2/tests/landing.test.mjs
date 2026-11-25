@@ -926,3 +926,20 @@ test("Desktop-only image preload and revision-qualified cache lifetime",async()=
   }
  }
 });
+
+
+test("Public design system uses only approved red, white and neutral colors",async()=>{
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
+ assert.equal(r.status,200);
+ const css=await r.text();
+ const allowed=new Set(["ffffff","faf9f8","f4f2f1","e5e1e1","d0cacc","bcb4b9","a6a0a2","817b7d","6a6568","55555b","424247","292629","242427","171719","fff3f3","fde8e9","f8d7dc","ffb3bf","e85c6f","e30613","c00818","980616","690912"]);
+ for(const match of css.matchAll(/#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})(?![0-9a-f])/gi)){
+  const hex=match[1].toLowerCase();
+  const base=hex.length===3?hex.split("").map(c=>c+c).join(""):hex.slice(0,6);
+  assert.ok(allowed.has(base),"Unapproved public UI color: "+match[0]);
+ }
+ assert.match(css,/\.detail-summary\{background:#fff;color:var\(--ink\);border:1px solid var\(--line\);border-inline-start:4px solid var\(--red\)/);
+ assert.match(css,/\.detail-summary li::before\{[^}]*background:var\(--red\);color:#fff/);
+ assert.match(css,/\.online-panel\{background:linear-gradient\(125deg,var\(--red-dark\),var\(--red\)\)/);
+ assert.match(css,/\.footer\{background:var\(--red-dark\)/);
+});
