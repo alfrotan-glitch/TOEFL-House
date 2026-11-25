@@ -1,0 +1,79 @@
+name: Full public brand production acceptance
+on:
+  push:
+    branches: [qa/full-brand-production-f50e562]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TOEFL_QA_BASE: https://toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f50e5626ccb66844e19ad26174be2dc52141a82f
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm production revision and all public routes
+        run: |
+          test "$(git rev-parse HEAD)" = "f50e5626ccb66844e19ad26174be2dc52141a82f"
+          node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch(process.env.TOEFL_QA_BASE);assert.equal(r.status,200);assert.ok((await r.text()).includes("9a326787dd29"));'
+          node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Inspect all public routes in mobile and desktop browser and capture corrected panels
+        run: |
+          mkdir -p reports
+          node <<'NODE'
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          const axe=require("/tmp/toefl-accessibility/node_modules/axe-core");
+          const assert=require("node:assert/strict");
+          (async()=>{
+            const base=process.env.TOEFL_QA_BASE;
+            const xml=await (await fetch(base+"/sitemap.xml")).text();
+            const paths=[...new Set([...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(m=>new URL(m[1]).pathname))];
+            assert.ok(paths.length>=39);
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            const issues=[];let checked=0,axeChecked=0,panels=0;
+            try{
+              for(const width of [320,390,768,1440]){
+                const page=await browser.newPage({viewport:{width,height:900},bypassCSP:true});
+                for(const path of paths){
+                  try{
+                    const response=await page.goto(base+path,{waitUntil:"domcontentloaded",timeout:30000});
+                    await page.evaluate(()=>document.fonts.ready);
+                    const state=await page.evaluate(()=>{
+                      const summary=document.querySelector(".detail-summary"),online=document.querySelector(".online-panel"),footer=document.querySelector(".footer");
+                      const read=(element,pseudo)=>element?getComputedStyle(element,pseudo):null;
+                      return {overflow:document.documentElement.scrollWidth-innerWidth,h1:document.querySelectorAll("h1").length,red:getComputedStyle(document.documentElement).getPropertyValue("--red").trim(),summary:summary?{background:read(summary).backgroundColor,text:read(summary.querySelector("strong")).color,check:read(summary.querySelector("li"),"::before")?.backgroundColor}:null,online:read(online)?.backgroundImage||null,footer:read(footer)?.backgroundColor||null};
+                    });
+                    if(response.status()!==200||state.overflow>1||state.h1!==1||state.red!=="#c00818")issues.push({path,width,kind:"geometry",state});
+                    if(state.summary&&(state.summary.background!=="rgb(255, 255, 255)"||state.summary.text!=="rgb(36, 36, 39)"||(state.summary.check&&state.summary.check!=="rgb(192, 8, 24)")))issues.push({path,width,kind:"summary brand",state});
+                    if(state.online&&(!state.online.includes("rgb(152, 6, 22)")||!state.online.includes("rgb(192, 8, 24)")))issues.push({path,width,kind:"online brand",state});
+                    if(state.footer&&state.footer!=="rgb(152, 6, 22)")issues.push({path,width,kind:"footer brand",state});
+                    if(state.summary||state.online)panels++;
+                    if(width===390){
+                      await page.addScriptTag({content:axe.source});
+                      const violations=await page.evaluate(async()=>{const out=await axe.run(document,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21a","wcag21aa"]},rules:{region:{enabled:false}}});return out.violations.filter(v=>["critical","serious"].includes(v.impact)).map(v=>({id:v.id,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary?.slice(0,400)}))}));});
+                      axeChecked++;if(violations.length)issues.push({path,width,kind:"accessibility",violations});
+                    }
+                    if(path==="/"||path==="/courses/general-english/"){
+                      const selector=path==="/"?".online-panel":".detail-summary";
+                      await page.locator(selector).screenshot({path:"reports/"+(path==="/"?"online":"duration")+"-"+width+".png",animations:"disabled"});
+                    }
+                    checked++;
+                  }catch(e){issues.push({path,width,error:String(e)});}
+                }
+                await page.close();
+              }
+            }finally{await browser.close();}
+            const result={checked,axeChecked,panels,issues};require("node:fs").writeFileSync("reports/results.json",JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));assert.deepEqual(issues,[]);
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-brand-browser-evidence
+          path: reports/
