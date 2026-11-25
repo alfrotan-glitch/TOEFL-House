@@ -357,12 +357,13 @@ test("Semester campaign has a keyboard-accessible poster play control with nativ
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/"),env());
  assert.equal(r.status,200);
  const html=await r.text();
- assert.match(html,/<button class="semester-video-cover" type="button" hidden aria-label="پخش ویدیوی معرفی سمستر جدید"/);
+ assert.match(html,/<button class="semester-video-cover" type="button" hidden aria-label="ویدیو را تماشا کنید — پخش ویدیوی معرفی سمستر جدید"/);
  assert.match(html,/class="semester-play-circle"/);
  const client=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.js"),env());
  const code=await client.text();
  assert.match(code,/semesterCover\.addEventListener\("click"/);
  assert.match(code,/semesterVideo\.play\(\)/);
+ assert.match(code,/if\(restoreFocus\)semesterVideo\.focus\(\)/);
  assert.doesNotMatch(code,/semesterVideo\.autoplay\s*=\s*true/);
 });
 
