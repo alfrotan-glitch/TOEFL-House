@@ -63,8 +63,8 @@ const render=[
 '      const page=await v2Detail(request,env,routeLocale,"admissions",null);',
 '      if(page)return page;',
 '    }',
-'    if(url.pathname==="/__th/v2/site.css") return staticResponse(request,V2_CSS,"text/css; charset=utf-8");',
-'    if(url.pathname==="/__th/v2/site.js") return staticResponse(request,V2_JS,"application/javascript; charset=utf-8");',
+'    if(url.pathname==="/__th/v2/site.css") return staticResponse(request,V2_CSS,"text/css; charset=utf-8",V2_REV);',
+'    if(url.pathname==="/__th/v2/site.js") return staticResponse(request,V2_JS,"application/javascript; charset=utf-8",V2_REV);',
 '    if(["/tools","/tools/","/fa/tools","/fa/tools/","/ps/tools","/ps/tools/"].includes(url.pathname)&&!["GET","HEAD"].includes(request.method))',
 '      return new Response("Method not allowed",{status:405,headers:{"Allow":"GET, HEAD"}});',
 ].join("\n")+"\n";
