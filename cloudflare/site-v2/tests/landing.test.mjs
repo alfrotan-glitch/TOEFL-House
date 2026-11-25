@@ -357,12 +357,13 @@ test("Semester campaign has a keyboard-accessible poster play control with nativ
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/fa/"),env());
  assert.equal(r.status,200);
  const html=await r.text();
- assert.match(html,/<button class="semester-video-cover" type="button" hidden aria-label="پخش ویدیوی معرفی سمستر جدید"/);
+ assert.match(html,/<button class="semester-video-cover" type="button" hidden aria-label="ویدیو را تماشا کنید — پخش ویدیوی معرفی سمستر جدید"/);
  assert.match(html,/class="semester-play-circle"/);
  const client=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.js"),env());
  const code=await client.text();
  assert.match(code,/semesterCover\.addEventListener\("click"/);
  assert.match(code,/semesterVideo\.play\(\)/);
+ assert.match(code,/if\(restoreFocus\)semesterVideo\.focus\(\)/);
  assert.doesNotMatch(code,/semesterVideo\.autoplay\s*=\s*true/);
 });
 
@@ -766,7 +767,7 @@ test("Course cards use concise localized headings, whole-card native hit areas, 
   assert.equal(response.status,200);
   const page=await response.text();
   assert.ok(page.includes('<meta property="og:locale" content="'+ogLocale+'">'),root+" missing correct OpenGraph locale");
-  assert.ok(page.includes('alt="'+photoAlt+'" fetchpriority="high"'),root+" campus image requires meaningful native language alt");
+  assert.ok(page.includes('alt="'+photoAlt+'" loading="lazy"'),root+" campus image requires meaningful native language alt");
   const card=page.match(/<article id="course-special-speaking" class="course-card [^"]*">([\s\S]*?)<\/article>/);
   assert.ok(card,root+" missing Special Speaking card");
   assert.ok(card[1].includes("<h3>"+speakingTitle+"</h3>"),root+" course card title too verbose");
@@ -908,5 +909,20 @@ test("Google Meet copy across three languages preserves legacy online routes and
  for(const locale of Object.values(data.locales)){
   const item=locale.programs.find(x=>x.id==="online-individual-zoom");
   assert.equal(item.title,"Private Google Meet classes");assert.equal(item.highlights[0],"Google Meet practice");
+ }
+});
+
+test("Desktop-only image preload and revision-qualified cache lifetime",async()=>{
+ const root=await worker.fetch(new Request("https://toeflhouse.pages.dev/"),env());
+ const html=await root.text();
+ assert.match(html,/<link rel="preload" media="\(min-width: 761px\)"[^>]+as="image"/);
+ const rev=html.match(/site\.css\?v=([a-f0-9]{12})/)[1];
+ for(const path of ["site.css","site.js"]){
+  const versioned=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/"+path+"?v="+rev),env());
+  assert.match(versioned.headers.get("Cache-Control"),/max-age=31536000/);
+  for(const suffix of ["","?v=outdated"]){
+   const stale=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/"+path+suffix),env());
+   assert.match(stale.headers.get("Cache-Control"),/max-age=3600/);
+  }
  }
 });
