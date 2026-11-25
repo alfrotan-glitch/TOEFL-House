@@ -78,11 +78,11 @@ async function v2ServeLegacyTools(request,env){
 }
 const CANONICAL_ORIGIN="https://toeflhouse.pages.dev";
 
-function staticResponse(request,content,type){
+function staticResponse(request,content,type,revision){
   if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{Allow:"GET, HEAD"}});
   return new Response(request.method==="HEAD"?null:content,{status:200,headers:{
     "Content-Type":type,
-    "Cache-Control":"public, max-age=3600, immutable",
+    "Cache-Control":revision&&new URL(request.url).searchParams.get("v")===revision?"public, max-age=31536000, immutable":"public, max-age=3600, immutable",
     "X-Content-Type-Options":"nosniff",
     "Cross-Origin-Resource-Policy":"same-origin",
     "X-Robots-Tag":"noindex, nofollow, noarchive"
