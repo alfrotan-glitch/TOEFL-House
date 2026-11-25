@@ -1,0 +1,52 @@
+name: Mobile performance candidate acceptance
+on:
+  push:
+    branches: [qa/perf-fa030bf-20261126]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TOEFL_QA_BASE: https://66483f27.toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fa030bfd9652590ea9b774491f222dc08ef40771
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify source and revision
+        run: |
+          test "$(git rev-parse HEAD)" = "fa030bfd9652590ea9b774491f222dc08ef40771"
+          node --input-type=module -e 'import assert from "node:assert/strict"; const root=await fetch(process.env.TOEFL_QA_BASE+"/"); assert.equal(root.status,200); const h=await root.text();assert.ok(h.includes("a4e6220effe1"));assert.ok(h.includes("Google Meet"));for(const f of ["site.css","site.js"]){const r=await fetch(process.env.TOEFL_QA_BASE+"/__th/v2/"+f+"?v=a4e6220effe1");assert.equal(r.status,200);assert.match(r.headers.get("cache-control"),/max-age=31536000/);}'
+      - run: node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - run: node cloudflare/site-v2/accessibility-audit.cjs
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compare production and preview under identical mobile simulation
+        run: |
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            for target in production preview; do
+              base="https://toeflhouse.pages.dev"
+              if [ "$target" = preview ]; then base="https://66483f27.toeflhouse.pages.dev"; fi
+              npx --yes lighthouse@12.8.2 "$base/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$target-$locale.json" --quiet
+            done
+          done
+          node -e 'for(const locale of ["en","fa","ps"]){for(const target of ["production","preview"]){const r=require("./reports/"+target+"-"+locale+".json");console.log(JSON.stringify({locale,target,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue,bytes:r.audits["total-byte-weight"].numericValue}));}}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-performance-comparison
+          path: reports/
