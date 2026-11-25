@@ -150,7 +150,9 @@ var semesterCover=document.querySelector(".semester-video-cover");
 if(semesterVideo&&semesterCover){
  semesterCover.hidden=false;
  semesterCover.addEventListener("click",function(){
+  var restoreFocus=document.activeElement===semesterCover;
   semesterCover.hidden=true;
+  if(restoreFocus)semesterVideo.focus();
   try{
    var playback=semesterVideo.play();
    if(playback&&typeof playback.catch==="function")playback.catch(function(){semesterVideo.controls=true;});
