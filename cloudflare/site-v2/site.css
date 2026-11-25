@@ -421,7 +421,7 @@ html[dir=rtl] .ge-stage h4{align-self:flex-start;text-align:start}
 .schedule-popular{display:inline-block;margin-inline-start:8px;padding:3px 10px;border-radius:999px;background:#fdeef0;color:#b1344c;font-size:11px;font-weight:800;white-space:nowrap}
 .schedule-full{display:inline-block;margin-inline-start:8px;padding:3px 10px;border-radius:999px;background:#eef3ef;color:#5b6f73;font-size:11px;font-weight:800;white-space:nowrap}
 .schedule-table tr.is-closed{opacity:.6}
-.schedule-note{margin:18px 0 0;color:#718084;font-size:13px;line-height:1.9}
+.schedule-note{margin:18px 0 0;color:var(--muted);font-size:13px;line-height:1.9}
 .ge-fee-total{margin-top:18px;padding:22px 24px;background:#173944;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:18px;border-radius:11px}
 .ge-fee-total>div{display:flex;flex-direction:column;gap:5px}
 .ge-fee-total>div strong{font-size:15px}
