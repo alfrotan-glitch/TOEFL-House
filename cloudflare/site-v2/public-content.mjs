@@ -16,6 +16,7 @@ async function v2PublicContent(request,env){
   if(!main?.body||!ps?.body||!Number.isInteger(main.revision)||!Number.isInteger(ps.revision))throw Error("Missing published CMS revision");
   const published=JSON.parse(main.body),pashto=JSON.parse(ps.body);
   if(!Array.isArray(published?.locales?.en?.programs)||!Array.isArray(published?.locales?.fa?.programs)||!Array.isArray(pashto?.programs))throw Error("Invalid published content structure");
+  for(const locale of [published.locales.en,published.locales.fa,pashto])v2OnlineProgramCopy(locale);
   const forbidden=new Set(["password","password_hash","password_salt","totp_secret","token_hash",
    "session_token","session_cookie","private_key","api_key","onboarding_invites",
    "staff_users","login_attempts","drafts","cms_draft_recovery_archive","authorization","editor"]);
