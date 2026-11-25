@@ -1,0 +1,26 @@
+name: Exact release preview 39d3042
+on:
+  push:
+    branches: [qa/preview-39d3042-20261126]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TOEFL_QA_BASE: https://f9ef0c5b.toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 39d30424ac9a965170cc0c61f81de58a3e7273ab
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "39d30424ac9a965170cc0c61f81de58a3e7273ab"
+      - name: Check all public routes and protected boundaries
+        run: node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Verify WCAG A and AA
+        run: node cloudflare/site-v2/accessibility-audit.cjs
