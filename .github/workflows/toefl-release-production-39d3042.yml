@@ -1,0 +1,28 @@
+name: Exact release production 39d3042
+on:
+  push:
+    branches: [qa/production-39d3042-20261126]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TOEFL_QA_BASE: https://toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 39d30424ac9a965170cc0c61f81de58a3e7273ab
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify source and production revision
+        run: |
+          test "$(git rev-parse HEAD)" = "39d30424ac9a965170cc0c61f81de58a3e7273ab"
+          node --input-type=module -e 'import assert from "node:assert/strict"; for(const p of ["/","/fa/","/ps/"]){const r=await fetch(process.env.TOEFL_QA_BASE+p,{cache:"no-store"});assert.equal(r.status,200); const h=await r.text();assert.ok(h.includes("8183778abd89"),"Unexpected revision "+p);assert.ok(h.includes("tabindex=\"0\" role=\"region\" aria-labelledby=\"schedule-title\""),"Missing keyboard region "+p);}'
+      - name: Verify all public routes and security boundaries
+        run: node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Verify WCAG A and AA
+        run: node cloudflare/site-v2/accessibility-audit.cjs
