@@ -153,10 +153,11 @@ function v2SemesterCampaign(locale){
 }
 // Keep the legacy online program ID and URL stable; normalize only its public editorial fields.
 function v2OnlineProgramCopy(locale){
+ const editorial=value=>Array.isArray(value)?value.map(editorial):typeof value==="string"?value.replace(/https?:\/\/[^\s<>]+|(?<![\w\-./])Zoom(?![\w\-/]|\.(?:us|com)\b)|زوم/gi,match=>/^https?:\/\//i.test(match)?match:"Google Meet"):value;
  const program=locale?.programs?.find(p=>p.id==="online-individual-zoom");
- if(!program)return;
- const editorial=value=>Array.isArray(value)?value.map(editorial):typeof value==="string"?value.replace(/(?<![\w\-./])Zoom(?![\w\-./])/gi,"Google Meet").replace(/زوم/g,"Google Meet"):value;
- for(const key of ["title","summary","details","duration","highlights","levels","schedule","recommendedFor","recommended"])if(Object.hasOwn(program,key))program[key]=editorial(program[key]);
+ if(program)for(const key of ["title","summary","details","duration","highlights","levels","schedule","recommendedFor","recommended"])if(Object.hasOwn(program,key))program[key]=editorial(program[key]);
+ const faq=Array.isArray(locale?.faq)?locale.faq:locale?.faq?.items;
+ if(Array.isArray(faq))for(const item of faq)if(/آنلاین|online|آنلاين|Zoom|زوم/i.test(item.q||item.question||""))for(const key of ["q","question","a","answer"])if(Object.hasOwn(item,key))item[key]=editorial(item[key]);
 }
 function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
 function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
