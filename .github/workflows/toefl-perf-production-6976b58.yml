@@ -1,0 +1,78 @@
+name: Production performance and responsive acceptance
+on:
+  push:
+    branches: [qa/production-perf-6976b58]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TOEFL_QA_BASE: https://toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 6976b58a6860e0576abb59dbf557ded03931bc77
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact release
+        run: |
+          test "$(git rev-parse HEAD)" = "6976b58a6860e0576abb59dbf557ded03931bc77"
+          node --input-type=module -e 'import assert from "node:assert/strict"; for(const p of ["/","/fa/","/ps/"]){const r=await fetch(process.env.TOEFL_QA_BASE+p);assert.equal(r.status,200,p);const h=await r.text();assert.ok(h.includes("a4e6220effe1"),p);assert.ok(h.includes("Google Meet"),p);}'
+      - run: node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - run: node cloudflare/site-v2/accessibility-audit.cjs
+      - name: Verify responsive geometry, heading, language and brand at four widths
+        run: |
+          node <<'NODE'
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          const assert=require("node:assert/strict");
+          (async()=>{
+            const base=process.env.TOEFL_QA_BASE;
+            const xml=await (await fetch(base+"/sitemap.xml")).text();
+            const paths=[...new Set([...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(m=>new URL(m[1]).pathname))];
+            assert.ok(paths.length>=39);
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            const issues=[];let checked=0;
+            try{
+              for(const width of [320,390,768,1440]){
+                const page=await browser.newPage({viewport:{width,height:900}});
+                for(const path of paths){
+                  try{
+                    const response=await page.goto(base+path,{waitUntil:"domcontentloaded",timeout:30000});
+                    await page.evaluate(()=>document.fonts.ready);
+                    const v=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth-innerWidth,h1:document.querySelectorAll("h1").length,lang:document.documentElement.lang,dir:document.documentElement.dir,brand:getComputedStyle(document.documentElement).getPropertyValue("--red").trim()}));
+                    const lang=path.startsWith("/fa/")?"fa-AF":path.startsWith("/ps/")?"ps-AF":"en";
+                    if(response.status()!==200||v.overflow>1||v.h1!==1||v.lang!==lang||v.dir!==(lang==="en"?"ltr":"rtl")||v.brand!=="#c00818")issues.push({path,width,status:response.status(),...v});
+                    checked++;
+                  }catch(e){issues.push({path,width,error:String(e)});}
+                }
+                await page.close();
+              }
+            }finally{await browser.close();}
+            console.log(JSON.stringify({checked,issues},null,2));assert.deepEqual(issues,[]);
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            npx --yes lighthouse@12.8.2 "https://toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale.json" --quiet
+          done
+          node -e 'for(const locale of ["en","fa","ps"]){const r=require("./reports/"+locale+".json");console.log(JSON.stringify({locale,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue}));}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-performance-6976b58
+          path: reports/
