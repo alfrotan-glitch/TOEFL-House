@@ -884,3 +884,29 @@ test("TOEFL Listening tasks render as separate lines in English; FA/PS bilingual
  const ps=await worker.fetch(new Request("https://toeflhouse.pages.dev/ps/courses/toefl-preparation/"),env());
  assert.ok((await ps.text()).includes("Listen to an Announcement او Listen to an Academic Talk"),"PS bilingual line must be untouched");
 });
+
+
+test("Google Meet copy across three languages preserves legacy online routes and identifiers",async()=>{
+ const m=structuredClone(main),p=structuredClone(ps);
+ for(const locale of [m.locales.en,m.locales.fa,p]){
+  const program=locale.programs.find(x=>x.id==="online-individual-zoom");
+  program.title="Private Zoom classes";program.summary="Live Zoom lessons";program.details="Live Zoom lessons";program.highlights=["Zoom practice"];
+ }
+ for(const prefix of ["/","/fa/","/ps/"]){
+  for(const path of [prefix,prefix+"admissions/?program=online-individual-zoom",prefix+"courses/online-individual-zoom/"]){
+   const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env(m,p));
+   assert.equal(r.status,200,path);
+   const h=await r.text();
+   assert.match(h,/Google Meet/,path);
+   assert.doesNotMatch(h,/(?<![\w-])Zoom(?![\w-])/i,path);
+   if(path.endsWith("online-individual-zoom/"))assert.match(h,/online-individual-zoom/);
+  }
+ }
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env(m,p));
+ assert.equal(r.status,200);
+ const data=await r.json();
+ for(const locale of Object.values(data.locales)){
+  const item=locale.programs.find(x=>x.id==="online-individual-zoom");
+  assert.equal(item.title,"Private Google Meet classes");assert.equal(item.highlights[0],"Google Meet practice");
+ }
+});
