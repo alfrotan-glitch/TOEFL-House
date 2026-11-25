@@ -1,0 +1,48 @@
+name: Published brand release acceptance
+on:
+  push:
+    branches: [qa/production-brand-957e7c7]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TOEFL_QA_BASE: https://toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 957e7c7730162e4fe6ee07bb70faa2b6bd6f5c0a
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify published source and platform
+        run: |
+          test "$(git rev-parse HEAD)" = "957e7c7730162e4fe6ee07bb70faa2b6bd6f5c0a"
+          node --input-type=module -e 'import assert from "node:assert/strict"; for(const prefix of ["/","/fa/","/ps/"]){for(const path of [prefix,prefix+"admissions/",prefix+"courses/online-individual-zoom/"]){const r=await fetch(process.env.TOEFL_QA_BASE+path);assert.equal(r.status,200,path);const h=await r.text();assert.ok(h.includes("Google Meet"),path);assert.ok(h.includes("58c4444cbb6d"),path);assert.doesNotMatch(h,/(?<![\\w-])Zoom(?![\\w-])/i,path);}}'
+      - run: node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - run: node cloudflare/site-v2/accessibility-audit.cjs
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Measure mobile Lighthouse on all three languages
+        run: |
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            npx --yes lighthouse@12.8.2 "https://toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale.json" --quiet
+          done
+          node -e 'for(const locale of ["en","fa","ps"]){const r=require("./reports/"+locale+".json");console.log(JSON.stringify({locale,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue}));}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: brand-release-lighthouse
+          path: reports/
