@@ -111,3 +111,4 @@ html[dir=rtl] .notfound-section h1{line-height:1.55}.notfound-section p{color:va
 
 .hero-actions .button-primary{background:#fff;color:var(--red-dark)}.hero-actions .button-primary:hover{background:#fde8e9}.hero-actions .button-quiet{background:transparent;border-color:#ffffff80;color:#fff}.hero-actions .button-quiet:hover{background:#690912}.hero a:focus-visible{outline-color:#fff}.hero-art .photo-side{margin-top:10px}
 @media(prefers-reduced-motion:no-preference){.photo-label{animation:hero-caption .55s var(--ease)}@keyframes hero-caption{from{transform:translateY(12px)}to{transform:translateY(0)}}}
+@media(max-width:460px){.eap-editorial .eap-hero .breadcrumbs{margin-bottom:20px}.eap-editorial .eap-program-name{margin-bottom:12px}.eap-editorial .eap-actions{display:grid;grid-template-columns:1fr}.eap-editorial .eap-lead{margin-bottom:20px;line-height:1.8}.eap-editorial .eap-hero-note{margin-top:16px}}
