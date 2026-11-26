@@ -1,73 +1,62 @@
-name: Verify final candidate repeated Lighthouse and read-only safety
+name: Canonical V3 English performance repeat and safe-read verification
 on:
   push:
-    branches: [qa/final-perf-confirm-8406d04]
+    branches: [qa/production-en-perf-repeat-d80e575]
 permissions:
   contents: read
 jobs:
-  repeat-measurement:
+  repeat-live-en:
     runs-on: ubuntu-latest
-    timeout-minutes: 22
+    timeout-minutes: 14
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Confirm exact isolated candidate and read-only security controls
+      - name: Confirm canonical indexability, 39 routes and read-only public checks
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          const base='https://98b71bb9.toeflhouse.pages.dev';
+          const base='https://toeflhouse.pages.dev';
           for(const prefix of ['/','/fa/','/ps/']){
-            const r=await fetch(base+prefix);const html=await r.text();
+            const r=await fetch(base+prefix),html=await r.text();
             assert.equal(r.status,200,prefix);
-            assert.match(r.headers.get('x-robots-tag')||'',/noindex/i,prefix);
-            assert.ok(html.includes('628767df8e41'),prefix);
-            assert.ok(html.includes('Google Meet'),prefix+' online copy');
+            assert.equal(r.headers.get('x-robots-tag'),null,'Production must be indexable');
+            assert.ok(html.includes('628767df8e41'),'Published revision changed');
+            assert.ok(html.includes('Google Meet'),'Learning format copy missing');
           }
-          const xml=await (await fetch(base+'/sitemap.xml')).text();
+          const xml=await(await fetch(base+'/sitemap.xml')).text();
           assert.equal((xml.match(/<loc>/g)||[]).length,39);
-          for(const path of ['/admissions/','/fa/admissions/','/ps/admissions/']){
-            const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:''});
-            assert.equal(r.status,403,path+' must reject writes on preview');
-            const get=await fetch(base+path);
-            assert.equal(get.status,200,path);
+          for(const p of ['/admissions/','/fa/admissions/','/ps/admissions/']){
+            assert.equal((await fetch(base+p)).status,200,p);
+            const head=await fetch(base+p,{method:'HEAD'});
+            assert.equal(head.status,200,p);
+            assert.equal(await head.text(),'');
           }
-          for(const path of ['/','/fa/','/ps/']){
-            const r=await fetch(base+path,{method:'HEAD'});
-            assert.equal(r.status,200,path); assert.equal(await r.text(),'');
-          }
-          console.log('39-route sitemap, locale copy, preview noindex, POST rejection, GET/HEAD safety passed');
+          console.log('Canonical 39 routes, indexing, three locales and admissions GET/HEAD passed; no submissions');
           NODE
-      - name: Repeat Lighthouse three times per locale for stable performance assessment
+      - name: Repeat canonical English Lighthouse three times
         run: |
           export CHROME_PATH=/usr/bin/google-chrome
           mkdir -p reports
-          for locale in en fa ps; do
-            suffix=""
-            if [ "$locale" != en ]; then suffix="$locale/"; fi
-            for n in 1 2 3; do
-              npx --yes lighthouse@12.8.2 "https://98b71bb9.toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale-$n.json" --quiet
-            done
+          for n in 1 2 3; do
+            npx --yes lighthouse@12.8.2 "https://toeflhouse.pages.dev/" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/en-$n.json" --quiet
           done
           node <<'NODE'
           const fs=require('node:fs'),assert=require('node:assert/strict');
-          const summary={};
-          for(const locale of ['en','fa','ps']){
-            const readings=[1,2,3].map(n=>{
-              const r=JSON.parse(fs.readFileSync('reports/'+locale+'-'+n+'.json','utf8'));
-              return {performance:r.categories.performance.score,accessibility:r.categories.accessibility.score,bestPractices:r.categories['best-practices'].score,LCP:r.audits['largest-contentful-paint'].numericValue,TBT:r.audits['total-blocking-time'].numericValue,SEO:r.categories.seo.score};
-            });
-            const med=k=>readings.map(x=>x[k]).sort((a,b)=>a-b)[1];
-            summary[locale]={readings,medianPerformance:med('performance'),medianLCP:med('LCP'),medianTBT:med('TBT')};
-            assert.ok(readings.every(x=>x.accessibility>=0.95&&x.bestPractices>=0.95),locale+' accessibility/best practices failure');
-            assert.ok(med('performance')>=0.90,locale+' median performance is too low');
-            assert.ok(med('TBT')<=350,locale+' median blocking time too high');
-          }
-          fs.writeFileSync('reports/summary.json',JSON.stringify(summary,null,2));
+          const data=[1,2,3].map(n=>{
+            const x=JSON.parse(fs.readFileSync('reports/en-'+n+'.json','utf8'));
+            return {performance:x.categories.performance.score,seo:x.categories.seo.score,accessibility:x.categories.accessibility.score,bestPractices:x.categories['best-practices'].score,TBT:x.audits['total-blocking-time'].numericValue,LCP:x.audits['largest-contentful-paint'].numericValue};
+          });
+          const median=k=>data.map(x=>x[k]).sort((a,b)=>a-b)[1];
+          const summary={runs:data,medianPerformance:median('performance'),medianTBT:median('TBT'),medianLCP:median('LCP')};
           console.log(JSON.stringify(summary,null,2));
+          fs.writeFileSync('reports/summary.json',JSON.stringify(summary,null,2));
+          assert.ok(data.every(x=>x.seo===1&&x.accessibility===1&&x.bestPractices===1),'Canonical SEO/A11y/best-practice failure');
+          assert.ok(median('performance')>=0.90,'Canonical EN performance median below threshold');
+          assert.ok(median('TBT')<=350,'Canonical EN TBT median too high');
           NODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: final-candidate-repeated-lighthouse
+          name: canonical-v3-en-repeat-evidence
           path: reports/
