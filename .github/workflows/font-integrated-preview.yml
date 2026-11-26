@@ -23,7 +23,7 @@ jobs:
           node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch(process.env.TOEFL_QA_BASE);assert.equal(r.status,200);assert.ok((await r.text()).includes("628767df8e41"));'
           node cloudflare/site-v2/build.mjs
           echo '398eaabfbfa4e75a6f88db7921f5035a44ed93c856ce45fe47c36798871a8a28  cloudflare/site-v2/dist/_worker.js' | sha256sum -c -
-          node --input-type=module -e 'import assert from "node:assert/strict";for(const p of ["/","/fa/","/ps/"]){const r=await fetch(process.env.TOEFL_QA_BASE+p);const h=await r.text();assert.equal(r.status,200);assert.equal(h.includes(\x27rel="preload" href="/__th/v2/font/vazirmatn-33.003.woff2"\x27),p==="/fa/");}'
+          node --input-type=module -e 'import assert from "node:assert/strict";for(const p of ["/","/fa/","/ps/"]){const r=await fetch(process.env.TOEFL_QA_BASE+p);const h=await r.text();assert.equal(r.status,200);const q=String.fromCharCode(34);assert.equal(h.includes("rel="+q+"preload"+q+" href="+q+"/__th/v2/font/vazirmatn-33.003.woff2"+q),p==="/fa/");}'
           node cloudflare/site-v2/production-full-acceptance.mjs
       - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
       - name: Inspect all public routes in mobile and desktop browser and capture corrected panels
