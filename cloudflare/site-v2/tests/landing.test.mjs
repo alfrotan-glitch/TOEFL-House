@@ -28,6 +28,11 @@ for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","
   assert.match(html,new RegExp('<html lang="'+lang+'" dir="'+dir+'">'));
   assert.equal((html.match(/<h1>/g)||[]).length,1);
   assert.equal((html.match(/class="course-card /g)||[]).length,6);
+  const eapCard=html.match(/<article id="course-academic-english" class="course-card [^"]*">([\s\S]*?)<\/article>/);
+  assert.ok(eapCard,"EAP catalog card must exist");
+  assert.match(eapCard[1],/<bdi class="course-full-name" lang="en" dir="ltr">EAP \(English for Academic Purposes\)<\/bdi>/);
+  assert.ok(eapCard[1].includes('href="'+(route==="/"?"/":route)+'courses/academic-english/"'),"EAP link must retain locale");
+
   assert.match(html,/4 months|۴ ماه|څلور میاشتې/);
   assert.match(html,/v2\/site\.css/);
   assert.match(html,/v2\/site\.js/);

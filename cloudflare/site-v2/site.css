@@ -761,6 +761,28 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .course-featured .course-bottom{border-color:#ffffff3a}
 .course-featured .course-mark{color:#fff;border-color:#ffffff66}
 .course-featured:hover .course-mark,.course-featured:focus-within .course-mark{background:#fff;color:#980616}
+/* Public catalog: institutional editorial hierarchy, not decorative UI. */
+.programs-section .courses-grid{gap:18px}
+.programs-section .course-card{border-block-start:3px solid var(--red);border-radius:10px;min-width:0;box-shadow:0 5px 20px #69091208}
+.programs-section .course-top{margin-bottom:24px}
+.programs-section .course-number{font-size:14px;color:var(--red-dark);font-weight:800}
+.programs-section .course-mark{width:34px;height:34px;color:var(--red-dark);border-color:#e5c7cc}
+.programs-section .course-card h3{font-size:clamp(20px,2vw,26px);line-height:1.35;overflow-wrap:anywhere}
+.programs-section .course-full-name{display:block;font-size:12px;font-weight:700;color:var(--red-dark);line-height:1.5;margin:0 0 10px;text-align:start;overflow-wrap:anywhere}
+.programs-section .course-copy{font-size:14px;line-height:1.75;max-width:none;color:#55555b}
+.programs-section .course-bottom{gap:10px;flex-wrap:wrap;align-items:center;padding-top:16px}
+.programs-section .course-bottom>span{min-width:0}
+.programs-section .course-bottom small{font-size:11px;color:#6a6568}
+.programs-section .course-bottom strong{font-size:12px}
+.programs-section .course-bottom a{display:inline-flex;align-items:center;gap:5px;min-height:44px;font-size:13px;white-space:normal}
+.programs-section .course-featured{border-block-start-color:#f8d7dc}
+.programs-section .course-featured .course-number,.programs-section .course-featured .course-mark,.programs-section .course-featured .course-copy,.programs-section .course-featured .course-bottom small{color:#fff}
+.programs-section .course-featured .course-mark{border-color:#ffffff66}
+.programs-section .course-featured:hover .course-mark,.programs-section .course-featured:focus-within .course-mark{color:var(--red-dark)}
+@media(max-width:760px){.programs-section .courses-grid{gap:12px}.programs-section .course-top{margin-bottom:17px}.programs-section .course-copy{font-size:13px}}
+@media(prefers-reduced-motion:reduce){.programs-section .course-card,.programs-section .course-mark{transition:none;transform:none}.programs-section .course-card:hover,.programs-section .course-card:hover .course-mark,.programs-section .course-card:focus-within .course-mark{transform:none}}
+@media(forced-colors:active){.programs-section .course-card,.programs-section .course-mark{border-color:CanvasText}.programs-section .course-full-name{color:CanvasText}}
+
 .online-panel{background:linear-gradient(125deg,var(--red-dark),var(--red));border-radius:16px}
 .online-symbol{color:#fff}
 .online-copy p:not(.eyebrow){color:#fff}
