@@ -1,0 +1,120 @@
+name: Narrow-screen catalog and EAP preview acceptance
+on:
+  push:
+    branches: [qa/catalog-e603abc]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TOEFL_QA_BASE: https://31c3aa7c.toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e603abc794635207f64224745709208e9b223d8a
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm read-only preview revision and all public routes
+        run: |
+          test "$(git rev-parse HEAD)" = "e603abc794635207f64224745709208e9b223d8a"
+          node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch(process.env.TOEFL_QA_BASE);assert.equal(r.status,200);assert.ok((await r.text()).includes("89212087c5e8"));'
+          node cloudflare/site-v2/build.mjs
+          echo 'af804c495d47af9cb7ea5ab531c518e46d17f840017ee4b125b7ff986584981e  cloudflare/site-v2/dist/_worker.js' | sha256sum -c -
+          node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Inspect all public routes in mobile and desktop browser and capture corrected panels
+        run: |
+          mkdir -p reports
+          node <<'NODE'
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          const axe=require("/tmp/toefl-accessibility/node_modules/axe-core");
+          const assert=require("node:assert/strict");
+          (async()=>{
+            const base=process.env.TOEFL_QA_BASE;
+            const xml=await (await fetch(base+"/sitemap.xml")).text();
+            const paths=[...new Set([...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(m=>new URL(m[1]).pathname))];
+            assert.ok(paths.length>=39);
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            const issues=[];let checked=0,axeChecked=0,panels=0;
+            try{
+              for(const width of [320,390,768,1440]){
+                const page=await browser.newPage({viewport:{width,height:900},bypassCSP:true});
+                await page.route("https://toefl-house-conversions.alfrotan2.workers.dev/**",r=>r.fulfill({status:204,body:""}));
+                await page.route("https://wa.me/**",r=>r.abort());
+                for(const path of paths){
+                  try{
+                    const response=await page.goto(base+path,{waitUntil:"domcontentloaded",timeout:30000});
+                    await page.evaluate(()=>document.fonts.ready);
+                    const state=await page.evaluate(()=>{
+                      const summary=document.querySelector(".detail-summary"),online=document.querySelector(".online-panel"),footer=document.querySelector(".footer");
+                      const read=(element,pseudo)=>element?getComputedStyle(element,pseudo):null;
+                      return {lang:document.documentElement.lang,dir:document.documentElement.dir,overflow:document.documentElement.scrollWidth-innerWidth,h1:document.querySelectorAll("h1").length,red:getComputedStyle(document.documentElement).getPropertyValue("--red").trim(),summary:summary?{background:read(summary).backgroundColor,text:read(summary.querySelector("strong")).color,check:read(summary.querySelector("li"),"::before")?.backgroundColor}:null,online:read(online)?.backgroundImage||null,footer:read(footer)?.backgroundColor||null};
+                    });
+                    const lang=path.startsWith("/fa/")?"fa-AF":path.startsWith("/ps/")?"ps-AF":"en";
+                    if(state.lang!==lang||state.dir!==(lang==="en"?"ltr":"rtl")||response.status()!==200||state.overflow>1||state.h1!==1||state.red!=="#c00818")issues.push({path,width,kind:"geometry",state});
+                    if(state.summary&&(state.summary.background!=="rgb(255, 255, 255)"||state.summary.text!=="rgb(36, 36, 39)"||(state.summary.check&&state.summary.check!=="rgb(192, 8, 24)")))issues.push({path,width,kind:"summary brand",state});
+                    if(state.online&&(!state.online.includes("rgb(152, 6, 22)")||!state.online.includes("rgb(192, 8, 24)")))issues.push({path,width,kind:"online brand",state});
+                    if(state.footer&&state.footer!=="rgb(152, 6, 22)")issues.push({path,width,kind:"footer brand",state});
+                    if(state.summary||state.online)panels++;
+                    if(["/","/fa/","/ps/"].includes(path)){
+                      const cards=await page.evaluate(()=>{const cards=[...document.querySelectorAll(".course-card")],name=document.querySelector(".course-full-name");return {count:cards.length,name:name?.textContent,lang:name?.lang,dir:name?.dir,clipped:cards.some(e=>e.scrollWidth>e.clientWidth+1),overflowDetails:cards.filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>({id:e.id,scroll:e.scrollWidth,client:e.clientWidth,children:[...e.querySelectorAll('*')].filter(n=>n.scrollWidth>n.clientWidth+1&&n.clientWidth>0).map(n=>({class:n.className,scroll:n.scrollWidth,client:n.clientWidth,text:n.textContent.slice(0,90)}))})),smallLinks:cards.some(e=>e.querySelector(".course-bottom a").getBoundingClientRect().height<44)}});
+                      if(cards.count!==6||cards.name!=="EAP (English for Academic Purposes)"||cards.lang!=="en"||cards.dir!=="ltr"||cards.clipped||cards.smallLinks)issues.push({path,width,kind:"catalog",cards});
+                      await page.locator(".courses-grid").screenshot({path:"reports/catalog-"+lang+"-"+width+".png",animations:"disabled"});
+                    }
+                    if(path.endsWith("/courses/academic-english/")){
+                      const eap=await page.evaluate(()=>{const name=document.querySelector(".eap-program-name"),hero=document.querySelector(".eap-hero-visual"),facts=[...document.querySelectorAll(".eap-fact")],rect=hero?.getBoundingClientRect();return {name:name?.textContent,lang:name?.lang,dir:name?.dir,count:facts.length,heroClipped:hero?hero.scrollWidth>hero.clientWidth:false,clipped:facts.some(e=>e.scrollWidth>e.clientWidth+1),bg:hero?getComputedStyle(hero).backgroundColor:null};});
+                      if(eap.name!=="English for Academic Purposes (EAP)"||eap.lang!=="en"||eap.dir!=="ltr"||eap.count!==4||eap.clipped||eap.bg!=="rgb(152, 6, 22)")issues.push({path,width,kind:"EAP editorial",eap});
+                      await page.locator(".eap-hero").screenshot({path:"reports/eap-"+lang+"-"+width+".png",animations:"disabled"});
+                    }
+                    if(width===390){
+                      await page.addScriptTag({content:axe.source});
+                      const violations=await page.evaluate(async()=>{const out=await axe.run(document,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21a","wcag21aa"]},rules:{region:{enabled:false}}});return out.violations.filter(v=>["critical","serious"].includes(v.impact)).map(v=>({id:v.id,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary?.slice(0,400)}))}));});
+                      axeChecked++;if(violations.length)issues.push({path,width,kind:"accessibility",violations});
+                    }
+                    if(path==="/"||path==="/courses/general-english/"){
+                      const selector=path==="/"?".online-panel":".detail-summary";
+                      await page.locator(selector).screenshot({path:"reports/"+(path==="/"?"online":"duration")+"-"+width+".png",animations:"disabled"});
+                    }
+                    checked++;
+                  }catch(e){issues.push({path,width,error:String(e)});}
+                }
+                await page.close();
+              }
+            }finally{await browser.close();}
+            assert.equal(checked,paths.length*4);assert.equal(axeChecked,paths.length);
+            const end=await fetch(base);assert.equal(end.status,200);assert.ok((await end.text()).includes("89212087c5e8"),"Preview revision changed");
+            const result={checked,axeChecked,panels,issues};require("node:fs").writeFileSync("reports/results.json",JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));assert.deepEqual(issues,[]);
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrated-catalog-responsive-evidence
+          path: reports/
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch("https://31c3aa7c.toeflhouse.pages.dev/");assert.equal(r.status,200);assert.ok((await r.text()).includes("89212087c5e8"));'
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          for locale in en fa ps; do
+            suffix="courses/academic-english/"
+            if [ "$locale" != en ]; then suffix="$locale/courses/academic-english/"; fi
+            npx --yes lighthouse@12.8.2 "https://31c3aa7c.toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale.json" --quiet
+          done
+          node -e 'for(const locale of ["en","fa","ps"]){const r=require("./reports/"+locale+".json");console.log(JSON.stringify({locale,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue}));}'
+      - name: Confirm release unchanged after measurement
+        run: node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch("https://31c3aa7c.toeflhouse.pages.dev/");assert.equal(r.status,200);assert.ok((await r.text()).includes("89212087c5e8"));'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrated-catalog-lighthouse
+          path: reports/
