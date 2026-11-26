@@ -29,6 +29,10 @@ for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","
   assert.match(html,new RegExp('<html lang="'+lang+'" dir="'+dir+'">'));
   assert.equal((html.match(/<h1>/g)||[]).length,1);
   assert.equal((html.match(/class="course-card /g)||[]).length,6);
+  const eapCard=html.match(/<article id="course-academic-english" class="course-card [^"]*">([\s\S]*?)<\/article>/);
+  assert.ok(eapCard,"EAP catalog card must exist");
+  assert.match(eapCard[1],/<bdi class="course-full-name" lang="en" dir="ltr">EAP \(English for Academic Purposes\)<\/bdi>/);
+  assert.ok(eapCard[1].includes('href="'+(route==="/"?"/":route)+'courses/academic-english/"'),"EAP link must retain locale");
   assert.match(html,/4 months|۴ ماه|څلور میاشتې/);
   assert.match(html,/v2\/site\.css/);
   assert.match(html,/v2\/site\.js/);
@@ -768,7 +772,7 @@ test("Course cards use concise localized headings, whole-card native hit areas, 
   assert.equal(response.status,200);
   const page=await response.text();
   assert.ok(page.includes('<meta property="og:locale" content="'+ogLocale+'">'),root+" missing correct OpenGraph locale");
-  assert.ok(page.includes('alt="'+photoAlt+'" loading="lazy"'),root+" campus image requires meaningful native language alt");
+  assert.ok(page.includes('alt="'+photoAlt+'" loading="'+(root==="/fa/"?"eager":"lazy")+'"'),root+" campus image requires meaningful native language alt");
   const card=page.match(/<article id="course-special-speaking" class="course-card [^"]*">([\s\S]*?)<\/article>/);
   assert.ok(card,root+" missing Special Speaking card");
   assert.ok(card[1].includes("<h3>"+speakingTitle+"</h3>"),root+" course card title too verbose");
@@ -968,4 +972,86 @@ test("Shared logo preserves exact artwork, versioned caching and preview indexin
  assert.match(old.headers.get("cache-control"),/max-age=3600/);
  const preview=await worker.fetch(new Request(url.replace("https://toeflhouse","https://test-preview.toeflhouse")),env());
  assert.match(preview.headers.get("x-robots-tag"),/noindex/);
+});
+
+test("Catalog text and narrow links can wrap without hiding content",async()=>{
+ const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
+ assert.equal(response.status,200);
+ const css=await response.text();
+ assert.match(css,/\.course-card\{[^}]*min-width:0;overflow-wrap:anywhere/);
+ assert.match(css,/\.course-bottom a\{align-self:flex-start;max-width:100%;flex-wrap:wrap\}/);
+});
+
+test("Signature editorial hero preserves accessible actions, true photography and reduced-motion preference",async()=>{
+ const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
+ const css=await cssResponse.text();
+ assert.match(css,/\.hero\{position:relative;overflow:hidden;background:var\(--red-dark\);color:#fff\}/);
+ assert.match(css,/\.hero-actions \.button-primary\{background:#fff;color:var\(--red-dark\)\}/);
+ assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\.photo-label\{animation:hero-caption/);
+ for(const root of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
+  assert.match(html,/<div class="photo-frame"><img[^>]*alt="[^"]+"/);
+  assert.match(html,/<div class="photo-side"><span>/);
+  assert.doesNotMatch(html,/<div class="photo-accent"/);
+  assert.ok(html.includes('href="'+root+'admissions/"'));
+ }
+});
+
+test("Mobile language style must not terminate the responsive media query prematurely",async()=>{
+ const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
+ const css=await response.text();
+ assert.match(css,/\.mobile-language a\.is-active\{background:var\(--red\);color:#fff\}/);
+ let depth=0;
+ for(const ch of css){if(ch==="{")depth++;if(ch==="}")assert.ok(--depth>=0,"CSS closing brace must have a matching opening brace");}
+ assert.equal(depth,0,"CSS blocks must be balanced");
+});
+
+test("Signature hero keeps compact mobile spacing and fluid trilingual typography",async()=>{
+ const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
+ assert.match(css,/\.hero-grid\{padding-block:28px 40px;gap:22px\}/);
+ assert.match(css,/html\[dir=rtl\] \.hero h1\{font-size:clamp\(30px,8\.7vw,35px\)\}/);
+ assert.match(css,/\.hero-actions \.button\{font-size:12px;min-height:52px/);
+});
+
+test("Dari homepage discovers its pinned font early without preloading it in other locales",async()=>{
+ for(const root of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
+  const marker='<link rel="preload" href="/__th/v2/font/vazirmatn-33.003.woff2" as="font" type="font/woff2" crossorigin>';
+  if(root==="/fa/"){
+   assert.ok(html.includes(marker));
+   assert.ok(html.indexOf(marker)<html.indexOf('rel="stylesheet"'));
+  }else assert.ok(!html.includes(marker));
+ }
+});
+
+test("Dari LCP photo is eagerly requested while other home locales retain desktop-only preload",async()=>{
+ for(const root of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
+  const hero=html.match(/<div class="photo-frame">(<img[^>]+>)/)?.[1];
+  assert.ok(hero);
+  const imagePreload=html.match(/<link rel="preload"[^>]*as="image"[^>]*>/)?.[0];
+  assert.ok(imagePreload);
+  if(root==="/fa/"){
+   assert.match(hero,/loading="eager" fetchpriority="high"/);
+   assert.doesNotMatch(imagePreload,/media=/);
+  }else{
+   assert.match(hero,/loading="lazy"/);
+   assert.match(imagePreload,/media="\(min-width: 761px\)"/);
+  }
+ }
+});
+
+test("Campus photo describes only a real asset in responsive image markup",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
+  assert.equal(response.status,200,prefix);
+  const html=await response.text();
+  const image=html.match(/<div class="photo-frame"><img\b[^>]*>/);
+  assert.ok(image,"Campus hero image missing: "+prefix);
+  assert.match(image[0],/src="\/assets\/aistudio\/FB_IMG_1793645643808_dad823ce\.jpg"/);
+  assert.doesNotMatch(image[0],/\bsrcset=|\bsizes=/,"Do not claim nonexistent derivative images");
+  const preloads=[...html.matchAll(/<link\b[^>]*rel="preload"[^>]*as="image"[^>]*>/g)];
+  for(const preload of preloads)assert.doesNotMatch(preload[0],/\bimagesrcset=|\bimagesizes=/);
+  if(prefix==="/fa/")assert.match(image[0],/loading="eager" fetchpriority="high"/);
+ }
 });
