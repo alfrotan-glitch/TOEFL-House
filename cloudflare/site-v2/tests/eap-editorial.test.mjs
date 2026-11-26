@@ -15,10 +15,10 @@ test("EAP editorial identity exposes full English name in each locale and retain
   assert.ok(h.includes(root+"admissions/?program=academic-english"));
  }
 });
-test("Editorial rules are isolated and motion is preference-gated",async()=>{
+test("Academic fact grid is shared and editorial motion is preference-gated",async()=>{
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env);
  assert.equal(r.status,200);
  const css=await r.text();
- assert.match(css,/\.eap-editorial \.eap-facts\{[^}]*gap:1px/);
+ assert.match(css,/\.eap-facts\{[^}]*gap:1px/);
  assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\.eap-editorial \.eap-faq-plus\{transition:transform/);
 });
