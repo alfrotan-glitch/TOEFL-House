@@ -1,0 +1,88 @@
+name: Shared brand asset acceptance
+on:
+  push:
+    branches: [qa/shared-brand-a84ac32]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TOEFL_QA_BASE: https://fef30261.toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a84ac327a3dd854877224cfa7c60e22d6c6e34e7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: test "$(git rev-parse HEAD)" = "a84ac327a3dd854877224cfa7c60e22d6c6e34e7"
+      - run: node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Verify original artwork, shared asset, HTML savings and real browser rendering
+        run: |
+          node <<'NODE'
+          const assert=require("node:assert/strict"),crypto=require("node:crypto");
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          (async()=>{
+            const base=process.env.TOEFL_QA_BASE,prod="https://toeflhouse.pages.dev",asset="/__th/v2/brand.webp?v=753895f6e945";
+            const r=await fetch(base+asset);
+            assert.equal(r.status,200);
+            assert.equal(r.headers.get("content-type"),"image/webp");
+            assert.match(r.headers.get("cache-control"),/max-age=31536000/);
+            assert.match(r.headers.get("x-robots-tag"),/noindex/);
+            assert.equal(crypto.createHash("sha256").update(Buffer.from(await r.arrayBuffer())).digest("hex"),"753895f6e9453eb62d4ee6feab020570d0c4113ac8263a417e6588fe55560e1e");
+            const xml=await (await fetch(base+"/sitemap.xml")).text();
+            const paths=[...new Set([...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(m=>new URL(m[1]).pathname))];
+            assert.equal(paths.length,39);
+            let saved=0;
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            try{
+              const page=await browser.newPage({viewport:{width:390,height:844}});
+              for(const path of paths){
+                const [a,b]=await Promise.all([fetch(prod+path),fetch(base+path)]);
+                const [old,html]=await Promise.all([a.text(),b.text()]);
+                assert.equal(b.status,200,path);
+                assert.ok(html.includes('rel="icon" href="'+asset+'"'),path);
+                assert.ok(html.includes('src="'+asset+'"'),path);
+                assert.ok(!html.includes("data:image/webp;base64,"),path);
+                const delta=Buffer.byteLength(old)-Buffer.byteLength(html);
+                assert.ok(delta>30000,path+" raw HTML savings "+delta);
+                saved+=delta;
+                await page.goto(base+path,{waitUntil:"domcontentloaded"});
+                const img=page.locator(".site-header .brand img");
+                await img.evaluate(el=>el.decode());
+                assert.ok(await img.evaluate(el=>el.naturalWidth>0&&el.naturalHeight>0),path);
+              }
+            }finally{await browser.close();}
+            console.log(JSON.stringify({checked:paths.length,rawHtmlSavedAcrossRoutes:saved,meanRawHtmlSaved:Math.round(saved/paths.length),logoBytes:13814}));
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - run: node cloudflare/site-v2/accessibility-audit.cjs
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compare three languages with identical Lighthouse settings
+        run: |
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            for target in production preview; do
+              base="https://toeflhouse.pages.dev"
+              if [ "$target" = preview ]; then base="https://fef30261.toeflhouse.pages.dev"; fi
+              npx --yes lighthouse@12.8.2 "$base/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$target-$locale.json" --quiet
+            done
+          done
+          node -e 'for(const locale of ["en","fa","ps"]){for(const target of ["production","preview"]){const r=require("./reports/"+target+"-"+locale+".json");console.log(JSON.stringify({locale,target,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue,bytes:r.audits["total-byte-weight"].numericValue}));}}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shared-logo-performance
+          path: reports/
