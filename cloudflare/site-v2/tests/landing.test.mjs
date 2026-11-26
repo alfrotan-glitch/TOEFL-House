@@ -981,3 +981,18 @@ test("Catalog text and narrow links can wrap without hiding content",async()=>{
  assert.match(css,/\.course-card\{[^}]*min-width:0;overflow-wrap:anywhere/);
  assert.match(css,/\.course-bottom a\{align-self:flex-start;max-width:100%;flex-wrap:wrap\}/);
 });
+
+test("Signature editorial hero preserves accessible actions, true photography and reduced-motion preference",async()=>{
+ const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
+ const css=await cssResponse.text();
+ assert.match(css,/\.hero\{position:relative;overflow:hidden;background:var\(--red-dark\);color:#fff\}/);
+ assert.match(css,/\.hero-actions \.button-primary\{background:#fff;color:var\(--red-dark\)\}/);
+ assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\.photo-label\{animation:hero-caption/);
+ for(const root of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
+  assert.match(html,/<div class="photo-frame"><img[^>]*alt="[^"]+"/);
+  assert.match(html,/<div class="photo-side"><span>/);
+  assert.doesNotMatch(html,/<div class="photo-accent"/);
+  assert.ok(html.includes('href="'+root+'admissions/"'));
+ }
+});
