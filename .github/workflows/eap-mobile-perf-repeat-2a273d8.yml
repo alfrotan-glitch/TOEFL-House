@@ -1,0 +1,76 @@
+name: EAP mobile preview repeated Lighthouse and read-only safety
+on:
+  push:
+    branches: [qa/eap-mobile-perf-repeat-2a273d8]
+permissions:
+  contents: read
+jobs:
+  repeat-measurement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm exact isolated candidate and read-only security controls
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          const base='https://94a27559.toeflhouse.pages.dev';
+          for(const prefix of ['/','/fa/','/ps/']){
+            const r=await fetch(base+prefix);const html=await r.text();
+            assert.equal(r.status,200,prefix);
+            assert.match(r.headers.get('x-robots-tag')||'',/noindex/i,prefix);
+            assert.ok(html.includes('f5968a30201e'),prefix);
+            assert.ok(html.includes('Google Meet'),prefix+' online copy');
+          }
+          const xml=await (await fetch(base+'/sitemap.xml')).text();
+          assert.equal((xml.match(/<loc>/g)||[]).length,39);
+          for(const path of ['/admissions/','/fa/admissions/','/ps/admissions/']){
+            const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:''});
+            assert.equal(r.status,403,path+' must reject writes on preview');
+            const get=await fetch(base+path);
+            assert.equal(get.status,200,path);
+          }
+          for(const path of ['/','/fa/','/ps/']){
+            const r=await fetch(base+path,{method:'HEAD'});
+            assert.equal(r.status,200,path); assert.equal(await r.text(),'');
+          }
+          console.log('39-route sitemap, locale copy, preview noindex, POST rejection, GET/HEAD safety passed');
+          NODE
+      - name: Repeat Lighthouse three times per locale for stable performance assessment
+        run: |
+          export CHROME_PATH=/usr/bin/google-chrome
+          mkdir -p reports
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            for n in 1 2 3; do
+              npx --yes lighthouse@12.8.2 "https://94a27559.toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale-$n.json" --quiet
+            done
+          done
+          node <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const summary={};
+          for(const locale of ['en','fa','ps']){
+            const readings=[1,2,3].map(n=>{
+              const r=JSON.parse(fs.readFileSync('reports/'+locale+'-'+n+'.json','utf8'));
+              return {performance:r.categories.performance.score,accessibility:r.categories.accessibility.score,bestPractices:r.categories['best-practices'].score,LCP:r.audits['largest-contentful-paint'].numericValue,TBT:r.audits['total-blocking-time'].numericValue,SEO:r.categories.seo.score};
+            });
+            const med=k=>readings.map(x=>x[k]).sort((a,b)=>a-b)[1];
+            summary[locale]={readings,medianPerformance:med('performance'),medianLCP:med('LCP'),medianTBT:med('TBT')};
+            assert.ok(readings.every(x=>x.accessibility>=0.95&&x.bestPractices>=0.95),locale+' accessibility/best practices failure');
+            assert.ok(med('performance')>=0.90,locale+' median performance is too low');
+            assert.ok(med('TBT')<=350,locale+' median blocking time too high');
+          }
+          fs.writeFileSync('reports/summary.json',JSON.stringify(summary,null,2));
+          console.log(JSON.stringify(summary,null,2));
+          NODE
+      - name: Confirm exact preview revision after all measurements
+        run: |
+          node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch("https://94a27559.toeflhouse.pages.dev/");assert.equal(r.status,200);assert.ok((await r.text()).includes("f5968a30201e"));'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eap-mobile-repeated-lighthouse
+          path: reports/
