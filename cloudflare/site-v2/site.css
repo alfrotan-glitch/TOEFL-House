@@ -849,3 +849,20 @@ html[dir=rtl] .notfound-section h1{line-height:1.55}
 @media(max-width:760px){.site-header .brand img{width:100px;height:48px}.hero-art .photo-frame{border-inline-end-width:3px}}
 @media(max-width:390px){.site-header .brand img{width:86px;height:42px}}
 @media(max-width:360px){.course-bottom{flex-direction:column;align-items:stretch;gap:6px}.course-bottom>span,.course-bottom a{min-width:0;overflow-wrap:anywhere}.course-bottom a{align-self:flex-start;max-width:100%}}
+/* EAP editorial identity: local scope protects other course templates. */
+.eap-editorial .eap-hero{background:#faf9f8;border-color:#e5e1e1}
+.eap-editorial .eap-program-name{text-align:start;letter-spacing:.035em;text-transform:none}
+.eap-editorial .eap-hero-visual{align-items:flex-start;padding:clamp(22px,4vw,44px);background:#980616;box-shadow:none;border-radius:12px;aspect-ratio:auto;min-height:320px;isolation:isolate}
+.eap-editorial .eap-visual-orbit{inset:auto -145px -185px auto;width:440px;height:440px;box-shadow:0 0 0 44px #ffffff0d,0 0 0 88px #ffffff08;z-index:-1;pointer-events:none}
+.eap-editorial .eap-hero-visual>strong{font-size:clamp(48px,7vw,88px);letter-spacing:-.045em;text-shadow:none;line-height:1}
+.eap-editorial .eap-visual-kicker{font-size:clamp(20px,3vw,34px);font-weight:700;line-height:1.18;letter-spacing:-.025em;text-align:left;margin:14px 0 24px}
+.eap-editorial .eap-visual-small{font-size:10px;letter-spacing:.08em;text-align:left;padding-bottom:24px}
+.eap-editorial .eap-visual-number{font-size:11px;inset-inline-end:22px;bottom:17px}
+.eap-editorial .eap-facts{gap:1px;background:#e5e1e1;border:1px solid #e5e1e1;border-radius:12px;overflow:hidden}
+.eap-editorial .eap-fact{border:0;border-radius:0;padding:clamp(15px,2.3vw,28px);gap:8px;position:relative}
+.eap-editorial .eap-fact:before{content:"";width:24px;height:3px;background:var(--red);border-radius:2px;margin-bottom:4px}
+.eap-editorial .eap-fact strong{font-size:clamp(18px,2.3vw,25px);line-height:1.45;color:#242427;overflow-wrap:anywhere}
+.eap-editorial .eap-fact span{font-size:14px;line-height:1.8;overflow-wrap:anywhere}
+.eap-editorial .eap-goal,.eap-editorial .eap-level,.eap-editorial .eap-book,.eap-editorial .eap-fee-card{border-radius:12px;box-shadow:none}
+@media(max-width:760px){.eap-editorial .eap-hero-visual{min-height:246px}.eap-editorial .eap-fact{padding:16px 13px}}
+@media(prefers-reduced-motion:no-preference){.eap-editorial .eap-faq-plus{transition:transform .18s ease-out}}
