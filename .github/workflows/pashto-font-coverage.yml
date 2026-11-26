@@ -1,0 +1,44 @@
+name: Pashto glyph coverage and typography evidence
+on:
+  push:
+    branches: [qa/dari-campus-image-optimization-d80e575]
+    paths: ['.github/workflows/pashto-font-coverage.yml']
+permissions:
+  contents: read
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install fonttools==4.59.1 brotli==1.1.0
+      - name: Check Pashto-specific letter support in existing same-origin fonts
+        run: |
+          mkdir -p reports
+          python - <<'PY'
+          from urllib.request import urlopen
+          from fontTools.ttLib import TTFont
+          from pathlib import Path
+          import io, json
+          base = 'https://toeflhouse.pages.dev'
+          chars = 'ټډړږښځڅڼېۍګ'
+          urls = ['/__th/v2/font/vazirmatn-33.003.woff2'] + [f'/assets/fonts/NotoSansArabic-{w}.woff2' for w in (400,500,600,700,800)]
+          result=[]
+          for path in urls:
+              with urlopen(base+path,timeout=30) as r:
+                  assert r.status==200
+                  data=r.read()
+              font=TTFont(io.BytesIO(data))
+              cmap=font.getBestCmap()
+              record={'path':path,'bytes':len(data),'supported':{f'U+{ord(c):04X}':cmap.get(ord(c)) is not None for c in chars}}
+              result.append(record)
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          Path('reports/font-coverage.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pashto-font-coverage
+          path: reports/
+          if-no-files-found: error
