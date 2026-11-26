@@ -1,0 +1,71 @@
+name: Online admissions candidate acceptance
+on:
+  push:
+    branches: [qa/online-1c6cc1e]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TOEFL_QA_BASE: https://aa9a9c88.toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1c6cc1e2fabc92807df3fdebb47e1c7b154f4aa9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact preview and routes
+        run: |
+          test "$(git rev-parse HEAD)" = "1c6cc1e2fabc92807df3fdebb47e1c7b154f4aa9"
+          node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch(process.env.TOEFL_QA_BASE);assert.equal(r.status,200);assert.ok((await r.text()).includes("217d766baf43"));'
+          node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Exercise admissions in all languages and both viewport types
+        run: |
+          node <<'NODE'
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          const assert=require("node:assert/strict");
+          (async()=>{
+            const base=process.env.TOEFL_QA_BASE;
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            let checked=0;
+            try{
+              for(const width of [390,1440])for(const prefix of ["/","/fa/","/ps/"]){
+                const ctx=await browser.newContext({viewport:{width,height:900}});
+                const page=await ctx.newPage();
+                const errors=[];page.on("pageerror",e=>errors.push(String(e)));
+                await ctx.route("https://wa.me/**",r=>r.fulfill({status:200,contentType:"text/html",body:"<title>Intercepted test only</title>"}));
+                await ctx.route("https://toefl-house-conversions.alfrotan2.workers.dev/**",r=>r.fulfill({status:204,body:""}));
+                const url=base+prefix+"admissions/?program=online-individual-zoom&format=campus&when=morning";
+                const response=await page.goto(url,{waitUntil:"networkidle"});
+                assert.equal(response.status(),200);
+                assert.match(response.headers()["x-robots-tag"]||"",/noindex/);
+                const program=page.locator("#v2-program"),format=page.locator("#v2-format"),campus=format.locator('option[value="campus"]');
+                assert.equal(await program.inputValue(),"online-individual-zoom");
+                assert.equal(await format.inputValue(),"online");
+                assert.equal(await campus.isDisabled(),true);
+                const lang=page.locator((width===390?".mobile-language":".language-links")+' a[hreflang="'+(prefix==="/fa/"?"en":"fa-AF")+'"]');
+                assert.match(await lang.getAttribute("href"),/program=online-individual-zoom&format=online&when=morning/);
+                await program.selectOption("general-english");
+                assert.equal(await campus.isDisabled(),false);
+                await format.selectOption("campus");
+                await program.selectOption("online-individual-zoom");
+                assert.equal(await format.inputValue(),"online");
+                await program.selectOption("general-english");
+                assert.equal(await format.inputValue(),"campus");
+                await program.selectOption("online-individual-zoom");
+                const draft=page.waitForRequest(r=>r.url().startsWith("https://wa.me/")&&r.url().includes("?text="));
+                await page.locator('#v2-enquiry-form button[type="submit"]').click();
+                const req=await draft;
+                assert.match(new URL(req.url()).searchParams.get("text"),/Google Meet/);
+                assert.deepEqual(errors,[]);
+                checked++;await ctx.close();
+              }
+            }finally{await browser.close();}
+            console.log(JSON.stringify({checked,realMessagesSent:0,issues:[]}));
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - run: node cloudflare/site-v2/accessibility-audit.cjs
