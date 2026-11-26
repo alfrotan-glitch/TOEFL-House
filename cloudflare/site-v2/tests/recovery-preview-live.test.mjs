@@ -21,7 +21,7 @@ for(const path of expected){
   if(!title)failures.push(path+" missing title");
   if(!r.headers.get("x-robots-tag")?.includes("noindex"))failures.push(path+" preview is indexable");
   if(/href=["'][^"']*\/tools\/?["']/i.test(body))failures.push(path+" exposes retired tools link");
-  if(path==="/"&&!body.includes('href="data:image/'))failures.push("homepage favicon is not self-contained");
+  if(!body.includes('rel="icon" href="/__th/v2/brand.webp?v=753895f6e945"'))failures.push(path+" shared favicon missing");
  }catch(e){failures.push(path+" "+String(e))}
 }
 const [api,css,js,admin,adminApi,campus,poster,tools,sitemap,robots]=await Promise.all([
