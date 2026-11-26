@@ -1,0 +1,16 @@
+name: Diagnose narrow viewport overflow
+on:
+  push:
+    branches: [qa/overflow-diagnosis-f50e562]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm install --prefix /tmp/qa --no-save playwright-core@1.56.0
+      - run: |
+          node <<'NODE'
+          const {chromium}=require('/tmp/qa/node_modules/playwright-core');
+          (async()=>{const b=await chromium.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox']});const p=await b.newPage({viewport:{width:320,height:900}});await p.goto('https://toeflhouse.pages.dev/');await p.evaluate(()=>document.fonts.ready);console.log(JSON.stringify(await p.evaluate(()=>({width:document.documentElement.scrollWidth,offenders:[...document.querySelectorAll('body *')].map(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return {tag:e.tagName,cls:String(e.className),left:r.left,right:r.right,width:r.width,scroll:e.scrollWidth,overflow:s.overflowX,display:s.display}}).filter(r=>r.right>321||r.left< -1).slice(0,100)})),null,2));await b.close()})().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
