@@ -1012,3 +1012,14 @@ test("Signature hero keeps compact mobile spacing and fluid trilingual typograph
  assert.match(css,/html\[dir=rtl\] \.hero h1\{font-size:clamp\(30px,8\.7vw,35px\)\}/);
  assert.match(css,/\.hero-actions \.button\{font-size:12px;min-height:52px/);
 });
+
+test("Dari homepage discovers its pinned font early without preloading it in other locales",async()=>{
+ for(const root of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
+  const marker='<link rel="preload" href="/__th/v2/font/vazirmatn-33.003.woff2" as="font" type="font/woff2" crossorigin>';
+  if(root==="/fa/"){
+   assert.ok(html.includes(marker));
+   assert.ok(html.indexOf(marker)<html.indexOf('rel="stylesheet"'));
+  }else assert.ok(!html.includes(marker));
+ }
+});
