@@ -1005,3 +1005,10 @@ test("Mobile language style must not terminate the responsive media query premat
  for(const ch of css){if(ch==="{")depth++;if(ch==="}")assert.ok(--depth>=0,"CSS closing brace must have a matching opening brace");}
  assert.equal(depth,0,"CSS blocks must be balanced");
 });
+
+test("Signature hero keeps compact mobile spacing and fluid trilingual typography",async()=>{
+ const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
+ assert.match(css,/\.hero-grid\{padding-block:28px 40px;gap:22px\}/);
+ assert.match(css,/html\[dir=rtl\] \.hero h1\{font-size:clamp\(30px,8\.7vw,35px\)\}/);
+ assert.match(css,/\.hero-actions \.button\{font-size:12px;min-height:52px/);
+});
