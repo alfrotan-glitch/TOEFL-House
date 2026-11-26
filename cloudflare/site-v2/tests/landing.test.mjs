@@ -973,3 +973,11 @@ test("Shared logo preserves exact artwork, versioned caching and preview indexin
  const preview=await worker.fetch(new Request(url.replace("https://toeflhouse","https://test-preview.toeflhouse")),env());
  assert.match(preview.headers.get("x-robots-tag"),/noindex/);
 });
+
+test("Catalog text and narrow links can wrap without hiding content",async()=>{
+ const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
+ assert.equal(response.status,200);
+ const css=await response.text();
+ assert.match(css,/\.course-card\{[^}]*min-width:0;overflow-wrap:anywhere/);
+ assert.match(css,/\.course-bottom a\{align-self:flex-start;max-width:100%;flex-wrap:wrap\}/);
+});
