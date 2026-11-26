@@ -1,7 +1,7 @@
-name: Final candidate exact-worker mobile, WCAG and Lighthouse acceptance
+name: V3 production exact-worker post-release QA, WCAG and Lighthouse
 on:
   push:
-    branches: [qa/final-8406d04]
+    branches: [qa/production-v3-d80e575]
 permissions:
   contents: read
 jobs:
@@ -9,21 +9,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      TOEFL_QA_BASE: https://98b71bb9.toeflhouse.pages.dev
+      TOEFL_QA_BASE: https://toeflhouse.pages.dev
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 8406d04320163c0db95c3f339550a091a13f7b73
+          ref: d80e5756986c464e70bdfcc8aed97e76a7979072
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Confirm read-only preview revision and all public routes
+      - name: Confirm canonical production revision and all public routes
         run: |
-          test "$(git rev-parse HEAD)" = "8406d04320163c0db95c3f339550a091a13f7b73"
+          test "$(git rev-parse HEAD)" = "d80e5756986c464e70bdfcc8aed97e76a7979072"
           node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch(process.env.TOEFL_QA_BASE);assert.equal(r.status,200);assert.ok((await r.text()).includes("628767df8e41"));'
           node cloudflare/site-v2/build.mjs
           echo 'f1cf7f1cd11352d9d5a8a820f7f277a854a14229a7e31f0194e35da42d017f4a  cloudflare/site-v2/dist/_worker.js' | sha256sum -c -
           node --input-type=module -e 'import assert from "node:assert/strict";for(const p of ["/","/fa/","/ps/"]){const r=await fetch(process.env.TOEFL_QA_BASE+p);const h=await r.text();assert.equal(r.status,200);const q=String.fromCharCode(34);assert.equal(h.includes("rel="+q+"preload"+q+" href="+q+"/__th/v2/font/vazirmatn-33.003.woff2"+q),p==="/fa/");}'
+          node --input-type=module -e 'import assert from "node:assert/strict";for(const p of ["/","/fa/","/ps/"]){const r=await fetch(process.env.TOEFL_QA_BASE+p);const html=await r.text();assert.equal(r.status,200);assert.equal(r.headers.get("x-robots-tag"),null,"Production must be indexable");assert.ok(!html.includes("<meta name=\"robots\" content=\"noindex"),"Production robots meta must be indexable");}'
           node cloudflare/site-v2/production-full-acceptance.mjs
       - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
       - name: Inspect all public routes in mobile and desktop browser and capture corrected panels
@@ -106,17 +107,17 @@ jobs:
         with:
           node-version: '22'
       - run: |
-          node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch("https://98b71bb9.toeflhouse.pages.dev/");assert.equal(r.status,200);assert.ok((await r.text()).includes("628767df8e41"));'
+          node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch("https://toeflhouse.pages.dev/");assert.equal(r.status,200);assert.ok((await r.text()).includes("628767df8e41"));'
           mkdir -p reports
           export CHROME_PATH=/usr/bin/google-chrome
           for locale in en fa ps; do
             suffix=""
             if [ "$locale" != en ]; then suffix="$locale/"; fi
-            npx --yes lighthouse@12.8.2 "https://98b71bb9.toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale.json" --quiet
+            npx --yes lighthouse@12.8.2 "https://toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale.json" --quiet
           done
           node -e 'for(const locale of ["en","fa","ps"]){const r=require("./reports/"+locale+".json");console.log(JSON.stringify({locale,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue}));}'
-      - name: Confirm release unchanged after measurement
-        run: node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch("https://98b71bb9.toeflhouse.pages.dev/");assert.equal(r.status,200);assert.ok((await r.text()).includes("628767df8e41"));'
+      - name: Confirm canonical release unchanged after measurement
+        run: node --input-type=module -e 'import assert from "node:assert/strict";const r=await fetch("https://toeflhouse.pages.dev/");assert.equal(r.status,200);assert.ok((await r.text()).includes("628767df8e41"));'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
