@@ -22,3 +22,11 @@ test("Academic fact grid is shared and editorial motion is preference-gated",asy
  assert.match(css,/\.eap-facts\{[^}]*gap:1px/);
  assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\.eap-editorial \.eap-faq-plus\{transition:transform/);
 });
+
+test("Narrow EAP layouts align actions and preserve readable introduction spacing",async()=>{
+ const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env);
+ assert.equal(r.status,200);
+ const css=await r.text();
+ assert.match(css,/@media\(max-width:460px\)\{\.eap-editorial \.eap-hero \.breadcrumbs\{margin-bottom:20px\}[^}]*\}[^}]*\.eap-actions\{display:grid;grid-template-columns:1fr\}/);
+ assert.match(css,/\.eap-editorial \.eap-lead\{margin-bottom:20px;line-height:1\.8\}/);
+});
