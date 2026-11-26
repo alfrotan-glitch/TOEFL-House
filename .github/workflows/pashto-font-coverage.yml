@@ -18,21 +18,21 @@ jobs:
         run: |
           mkdir -p reports
           python - <<'PY'
-          from urllib.request import urlopen
+          from urllib.request import urlopen, Request
           from fontTools.ttLib import TTFont
           from pathlib import Path
           import io, json
           base = 'https://toeflhouse.pages.dev'
-          chars = 'ټډړږښځڅڼېۍګ'
+          chars = 'ټډړږښځڅڼېۍګ' + '\u06cd\u06d0\u06cc'
           urls = ['/__th/v2/font/vazirmatn-33.003.woff2'] + [f'/assets/fonts/NotoSansArabic-{w}.woff2' for w in (400,500,600,700,800)]
           result=[]
           for path in urls:
-              with urlopen(base+path,timeout=30) as r:
+              with urlopen(Request(base+path, headers={'User-Agent':'TOEFL-House-read-only-QA/1.0','Accept':'font/woff2,*/*;q=0.8'}),timeout=30) as r:
                   assert r.status==200
                   data=r.read()
               font=TTFont(io.BytesIO(data))
               cmap=font.getBestCmap()
-              record={'path':path,'bytes':len(data),'supported':{f'U+{ord(c):04X}':cmap.get(ord(c)) is not None for c in chars}}
+              record={'path':path,'bytes':len(data),'supported':{f'U+{ord(c):04X}':cmap.get(ord(c)) not in (None,'.notdef') for c in chars}}
               result.append(record)
           print(json.dumps(result,ensure_ascii=False,indent=2))
           Path('reports/font-coverage.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
