@@ -1040,3 +1040,18 @@ test("Dari LCP photo is eagerly requested while other home locales retain deskto
   }
  }
 });
+
+test("Campus photo describes only a real asset in responsive image markup",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
+  assert.equal(response.status,200,prefix);
+  const html=await response.text();
+  const image=html.match(/<div class="photo-frame"><img\b[^>]*>/);
+  assert.ok(image,"Campus hero image missing: "+prefix);
+  assert.match(image[0],/src="\/assets\/aistudio\/FB_IMG_1793645643808_dad823ce\.jpg"/);
+  assert.doesNotMatch(image[0],/\bsrcset=|\bsizes=/,"Do not claim nonexistent derivative images");
+  const preloads=[...html.matchAll(/<link\b[^>]*rel="preload"[^>]*as="image"[^>]*>/g)];
+  for(const preload of preloads)assert.doesNotMatch(preload[0],/\bimagesrcset=|\bimagesizes=/);
+  if(prefix==="/fa/")assert.match(image[0],/loading="eager" fetchpriority="high"/);
+ }
+});
