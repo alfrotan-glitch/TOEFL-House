@@ -814,13 +814,13 @@ test("Dari editorial keeps standard Peh and says university; Pashto remains unch
  assert.equal(academicHtml.includes("پوهنتون"),false);
  assert.ok(academicHtml.includes("دانشگاه"));
 });
-test("Dari font is localized and mobile FAQ has a readable compact layout",async()=>{
+test("RTL fonts use the coverage-verified variable face and mobile FAQ stays compact",async()=>{
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(r.status,200);
  const css=await r.text();
  assert.match(css,/font-family:THDari;src:url\("\/__th\/v2\/font\/vazirmatn-33\.003\.woff2"\)/);
- assert.ok(css.includes("html[lang=fa-AF] body{font-family:THDari"),"Dari only");
- assert.ok(css.includes('html[dir=rtl] body{font-family:Tahoma,"Noto Sans Arabic",Arial,sans-serif'),"Pashto uses a stable Arabic-script fallback");
+ assert.ok(css.includes("html[lang=fa-AF] body{font-family:THDari"),"Dari-specific line height is retained");
+ assert.ok(css.includes('html[dir=rtl] body{font-family:THDari,Tahoma,"Noto Sans Arabic",Arial,sans-serif'),"Pashto uses the coverage-verified Arabic-script face before platform fallbacks");
  assert.ok(css.includes(".faq-section.section{padding:54px 0 64px}"),"FAQ section compact on phones");
 });
 
@@ -1013,11 +1013,11 @@ test("Signature hero keeps compact mobile spacing and fluid trilingual typograph
  assert.match(css,/\.hero-actions \.button\{font-size:12px;min-height:52px/);
 });
 
-test("Dari homepage discovers its pinned font early without preloading it in other locales",async()=>{
+test("Dari and Pashto homepages discover their pinned font early without preloading it in English",async()=>{
  for(const root of ["/","/fa/","/ps/"]){
   const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
   const marker='<link rel="preload" href="/__th/v2/font/vazirmatn-33.003.woff2" as="font" type="font/woff2" crossorigin>';
-  if(root==="/fa/"){
+  if(root!=="/"){
    assert.ok(html.includes(marker));
    assert.ok(html.indexOf(marker)<html.indexOf('rel="stylesheet"'));
   }else assert.ok(!html.includes(marker));
