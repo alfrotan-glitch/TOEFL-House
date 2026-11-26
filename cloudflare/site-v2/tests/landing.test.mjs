@@ -996,3 +996,12 @@ test("Signature editorial hero preserves accessible actions, true photography an
   assert.ok(html.includes('href="'+root+'admissions/"'));
  }
 });
+
+test("Mobile language style must not terminate the responsive media query prematurely",async()=>{
+ const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
+ const css=await response.text();
+ assert.match(css,/\.mobile-language a\.is-active\{background:var\(--red\);color:#fff\}/);
+ let depth=0;
+ for(const ch of css){if(ch==="{")depth++;if(ch==="}")assert.ok(--depth>=0,"CSS closing brace must have a matching opening brace");}
+ assert.equal(depth,0,"CSS blocks must be balanced");
+});
