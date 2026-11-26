@@ -1,0 +1,44 @@
+name: Signature homepage performance diagnosis
+on:
+  push:
+    branches: [qa/perf-diagnose-244b6d8]
+permissions:
+  contents: read
+jobs:
+  diagnosis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Measure repeatable cold homepage performance and audit culprits
+        run: |
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            for attempt in 1 2 3; do
+              npx --yes lighthouse@12.8.2 "https://436b20b1.toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale-$attempt.json" --quiet
+            done
+          done
+          node <<'NODE'
+          const fs=require("node:fs");
+          for(const locale of ["en","fa","ps"]){
+            const rows=[];
+            for(let i=1;i<=3;i++){
+              const r=JSON.parse(fs.readFileSync("reports/"+locale+"-"+i+".json"));
+              const a=r.audits, pick=id=>a[id]?.details?.items?.slice(0,5);
+              const data={locale,i,score:r.categories.performance.score,LCP:a["largest-contentful-paint"].numericValue,CLS:a["cumulative-layout-shift"].numericValue,TBT:a["total-blocking-time"].numericValue,longTasks:pick("long-tasks"),bootup:pick("bootup-time"),layoutShifts:pick("layout-shifts"),lcp:pick("largest-contentful-paint-element"),lcpBreakdown:pick("lcp-breakdown-insight"),font:pick("font-display-insight")};
+              rows.push(data);console.log(JSON.stringify(data).slice(0,16000));
+            }
+            const med=k=>rows.map(x=>x[k]).sort((a,b)=>a-b)[1];
+            console.log("MEDIAN "+JSON.stringify({locale,score:med("score"),LCP:med("LCP"),CLS:med("CLS"),TBT:med("TBT")}));
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: signature-performance-diagnostics
+          path: reports/
