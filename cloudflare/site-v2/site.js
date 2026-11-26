@@ -62,7 +62,27 @@ if(enquiry){
  if(allowed(courseChoice,selectedProgram))courseChoice.value=selectedProgram;
  if(allowed(formatChoice,admissionQuery.get("format")))formatChoice.value=admissionQuery.get("format");
  if(allowed(timeChoice,admissionQuery.get("when")))timeChoice.value=admissionQuery.get("when");
+ // The legacy program ID is stable; this specific offering is online-only.
+ var lastFlexibleFormat=formatChoice?.value;
+ var wasOnlineOnly=false;
+ function syncOnlineFormat(){
+  if(!courseChoice||!formatChoice)return;
+  var campus=Array.prototype.find.call(formatChoice.options,function(option){return option.value==="campus";});
+  if(!campus||!allowed(formatChoice,"online"))return;
+  var onlineOnly=courseChoice.value==="online-individual-zoom";
+  if(onlineOnly){
+   if(!wasOnlineOnly)lastFlexibleFormat=formatChoice.value;
+   campus.disabled=true;
+   formatChoice.value="online";
+  }else{
+   campus.disabled=false;
+   if(wasOnlineOnly&&allowed(formatChoice,lastFlexibleFormat))formatChoice.value=lastFlexibleFormat;
+   lastFlexibleFormat=formatChoice.value;
+  }
+  wasOnlineOnly=onlineOnly;
+ }
  function syncLanguageLinks(){
+  syncOnlineFormat();
   document.querySelectorAll(".language-links a[hreflang], .mobile-language a[hreflang]").forEach(function(link){
    var dest=new URL(link.getAttribute("href"),location.href);
    if(dest.origin!==location.origin||!/\/admissions\/$/.test(dest.pathname))return;
@@ -89,6 +109,7 @@ if(enquiry){
  updateCoursePreview();
  enquiry.addEventListener("submit",function(event){
   event.preventDefault();
+  syncOnlineFormat();
   if(!enquiry.checkValidity()){enquiry.reportValidity();return;}
   var chosen=enquiry.querySelector("#v2-program");
   var format=enquiry.querySelector("#v2-format");
