@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {createHash} from "node:crypto";
 import worker from "../dist/_worker.js";
 const allIds=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
 const main={
@@ -32,7 +33,6 @@ for(const [route,lang,dir] of [["/","en","ltr"],["/fa/","fa-AF","rtl"],["/ps/","
   assert.ok(eapCard,"EAP catalog card must exist");
   assert.match(eapCard[1],/<bdi class="course-full-name" lang="en" dir="ltr">EAP \(English for Academic Purposes\)<\/bdi>/);
   assert.ok(eapCard[1].includes('href="'+(route==="/"?"/":route)+'courses/academic-english/"'),"EAP link must retain locale");
-
   assert.match(html,/4 months|۴ ماه|څلور میاشتې/);
   assert.match(html,/v2\/site\.css/);
   assert.match(html,/v2\/site\.js/);
@@ -947,4 +947,29 @@ test("Public design system uses only approved red, white and neutral colors",asy
  assert.match(css,/\.detail-summary li::before\{[^}]*background:var\(--red\);color:#fff/);
  assert.match(css,/\.online-panel\{background:linear-gradient\(125deg,var\(--red-dark\),var\(--red\)\)/);
  assert.match(css,/\.footer\{background:var\(--red-dark\)/);
+});
+
+test("Shared logo preserves exact artwork, versioned caching and preview indexing rules",async()=>{
+ const url="https://toeflhouse.pages.dev/__th/v2/brand.webp?v=753895f6e945";
+ for(const root of ["/","/fa/","/ps/"])for(const route of [root,root+"admissions/"]){
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
+  const html=await response.text();
+  assert.ok(html.includes('rel="icon" href="/__th/v2/brand.webp?v=753895f6e945"'),route);
+  assert.ok(html.includes('src="/__th/v2/brand.webp?v=753895f6e945"'),route);
+  assert.ok(!html.includes("data:image/webp;base64,"),route);
+ }
+ const logo=await worker.fetch(new Request(url),env());
+ assert.equal(logo.status,200);
+ assert.equal(logo.headers.get("content-type"),"image/webp");
+ assert.match(logo.headers.get("cache-control"),/max-age=31536000/);
+ assert.equal(logo.headers.get("x-robots-tag"),null);
+ const bytes=Buffer.from(await logo.arrayBuffer());
+ assert.equal(bytes.length,13814);
+ assert.equal(createHash("sha256").update(bytes).digest("hex"),"753895f6e9453eb62d4ee6feab020570d0c4113ac8263a417e6588fe55560e1e");
+ const head=await worker.fetch(new Request(url,{method:"HEAD"}),env());
+ assert.equal(head.status,200);assert.equal((await head.arrayBuffer()).byteLength,0);
+ const old=await worker.fetch(new Request(url.replace("753895f6e945","stale")),env());
+ assert.match(old.headers.get("cache-control"),/max-age=3600/);
+ const preview=await worker.fetch(new Request(url.replace("https://toeflhouse","https://test-preview.toeflhouse")),env());
+ assert.match(preview.headers.get("x-robots-tag"),/noindex/);
 });
