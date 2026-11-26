@@ -772,7 +772,7 @@ test("Course cards use concise localized headings, whole-card native hit areas, 
   assert.equal(response.status,200);
   const page=await response.text();
   assert.ok(page.includes('<meta property="og:locale" content="'+ogLocale+'">'),root+" missing correct OpenGraph locale");
-  assert.ok(page.includes('alt="'+photoAlt+'" loading="lazy"'),root+" campus image requires meaningful native language alt");
+  assert.ok(page.includes('alt="'+photoAlt+'" loading="'+(root==="/fa/"?"eager":"lazy")+'"'),root+" campus image requires meaningful native language alt");
   const card=page.match(/<article id="course-special-speaking" class="course-card [^"]*">([\s\S]*?)<\/article>/);
   assert.ok(card,root+" missing Special Speaking card");
   assert.ok(card[1].includes("<h3>"+speakingTitle+"</h3>"),root+" course card title too verbose");
@@ -1021,5 +1021,22 @@ test("Dari homepage discovers its pinned font early without preloading it in oth
    assert.ok(html.includes(marker));
    assert.ok(html.indexOf(marker)<html.indexOf('rel="stylesheet"'));
   }else assert.ok(!html.includes(marker));
+ }
+});
+
+test("Dari LCP photo is eagerly requested while other home locales retain desktop-only preload",async()=>{
+ for(const root of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
+  const hero=html.match(/<div class="photo-frame">(<img[^>]+>)/)?.[1];
+  assert.ok(hero);
+  const imagePreload=html.match(/<link rel="preload"[^>]*as="image"[^>]*>/)?.[0];
+  assert.ok(imagePreload);
+  if(root==="/fa/"){
+   assert.match(hero,/loading="eager" fetchpriority="high"/);
+   assert.doesNotMatch(imagePreload,/media=/);
+  }else{
+   assert.match(hero,/loading="lazy"/);
+   assert.match(imagePreload,/media="\(min-width: 761px\)"/);
+  }
  }
 });
