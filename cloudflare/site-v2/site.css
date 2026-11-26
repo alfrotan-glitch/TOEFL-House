@@ -766,7 +766,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .programs-section .course-card{border-block-start:3px solid var(--red);border-radius:10px;min-width:0;box-shadow:0 5px 20px #69091208}
 .programs-section .course-top{margin-bottom:24px}
 .programs-section .course-number{font-size:14px;color:var(--red-dark);font-weight:800}
-.programs-section .course-mark{width:34px;height:34px;color:var(--red-dark);border-color:#e5c7cc}
+.programs-section .course-mark{width:34px;height:34px;color:var(--red-dark);border-color:#f8d7dc}
 .programs-section .course-card h3{font-size:clamp(20px,2vw,26px);line-height:1.35;overflow-wrap:anywhere}
 .programs-section .course-full-name{display:block;font-size:12px;font-weight:700;color:var(--red-dark);line-height:1.5;margin:0 0 10px;text-align:start;overflow-wrap:anywhere}
 .programs-section .course-copy{font-size:14px;line-height:1.75;max-width:none;color:#55555b}
