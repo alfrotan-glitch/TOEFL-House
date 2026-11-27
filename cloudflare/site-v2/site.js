@@ -163,7 +163,7 @@ var practice=document.querySelector("[data-ge-practice]");
 if(practice){
 const find=(el,key)=>el.querySelector("[data-ge-"+key+"]");
 const questions=[...practice.querySelectorAll("[data-ge-question]")],d=practice.dataset,outcomes=new Map(),resets=[];
-const update=()=>{find(practice,"progress").textContent=d.geProgressLabel+": "+outcomes.size+"/"+questions.length+" · "+d.geScoreLabel+": "+[...outcomes.values()].filter(Boolean).length+"/"+questions.length;};
+const update=()=>{find(practice,"progress").textContent=d.progressLabel+": "+outcomes.size+"/"+questions.length+" · "+d.scoreLabel+": "+[...outcomes.values()].filter(Boolean).length+"/"+questions.length;};
 questions.forEach(q=>{
 const check=find(q,"check"),feedback=find(q,"feedback"),answer=find(q,"answer"),inputs=q.querySelectorAll("input");
 find(q,"controls").hidden=false;find(q,"fallback").hidden=true;answer.hidden=true;
@@ -172,7 +172,7 @@ check.addEventListener("click",()=>{
 const selected=q.querySelector("input:checked");
 if(!selected||outcomes.has(q))return;
 const correct=selected.value===q.dataset.correct;
-outcomes.set(q,correct);feedback.textContent=correct?d.geCorrectLabel:d.geIncorrectLabel;
+outcomes.set(q,correct);feedback.textContent=correct?d.correctLabel:d.incorrectLabel;
 answer.hidden=false;answer.open=true;check.disabled=true;inputs.forEach(i=>i.disabled=true);update();
 });
 resets.push(()=>{inputs.forEach(i=>{i.checked=i.disabled=false;});check.disabled=true;feedback.textContent="";answer.open=false;answer.hidden=true;});
