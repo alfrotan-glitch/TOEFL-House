@@ -338,6 +338,142 @@ function v2CourseListSchema(locale,content){
   return {"@type":"ListItem","position":i+1,"url":url,"item":{"@type":"Course","name":name,"description":description,"url":url,"provider":provider}};
  })};
 }
+// Original learner guidance. Links point only to existing localized public guides.
+const V2_LEARNING_HABITS={
+ "en": {
+  "label": "LEARN BEYOND THE CLASSROOM",
+  "title": "Make English part of your everyday life.",
+  "intro": "Your class gives you a structured place to learn. What you do between lessons can help turn that knowledge into a skill you use. Start with these three simple habits.",
+  "habits": [
+   [
+    "01",
+    "Listen and read for meaning",
+    "Choose a short, level-appropriate text or audio recording on a topic you enjoy. Understand the main idea before looking up every unfamiliar word."
+   ],
+   [
+    "02",
+    "Use what you learn",
+    "Try a short spoken summary, ask yourself a question or write a few sentences using new expressions. Bring questions you cannot answer to your next class."
+   ],
+   [
+    "03",
+    "Review and keep going",
+    "Revisit useful expressions over several days. Note what you can do more easily and what still needs practice. Choose one small goal for your next session."
+   ]
+  ],
+  "resourceTitle": "Free learning guides",
+  "resourceIntro": "Explore practical advice from The TOEFL House before choosing your next learning goal.",
+  "links": [
+   [
+    "speaking-practice",
+    "Improve your speaking",
+    "Explore practical ways to practice speaking."
+   ],
+   [
+    "english-courses-kabul",
+    "Find your learning pathway",
+    "Understand the English course options in Kabul."
+   ],
+   [
+    "toefl-ibt-2026",
+    "Prepare for the TOEFL iBT",
+    "Understand the 2026 test and plan your preparation."
+   ]
+  ],
+  "open": "Read guide",
+  "all": "Explore all learning guides"
+ },
+ "fa": {
+  "label": "یادگیری فراتر از صنف",
+  "title": "انگلیسی را بخشی از زندگی روزمرهٔ خود بسازید.",
+  "intro": "صنف، محیطی منظم برای یادگیری فراهم می‌کند. تمرین میان درس‌ها نیز به شما کمک می‌کند آموخته‌های خود را به مهارت کاربردی تبدیل کنید. با این سه عادت ساده آغاز کنید.",
+  "habits": [
+   [
+    "۰۱",
+    "برای درک مطلب بشنوید و بخوانید",
+    "متن یا فایل صوتی کوتاه و متناسب با سطح خود را در موضوعی که دوست دارید انتخاب کنید. پیش از جست‌وجوی تمام لغات ناآشنا، مفهوم اصلی را دریابید."
+   ],
+   [
+    "۰۲",
+    "آموخته‌های خود را به کار ببرید",
+    "خلاصه‌ای کوتاه به انگلیسی بگویید، از خود پرسشی مطرح کنید یا با عبارت‌های تازه چند جمله بنویسید. پرسش‌های دشوار را در درس بعدی مطرح کنید."
+   ],
+   [
+    "۰۳",
+    "مرور کنید و پیوسته پیش بروید",
+    "عبارت‌های مفید را در چند روز مرور کنید. آنچه آسان‌تر انجام می‌دهید و آنچه هنوز به تمرین نیاز دارد یادداشت کنید. برای تمرین بعدی یک هدف کوچک تعیین کنید."
+   ]
+  ],
+  "resourceTitle": "رهنمودهای رایگان یادگیری",
+  "resourceIntro": "پیش از انتخاب گام بعدی، رهنمایی‌های کاربردی تافل هوس را مطالعه کنید.",
+  "links": [
+   [
+    "speaking-practice",
+    "تقویت مهارت مکالمه",
+    "روش‌های عملی تمرین مکالمه را بشناسید."
+   ],
+   [
+    "english-courses-kabul",
+    "انتخاب مسیر آموزشی مناسب",
+    "با گزینه‌های آموزش انگلیسی در کابل آشنا شوید."
+   ],
+   [
+    "toefl-ibt-2026",
+    "آمادگی برای TOEFL iBT",
+    "ساختار آزمون ۲۰۲۶ را بشناسید و برای آن برنامه‌ریزی کنید."
+   ]
+  ],
+  "open": "مطالعهٔ رهنمود",
+  "all": "تمام رهنمودهای یادگیری"
+ },
+ "ps": {
+  "label": "له ټولګي بهر زده‌کړه",
+  "title": "انګلیسي د خپل ورځني ژوند برخه وګرځوئ.",
+  "intro": "ټولګی د منظمې زده‌کړې ځای دی. د درسونو ترمنځ تمرین له تاسو سره مرسته کوي چې زده کړې پوهه په عملي مهارت بدله کړئ. له دې درې ساده عادتونو پیل وکړئ.",
+  "habits": [
+   [
+    "۰۱",
+    "د مطلب د درک لپاره واورئ او ولولئ",
+    "د خپلې کچې او خوښې له مخې لنډ متن یا غږیز مطلب وټاکئ. د ټولو نابلدو لغتونو له لټون مخکې اصلي مانا درک کړئ."
+   ],
+   [
+    "۰۲",
+    "خپلې زده کړې وکاروئ",
+    "لنډیز په انګلیسي ووایئ، له ځانه پوښتنه وکړئ یا په نویو عبارتونو څو جملې ولیکئ. ستونزمنې پوښتنې په راتلونکي درس کې مطرح کړئ."
+   ],
+   [
+    "۰۳",
+    "بیاکتنه وکړئ او دوام ورکړئ",
+    "ګټور عبارتونه په څو ورځو کې بیا تمرین کړئ. هغه څه ولیکئ چې اوس یې اسانه ترسره کوئ او هغه چې لا تمرین ته اړتیا لري. د راتلونکي تمرین لپاره یوه کوچنۍ موخه وټاکئ."
+   ]
+  ],
+  "resourceTitle": "د زده‌کړې وړیا لارښودونه",
+  "resourceIntro": "د راتلونکي ګام له ټاکلو مخکې د تافل هوس عملي لارښوونې ولولئ.",
+  "links": [
+   [
+    "speaking-practice",
+    "د خبرو مهارت پیاوړی کړئ",
+    "د انګلیسي خبرو عملي تمرینونه وپېژنئ."
+   ],
+   [
+    "english-courses-kabul",
+    "مناسبه ښوونیزه لار ومومئ",
+    "په کابل کې د انګلیسي کورسونو له انتخابونو سره اشنا شئ."
+   ],
+   [
+    "toefl-ibt-2026",
+    "TOEFL iBT ته چمتووالی",
+    "د ۲۰۲۶ ازموینه وپېژنئ او د چمتووالي پلان جوړ کړئ."
+   ]
+  ],
+  "open": "لارښود ولولئ",
+  "all": "ټول ښوونیز لارښودونه"
+ }
+};
+function v2LearningHabits(locale){
+ const c=V2_LEARNING_HABITS[locale]||V2_LEARNING_HABITS.en,p=v2Prefix(locale);
+ return '<section class="journey-section section" id="learning-habits" aria-labelledby="learning-habits-title"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.label)+'</p><h2 id="learning-habits-title">'+v2T(c.title)+'</h2></div><p class="section-intro">'+v2T(c.intro)+'</p></div><div class="journey-grid">'+c.habits.map(([n,h,t])=>'<article class="journey-step"><span class="step-no" aria-hidden="true">'+v2T(n)+'</span><div class="step-line"></div><h3>'+v2T(h)+'</h3><p>'+v2T(t)+'</p></article>').join("")+'</div><div class="section-head"><div><h3>'+v2T(c.resourceTitle)+'</h3></div><p class="section-intro">'+v2T(c.resourceIntro)+'</p></div><div class="growth-card-grid">'+c.links.map(([slug,h,t])=>'<a class="growth-card" href="'+p+'guides/'+slug+'/"><h4>'+v2T(h)+'</h4><p>'+v2T(t)+'</p><span class="growth-arrow">'+v2T(c.open)+' <span aria-hidden="true">↗</span></span></a>').join("")+'</div><a class="text-link" href="'+p+'guides/">'+v2T(c.all)+' <span aria-hidden="true">↗</span></a></div></section>';
+}
 function v2Page(locale,content){
  const c=V2_COPY[locale],prefix=v2Prefix(locale),title=locale==="en"?"The TOEFL House | English Classes & TOEFL Preparation in Kabul":locale==="fa"?"تافل هوس | کورس زبان انگلیسی و آمادگی تافل در کابل":"The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه";
  const desc=c.subtitle,canonical=V2_ORIGIN+prefix;
@@ -349,6 +485,7 @@ function v2Page(locale,content){
  +v2SemesterCampaign(locale)
  +v2Stats(c,content,locale)
  +v2Programs(c,content,locale)
+ +v2LearningHabits(locale)
  +v2Schedule(c,content,locale)
  +'<section class="online-section section" id="online"><div class="shell"><div class="online-panel"><div class="online-symbol" aria-hidden="true"><span>1:1</span><svg viewBox="0 0 70 70" fill="none" aria-hidden="true"><circle cx="35" cy="35" r="31" stroke="currentColor" stroke-width="1.5"/><path d="M15 35h40M35 15v40" stroke="currentColor" stroke-width="1.5"/></svg></div><div class="online-copy"><p class="eyebrow">'+v2T(c.onlineLabel)+'</p><h2>'+v2T(c.onlineTitle)+'</h2><p>'+v2T(c.onlineText)+'</p></div><a class="button button-light" href="'+prefix+'admissions/?program=online-individual-zoom&amp;format=online">'+v2T(c.onlineCta)+' <span aria-hidden="true">↗</span></a></div></div></section>'
  +'<section class="journey-section section" id="why-us"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.whyLabel)+'</p><h2>'+v2T(c.whyTitle)+'</h2></div><p class="section-intro">'+v2T(c.whyLead)+'</p></div><div class="journey-grid">'+c.steps.map(([n,h,p])=>'<article class="journey-step"><span class="step-no">'+v2T(n)+'</span><div class="step-line"></div><h3>'+v2T(h)+'</h3><p>'+v2T(p)+'</p></article>').join("")+'</div><div class="tools-strip"><div class="tools-glyph" aria-hidden="true">✳</div><div class="tools-content"><span class="eyebrow">'+v2T(c.toolsLabel)+'</span><h3>'+v2T(c.toolsTitle)+'</h3><p>'+v2T(c.toolsText)+'</p></div><a class="text-link" href="'+prefix+'admissions/">'+v2T(c.toolsCta)+' <span aria-hidden="true">↗</span></a></div></div></section>'

@@ -241,6 +241,67 @@ test("General English exposes five school levels, realistic AFN tuition and Oxfo
   assert.doesNotMatch(html,/<img[^>]+(?:got-it|gotit|oxford-cover)/i,"No unlicensed Oxford images");
  }
 });
+
+test("General English editorial is localized, coherent and preserves the CMS schedule without mutation",async()=>{
+ const edited=structuredClone(main),p=structuredClone(ps);
+ for(const lang of ["en","fa"]){const x=edited.locales[lang].programs[0];Object.assign(x,{summary:"STALE_GE_SUMMARY",details:"STALE_GE_DETAILS",duration:"STALE_GE_DURATION",levels:"STALE_GE_LEVELS",schedule:"GE_CMS_SCHEDULE"});}
+ Object.assign(p.programs[0],{summary:"STALE_GE_SUMMARY",details:"STALE_GE_DETAILS",duration:"STALE_GE_DURATION",levels:"STALE_GE_LEVELS",schedule:"GE_CMS_SCHEDULE"});
+ const cases=[
+  ["/courses/general-english/","General English","1–2 months per stage","A practical foundation for your next step","Listen with understanding","General English Courses in Kabul"],
+  ["/fa/courses/general-english/","انگلیسی عمومی","۱ تا ۲ ماه برای هر سطح","بنیادی استوار برای گام بعدی شما","شنیدن و درک بهتر پیام‌ها","کورس انگلیسی عمومی در کابل"],
+  ["/ps/courses/general-english/","عمومي انګلیسي","د هرې کچې لپاره ۱ تر ۲ میاشتو","د راتلونکي ګام لپاره پیاوړی بنسټ","د پیغامونو ښه اورېدل او درک","په کابل کې د عمومي انګلیسي کورس"]
+ ];
+ for(const [path,title,duration,overview,skill,seo] of cases){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env(edited,p));
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.ok(html.includes("<h1>"+title+"</h1>"),path);
+  for(const value of [duration,overview,skill,seo,"GE_CMS_SCHEDULE"])assert.ok(html.includes(value),path+" "+value);
+  assert.doesNotMatch(html,/STALE_GE_(SUMMARY|DETAILS|DURATION|LEVELS)/);
+  assert.equal((html.match(/class="ge-stage"/g)||[]).length,5);
+  assert.equal((html.match(/class="ge-faq"/g)||[]).length,3);
+ }
+ assert.equal(edited.locales.en.programs[0].summary,"STALE_GE_SUMMARY");
+ assert.equal(p.programs[0].details,"STALE_GE_DETAILS");
+});
+
+test("General English premium introduction and five distinct learning focuses are visible in each locale",async()=>{
+ const cases=[
+  ["/courses/general-english/","English for life. A foundation for what comes next.",["Discover the basics","Connect in everyday English","Express connected ideas","Communicate more independently","Prepare for your next challenge"]],
+  ["/fa/courses/general-english/","انگلیسی برای زندگی؛ بنیادی برای آینده.",["آشنایی با پایه‌های زبان","ارتباط در موقعیت‌های روزمره","بیان افکار با جمله‌های مرتبط","مکالمهٔ مستقل‌تر","آمادگی برای گام بعدی"]],
+  ["/ps/courses/general-english/","د ژوند لپاره انګلیسي؛ د راتلونکي لپاره بنسټ.",["د ژبې له بنسټ سره اشنايي","په ورځنیو حالاتو کې خبرې","د تړلو نظریو بیان","لا خپلواکې خبرې","راتلونکي ګام ته چمتووالی"]]
+ ];
+ for(const [path,tagline,focuses] of cases){
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
+  assert.equal(response.status,200);
+  const html=await response.text();
+  assert.ok(html.includes('<p class="ge-hero-tagline"><strong>'+tagline+"</strong>"),path);
+  assert.equal((html.match(/id="ge-pathway"/g)||[]).length,1,path);
+  assert.match(html,/href="#ge-pathway"/,path);
+  assert.match(html,/class="ge-cta"/,path);
+  for(const focus of focuses)assert.ok(html.includes("<strong>"+focus+"</strong>"),path+" "+focus);
+  assert.equal((html.match(/<h1>/g)||[]).length,1,path);
+ }
+});
+
+test("General English presents all four distinct skills in a localized accessible section",async()=>{
+ const cases=[
+  ["/courses/general-english/",["Listening","Speaking","Reading","Writing"]],
+  ["/fa/courses/general-english/",["شنیدن (Listening)","مکالمه (Speaking)","خواندن (Reading)","نوشتن (Writing)"]],
+  ["/ps/courses/general-english/",["اورېدل (Listening)","خبرې کول (Speaking)","لوستل (Reading)","لیکل (Writing)"]]
+ ];
+ for(const [path,skills] of cases){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.equal((html.match(/id="ge-skills-title"/g)||[]).length,1,path);
+  const section=html.match(/<section class="ge-stages-block" aria-labelledby="ge-skills-title">([\s\S]*?)<\/section>/);
+  assert.ok(section,path);
+  assert.equal((section[1].match(/<article class="ge-fact">/g)||[]).length,4,path);
+  for(const skill of skills)assert.ok(section[1].includes("<h4>"+skill+"</h4>"),path+" "+skill);
+ }
+});
+
 test("General English supplement is exclusive to General English; other courses unchanged",async()=>{
  for(const route of ["/courses/toefl-preparation/","/fa/courses/academic-english/","/ps/courses/special-speaking/"]){
   const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
@@ -1053,5 +1114,30 @@ test("Campus photo describes only a real asset in responsive image markup",async
   const preloads=[...html.matchAll(/<link\b[^>]*rel="preload"[^>]*as="image"[^>]*>/g)];
   for(const preload of preloads)assert.doesNotMatch(preload[0],/\bimagesrcset=|\bimagesizes=/);
   if(prefix==="/fa/")assert.match(image[0],/loading="eager" fetchpriority="high"/);
+ }
+});
+
+
+test("homepage learner habits and original localized learning guides are discoverable",async()=>{
+ const variants=[["/","Make English part of your everyday life.","Free learning guides"],["/fa/","انگلیسی را بخشی از زندگی روزمرهٔ خود بسازید.","رهنمودهای رایگان یادگیری"],["/ps/","انګلیسي د خپل ورځني ژوند برخه وګرځوئ.","د زده‌کړې وړیا لارښودونه"]];
+ for(const [prefix,title,resources] of variants){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.equal((html.match(/id="learning-habits"/g)||[]).length,1);
+  const section=html.match(/<section class="journey-section section" id="learning-habits" aria-labelledby="learning-habits-title">([\s\S]*?)<\/section>/);
+  assert.ok(section,prefix);
+  assert.ok(section[1].includes(title),prefix);
+  assert.ok(section[1].includes(resources),prefix);
+  assert.equal((section[1].match(/class="journey-step"/g)||[]).length,3);
+  assert.equal((section[1].match(/class="growth-card"/g)||[]).length,3);
+  for(const slug of ["speaking-practice","english-courses-kabul","toefl-ibt-2026"]){
+   const link=prefix+"guides/"+slug+"/";
+   assert.ok(section[1].includes('href="'+link+'"'),prefix+" "+slug);
+   const guide=await worker.fetch(new Request("https://toeflhouse.pages.dev"+link),env());
+   assert.equal(guide.status,200,link);
+  }
+  assert.ok(section[1].includes('href="'+prefix+'guides/"'));
+  assert.doesNotMatch(section[1],/zabanshenas\.com|<script|<iframe/);
  }
 });

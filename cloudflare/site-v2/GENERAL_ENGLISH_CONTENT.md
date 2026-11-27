@@ -34,7 +34,8 @@ All original explanation and teaching-stage copy are newly authored. Do not uplo
 
 - Source of this dedicated page supplement: `cloudflare/site-v2/general-english.mjs`; visual design: `cloudflare/site-v2/site.css`.
 - It is compiled into the Cloudflare Pages edge renderer. **Do not modify production D1 or force a CMS draft publish to update this text**; submit a reviewed source change, build, test on Preview and publish the exact accepted bundle.
-- General program title, summary and original class information continue to be read from the existing CMS. This specialized supplement is source-controlled and **is not yet editable from the legacy CMS editor**.
+- General English course-page title, introduction, goals, audience, duration summary and detailed learning pathway now share one source-controlled trilingual editorial model. The CMS still determines course availability and the current schedule; the homepage catalog and other course pages retain their existing sources. The editorial model is not editable from the legacy CMS editor.
+- Learning goals describe intended development, not confirmed textbook-to-level mapping, guaranteed fluency, CEFR attainment, or a fixed list of assessed outcomes. Native Pashto review, staff confirmation of curriculum examples and real-user testing remain separate from automated acceptance.
 - If the course changes the fees, instructors, textbook edition, Speaking book or semester structure, update all three languages and the automated tests together.
 - Do not confuse free assessment with free course tuition; do not assert Oxford certification or a guaranteed CEFR result.
 
