@@ -394,6 +394,66 @@ const V2_GENERAL_ENGLISH={
  }
 };
 const V2_GE_STAGE_IDS=["Pre-Starter","Starter","Prep One","Prep Two","Prep Three"];
+// Original practice questions. Local-only, no placement inference or personal data.
+const V2_GE_PRACTICE_UI={
+ "en": {
+  "title": "Try a little English right now",
+  "intro": "Three short questions. Choose an answer, discover why it works, and practise again. This is a sample exercise, not a placement assessment.",
+  "question": "Question",
+  "check": "Check answer",
+  "reveal": "Show answer and explanation",
+  "correct": "Correct!",
+  "incorrect": "Not quite. Keep practising.",
+  "progress": "Answered",
+  "score": "Correct answers",
+  "reset": "Try again",
+  "explanations": [
+   "Use “I'm from” to say where you come from.",
+   "With he, she or it, add -s to most verbs in the present simple: she studies.",
+   "“Could you repeat that, please?” is a polite way to ask someone to say something again."
+  ]
+ },
+ "fa": {
+  "title": "همین حالا کمی انگلیسی تمرین کنید",
+  "intro": "سه پرسش کوتاه؛ پاسخ را انتخاب کنید، دلیل درستی آن را بیاموزید و دوباره تمرین کنید. این یک نمونهٔ تمرین است، نه آزمون تعیین سطح.",
+  "question": "پرسش",
+  "check": "بررسی پاسخ",
+  "reveal": "نمایش پاسخ و توضیح",
+  "correct": "آفرین! درست است.",
+  "incorrect": "هنوز درست نیست؛ تمرین را ادامه دهید.",
+  "progress": "پاسخ‌داده‌شده",
+  "score": "پاسخ‌های درست",
+  "reset": "تمرین دوباره",
+  "explanations": [
+   "برای بیان محل اصلی زندگی یا کشور خود، از عبارت «I'm from» استفاده می‌کنیم.",
+   "در زمان حال ساده، برای he، she و it معمولاً به فعل s اضافه می‌شود؛ study به studies تبدیل می‌شود.",
+   "عبارت «Could you repeat that, please?» راه مؤدبانه‌ای برای درخواست تکرار سخن است."
+  ]
+ },
+ "ps": {
+  "title": "همدا اوس لږ انګلیسي تمرین کړئ",
+  "intro": "درې لنډې پوښتنې؛ ځواب وټاکئ، دلیل یې زده کړئ او بیا تمرین وکړئ. دا نمونه‌یي تمرین دی، د سویې ارزونه نه ده.",
+  "question": "پوښتنه",
+  "check": "ځواب وګورئ",
+  "reveal": "ځواب او تشریح وګورئ",
+  "correct": "سم ځواب!",
+  "incorrect": "لا سم نه دی؛ تمرین ته دوام ورکړئ.",
+  "progress": "ځواب شوې",
+  "score": "سم ځوابونه",
+  "reset": "بیا تمرین وکړئ",
+  "explanations": [
+   "د خپل هېواد یا اصلي ځای د ښودلو لپاره «I'm from» وکاروئ.",
+   "په ساده اوسني زمان کې له he، she او it سره فعل عموماً s اخلي؛ study په studies بدلېږي.",
+   "«Could you repeat that, please?» له چا څخه د خبرې د بیا ویلو مؤدبانه غوښتنه ده."
+  ]
+ }
+};
+const V2_GE_PRACTICE_QUESTIONS=[{"prompt":"Where are you from?","choices":["I'm twenty years old.","I'm from Kabul.","I'm fine, thanks."],"correct":1},{"prompt":"She ___ English every day.","choices":["study","studying","studies"],"correct":2},{"prompt":"You didn't hear someone clearly. What can you say?","choices":["Could you repeat that, please?","I don't have a pen.","See you tomorrow."],"correct":0}];
+function v2GePractice(locale){
+ const c=V2_GE_PRACTICE_UI[locale]||V2_GE_PRACTICE_UI.en,e=v2T;
+ const items=V2_GE_PRACTICE_QUESTIONS.map((q,i)=>'<article class="ge-panel" data-ge-question data-correct="'+q.correct+'"><h4>'+e(c.question)+' '+(i+1)+'</h4><p lang="en" dir="ltr"><strong>'+e(q.prompt)+'</strong></p><ol data-ge-fallback lang="en" dir="ltr">'+q.choices.map(x=>'<li>'+e(x)+'</li>').join("")+'</ol><div data-ge-controls hidden><fieldset><legend>'+e(c.question)+' '+(i+1)+'</legend>'+q.choices.map((x,j)=>'<p><label><input type="radio" name="ge-practice-'+i+'" value="'+j+'"> <span lang="en" dir="ltr">'+e(x)+'</span></label></p>').join("")+'</fieldset><button type="button" class="button button-primary" data-ge-check disabled>'+e(c.check)+'</button><p data-ge-feedback role="status" aria-live="polite"></p></div><details data-ge-answer><summary>'+e(c.reveal)+'</summary><p><strong lang="en" dir="ltr">'+e(q.choices[q.correct])+'</strong> — '+e(c.explanations[i])+'</p></details></article>').join("");
+ return '<section id="ge-mini-practice" class="ge-stages-block" aria-labelledby="ge-practice-title" data-ge-practice data-correct-label="'+e(c.correct)+'" data-incorrect-label="'+e(c.incorrect)+'" data-progress-label="'+e(c.progress)+'" data-score-label="'+e(c.score)+'"><div class="ge-section-intro"><h3 id="ge-practice-title">'+e(c.title)+'</h3><p>'+e(c.intro)+'</p></div><div class="growth-card-grid">'+items+'</div><div data-ge-result hidden><p role="status" aria-live="polite" data-ge-progress></p><button class="button button-quiet" type="button" data-ge-reset>'+e(c.reset)+'</button></div></section>';
+}
 function v2GeneralEnglish(locale){
  const c=V2_GENERAL_ENGLISH[locale]||V2_GENERAL_ENGLISH.en;
  const esc=v2T;
@@ -427,6 +487,7 @@ function v2GeneralEnglish(locale){
   '<div class="ge-facts" aria-label="'+esc(c.eyebrow)+'">'+facts+'</div>'+
   '<section class="ge-stages-block" aria-labelledby="ge-skills-title"><div class="ge-section-intro"><h3 id="ge-skills-title">'+esc(c.skillTitle)+'</h3><p>'+esc(c.skillIntro)+'</p></div>'+
   '<div class="ge-facts ge-skills">'+c.skills.map(pair=>'<article class="ge-fact"><h4>'+esc(pair[0])+'</h4><p>'+esc(pair[1])+'</p></article>').join("")+'</div></section>'+
+  v2GePractice(locale)+
   '<div class="ge-stages-block" id="ge-pathway"><div class="ge-section-intro"><h3>'+esc(c.levelsTitle)+'</h3><p>'+esc(c.levelsIntro)+'</p></div>'+
   '<ol class="ge-stages">'+levelItems+'</ol></div>'+
   '<div class="ge-columns">'+
