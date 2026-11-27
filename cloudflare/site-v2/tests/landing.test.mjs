@@ -1116,3 +1116,28 @@ test("Campus photo describes only a real asset in responsive image markup",async
   if(prefix==="/fa/")assert.match(image[0],/loading="eager" fetchpriority="high"/);
  }
 });
+
+
+test("homepage learner habits and original localized learning guides are discoverable",async()=>{
+ const variants=[["/","Make English part of your everyday life.","Free learning guides"],["/fa/","انگلیسی را بخشی از زندگی روزمرهٔ خود بسازید.","رهنمودهای رایگان یادگیری"],["/ps/","انګلیسي د خپل ورځني ژوند برخه وګرځوئ.","د زده‌کړې وړیا لارښودونه"]];
+ for(const [prefix,title,resources] of variants){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.equal((html.match(/id="learning-habits"/g)||[]).length,1);
+  const section=html.match(/<section class="journey-section section" id="learning-habits" aria-labelledby="learning-habits-title">([\s\S]*?)<\/section>/);
+  assert.ok(section,prefix);
+  assert.ok(section[1].includes(title),prefix);
+  assert.ok(section[1].includes(resources),prefix);
+  assert.equal((section[1].match(/class="journey-step"/g)||[]).length,3);
+  assert.equal((section[1].match(/class="growth-card"/g)||[]).length,3);
+  for(const slug of ["speaking-practice","english-courses-kabul","toefl-ibt-2026"]){
+   const link=prefix+"guides/"+slug+"/";
+   assert.ok(section[1].includes('href="'+link+'"'),prefix+" "+slug);
+   const guide=await worker.fetch(new Request("https://toeflhouse.pages.dev"+link),env());
+   assert.equal(guide.status,200,link);
+  }
+  assert.ok(section[1].includes('href="'+prefix+'guides/"'));
+  assert.doesNotMatch(section[1],/zabanshenas\.com|<script|<iframe/);
+ }
+});
