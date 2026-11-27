@@ -275,7 +275,10 @@ test("General English premium introduction and five distinct learning focuses ar
   const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
   assert.equal(response.status,200);
   const html=await response.text();
-  assert.ok(html.includes("<strong>"+tagline+"</strong>"),path);
+  assert.ok(html.includes('<p class="ge-hero-tagline"><strong>'+tagline+"</strong>"),path);
+  assert.equal((html.match(/id="ge-pathway"/g)||[]).length,1,path);
+  assert.match(html,/href="#ge-pathway"/,path);
+  assert.match(html,/class="ge-cta"/,path);
   for(const focus of focuses)assert.ok(html.includes("<strong>"+focus+"</strong>"),path+" "+focus);
   assert.equal((html.match(/<h1>/g)||[]).length,1,path);
  }
