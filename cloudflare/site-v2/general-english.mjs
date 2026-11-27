@@ -6,9 +6,9 @@
  */
 const V2_GENERAL_ENGLISH={
  "en": {
-  "eyebrow": "YOUR LEARNING PATHWAY",
-  "title": "From your first words to meaningful conversations.",
-  "intro": "Five progressive stages bring together the four language skills, vocabulary and grammar. Two instructors teach the program using selected lessons from Oxford University Press’s Got it! series and a dedicated Speaking chapter.",
+  "eyebrow": "THE LEARNING EXPERIENCE",
+  "title": "A clear path from learning to using English",
+  "intro": "Learn through selected lessons from Oxford University Press’s Got it! series, taught by two instructors and complemented by a dedicated Speaking chapter.",
   "facts": [
    [
     "2 instructors",
@@ -27,14 +27,14 @@ const V2_GENERAL_ENGLISH={
     "Placement assessment"
    ]
   ],
-  "levelsTitle": "Know what you are working toward",
-  "levelsIntro": "Begin at the level that matches your current English. Pre-Starter lasts one month; Starter through Prep Three each last two months. The descriptions below are learning aims, not guaranteed outcomes.",
+  "levelsTitle": "Five stages. Five meaningful steps forward.",
+  "levelsIntro": "Start at the right level for you. Each stage has a distinct learning focus; progress depends on your starting point, attendance and practice.",
   "stageDescs": [
-   "Get comfortable with essential words, basic expressions and simple classroom instructions. Practise recognising sounds and forming your first short sentences.",
-   "Use familiar vocabulary and basic sentence patterns to introduce yourself, ask simple questions and take part in short everyday exchanges.",
-   "Develop understanding of short texts and spoken messages; practise describing routines, preferences and familiar experiences in connected sentences.",
-   "Work toward more independent conversations, clearer descriptions and explanations. Connect ideas and practise reading and writing longer passages.",
-   "Strengthen accuracy, comprehension and confidence across the four skills, building a foundation for more advanced or academic English study."
+   "Recognize essential sounds and words, follow simple instructions and form your first short sentences.",
+   "Introduce yourself, ask and answer simple questions, and exchange information in familiar situations.",
+   "Understand short texts and spoken messages; describe routines, preferences and familiar experiences.",
+   "Explain ideas, take part in longer conversations and organize information in reading and writing.",
+   "Consolidate accuracy and comprehension across all four skills as a foundation for further study."
   ],
   "foundation": "1 month",
   "semester": "2 months / semester",
@@ -42,33 +42,33 @@ const V2_GENERAL_ENGLISH={
   "tuition": "Tuition",
   "monthlyRate": "500 AFN per month",
   "semesterRate": "1,000 AFN per semester",
-  "twoTitle": "Two instructors, one learning pathway",
-  "twoText": "Two instructors support the program, connecting the core lessons with dedicated speaking practice so that language knowledge can become usable communication. Ask admissions about the teachers and timetable for your class.",
+  "twoTitle": "Two instructors. A connected approach.",
+  "twoText": "Core lessons and speaking practice complement one another within a program taught by two instructors. Admissions can confirm your class teachers and timetable.",
   "oxfordLabel": "LEARNING MATERIALS",
-  "oxfordTitle": "Learn language in context with Got it!",
-  "oxfordIntro": "Published by Oxford University Press, Got it! is a four-level American English series originally designed for secondary learners. Selected lessons provide a structured resource for developing language knowledge and communicative skills.",
+  "oxfordTitle": "Learn with structure. Practise with purpose.",
+  "oxfordIntro": "Got it!, from Oxford University Press, is a four-level American English series originally developed for secondary learners. Selected lessons connect grammar and vocabulary with meaningful communication.",
   "oxfordFeatures": [
-   "Vocabulary and grammar in meaningful situations, with opportunities to apply them.",
-   "Listening and reading for understanding, followed by opportunities to speak and write.",
-   "Dialogues, pair-work and communication tasks that encourage active participation.",
-   "Review and self-assessment activities to help learners recognise progress and areas to practise."
+   "Language in context, rather than isolated rules.",
+   "Listening and reading linked to speaking and writing.",
+   "Dialogues, pair work and practical communication tasks.",
+   "Review and self-assessment to recognize progress."
   ],
   "oxfordLevelsLabel": "Publisher's book levels",
   "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
   "oxfordNote": "The TOEFL House’s five stages are separate from the four publisher book levels. Confirm the edition and materials for your class with admissions. Textbook use does not imply Oxford endorsement or accreditation.",
   "speakingLabel": "DEDICATED SPEAKING CHAPTER",
-  "speakingTitle": "Put the English you learn into practice",
-  "speakingText": "Knowing a word is different from being able to use it in a conversation. The additional Speaking chapter creates opportunities to practise pronunciation, ask and answer questions, exchange ideas and use familiar language in everyday situations.",
+  "speakingTitle": "Make English a language you use.",
+  "speakingText": "Move beyond knowing the answer on paper. The dedicated Speaking chapter gives you opportunities to practise pronunciation, ask questions, share ideas and respond in everyday conversations.",
   "feeLabel": "PLAN YOUR STUDY",
-  "feeTitle": "A clear investment in your English",
-  "feeIntro": "Monthly tuition is AFN 500. Pre-Starter lasts one month; each later stage lasts two months and costs AFN 1,000 in tuition. Payment is arranged by semester; confirm dates and textbook charges with admissions.",
+  "feeTitle": "Your time and tuition, made clear",
+  "feeIntro": "Monthly tuition is AFN 500. The introductory stage is one month; each following stage is a two-month semester. Fees are arranged by semester.",
   "colLevel": "Course stage",
   "colDuration": "Duration",
   "colFee": "Stage tuition",
   "totalTitle": "Full pathway, if taken consecutively",
   "totalDuration": "9 months",
   "totalFee": "4,500 AFN",
-  "totalNote": "Nine months and AFN 4,500 represent the full sequential pathway, not a compulsory upfront payment. Your starting point may differ. Books and any additional charges should be confirmed before enrollment.",
+  "totalNote": "The full pathway assumes all five stages are taken consecutively; it is not an upfront payment requirement. Confirm textbook costs and payment dates with admissions.",
   "faqTitle": "Make an informed decision",
   "faqs": [
    [
@@ -87,26 +87,34 @@ const V2_GENERAL_ENGLISH={
   "sourcesTitle": "Textbook information and references",
   "sourcesNote": "Book details are based on Oxford University Press bibliographic and catalogue information. Teaching with a published Oxford textbook does not mean the institute is endorsed or accredited by Oxford University Press.",
   "cta": "Request a free placement assessment",
-  "ctaSub": "Take the first step at your current level. Ask about class times, available places and learning materials. No email required.",
+  "ctaSub": "Discover your starting level and the class that fits you. No email required.",
   "heroTitle": "General English",
-  "heroIntro": "Build the English you need for everyday conversations, further study and new opportunities. Start at the right level and develop practical communication skills through a structured, five-stage learning pathway.",
+  "heroIntro": "Begin with the English you know. Build the skills to take part in everyday conversations, express your ideas and prepare for further study. Five progressive stages, Oxford Got it! lessons and dedicated speaking practice bring your learning together.",
   "heroDuration": "1–2 months per stage",
   "heroSkills": [
-   "Understand everyday spoken English",
-   "Express ideas clearly in conversation",
-   "Read and write with greater confidence",
-   "Use vocabulary and grammar in context"
+   "Listen with understanding",
+   "Speak with increasing confidence",
+   "Read and write with clarity",
+   "Apply grammar and vocabulary"
   ],
   "overviewTitle": "A practical foundation for your next step",
-  "overview": "Knowing English means more than remembering words and rules. This program connects language knowledge with meaningful use: listening for information, expressing ideas, understanding texts and writing clearly. It is designed to help you develop these skills together, at a pace appropriate to your starting level.",
-  "audience": "For beginners and learners who want to rebuild their foundations, communicate more independently or prepare for further English study. Your starting class is recommended after a free placement assessment.",
+  "overview": "Every lesson has a purpose: understand more, express yourself more clearly and use English beyond the classroom. Develop listening, speaking, reading and writing alongside vocabulary and grammar, with a pathway that begins at your current level.",
+  "audience": "Starting from the basics? Returning to English after a break? Preparing for more advanced study? This program helps you build the foundation. A free placement assessment guides your starting point.",
   "seoTitle": "General English Courses in Kabul | The TOEFL House",
-  "seoDescription": "Learn practical English in five stages, with Oxford Got it! lessons and dedicated speaking practice. AFN 500 monthly tuition. Free placement assessment in Kabul."
+  "seoDescription": "Learn practical English in five stages, with Oxford Got it! lessons and dedicated speaking practice. AFN 500 monthly tuition. Free placement assessment in Kabul.",
+  "heroTagline": "English for life. A foundation for what comes next.",
+  "stageFocus": [
+   "Discover the basics",
+   "Connect in everyday English",
+   "Express connected ideas",
+   "Communicate more independently",
+   "Prepare for your next challenge"
+  ]
  },
  "fa": {
-  "eyebrow": "مسیر یادگیری شما",
-  "title": "از نخستین جمله‌ها تا مکالمات معنادار",
-  "intro": "پنج سطح پیوسته، چهار مهارت زبان، لغات و گرامر را در کنار هم پرورش می‌دهند. دو استاد با استفاده از درس‌های منتخب Got it! انتشارات Oxford University Press و چپتر اختصاصی Speaking این برنامه را تدریس می‌کنند.",
+  "eyebrow": "تجربهٔ یادگیری",
+  "title": "مسیری روشن از یادگیری تا کاربرد زبان",
+  "intro": "دو استاد، درس‌های منتخب Got it! انتشارات Oxford University Press را در کنار چپتر اختصاصی Speaking تدریس می‌کنند.",
   "facts": [
    [
     "۲ استاد",
@@ -125,14 +133,14 @@ const V2_GENERAL_ENGLISH={
     "تعیین سطح"
    ]
   ],
-  "levelsTitle": "در هر سطح به سوی چه هدفی پیش می‌روید؟",
-  "levelsIntro": "از سطح متناسب با دانش فعلی خود آغاز کنید. Pre-Starter یک ماه و چهار سطح بعدی هرکدام دو ماه دوام دارند. توضیحات زیر اهداف آموزشی‌اند، نه تضمین نتیجهٔ یکسان برای همه.",
+  "levelsTitle": "پنج سطح؛ پنج گام هدفمند",
+  "levelsIntro": "از سطح مناسب خود آغاز کنید. هر مرحله هدف آموزشی مشخصی دارد و پیشرفت شما به سطح آغازین، حضور در صنف و تمرین وابسته است.",
   "stageDescs": [
-   "با لغات ضروری، عبارت‌های ابتدایی و دستورهای سادهٔ صنفی آشنا شوید؛ تشخیص صداها و ساختن نخستین جمله‌های کوتاه را تمرین کنید.",
-   "با استفاده از لغات آشنا و ساختارهای ساده، خود را معرفی کنید، پرسش‌های ابتدایی مطرح کنید و در گفت‌وگوهای کوتاه روزمره سهم بگیرید.",
-   "درک متن‌ها و پیام‌های گفتاری کوتاه را تقویت کنید و دربارهٔ عادت‌ها، علاقه‌ها و تجربه‌های آشنا با جمله‌های مرتبط صحبت کنید.",
-   "به سوی مکالمهٔ مستقل‌تر، توصیف روشن و توضیح افکار پیش بروید؛ ارتباط میان جمله‌ها و خواندن و نوشتن متن‌های طولانی‌تر را تمرین کنید.",
-   "دقت زبانی، درک مطلب و اعتماد به نفس را در چهار مهارت تقویت کنید و برای ادامهٔ آموزش پیشرفته‌تر یا اکادمیک بنیاد بسازید."
+   "صداها و لغات ضروری را بشناسید، دستورهای ساده را درک کنید و نخستین جمله‌های کوتاه خود را بسازید.",
+   "خود را معرفی کنید، پرسش و پاسخ ساده داشته باشید و در موقعیت‌های آشنا معلومات ردوبدل کنید.",
+   "متن‌ها و پیام‌های گفتاری کوتاه را درک کنید و دربارهٔ عادت‌ها، علاقه‌ها و تجربه‌های آشنا صحبت کنید.",
+   "افکار خود را توضیح دهید، در گفت‌وگوهای طولانی‌تر سهم بگیرید و معلومات را در خواندن و نوشتن منظم کنید.",
+   "دقت و درک خود را در چهار مهارت تقویت کنید تا برای ادامهٔ آموزش انگلیسی آماده‌تر شوید."
   ],
   "foundation": "۱ ماه",
   "semester": "۲ ماه / یک سمستر",
@@ -140,33 +148,33 @@ const V2_GENERAL_ENGLISH={
   "tuition": "فیس دوره",
   "monthlyRate": "۵۰۰ افغانی برای یک ماه",
   "semesterRate": "۱٬۰۰۰ افغانی برای هر سمستر",
-  "twoTitle": "دو استاد، یک مسیر آموزشی هماهنگ",
-  "twoText": "دو استاد در تدریس این برنامه سهم دارند و درس‌های اصلی را با تمرین اختصاصی مکالمه پیوند می‌دهند تا آموخته‌ها به توانایی ارتباطی تبدیل شوند. نام استادان و تقسیم اوقات صنف را از پذیرش بپرسید.",
+  "twoTitle": "دو استاد؛ آموزش هماهنگ",
+  "twoText": "درس‌های اصلی و تمرین مکالمه در برنامه‌ای که دو استاد تدریس می‌کنند، مکمل یکدیگرند. نام استادان و تقسیم اوقات صنف را از پذیرش بپرسید.",
   "oxfordLabel": "منابع آموزشی",
-  "oxfordTitle": "یادگیری زبان در متن و موقعیت با Got it!",
-  "oxfordIntro": "Got it! مجموعهٔ چهارسطحی انگلیسی امریکایی از Oxford University Press است که در اصل برای زبان‌آموزان دورهٔ متوسطه تدوین شده است. درس‌های منتخب آن منبعی منظم برای تقویت دانش زبان و مهارت‌های ارتباطی فراهم می‌کنند.",
+  "oxfordTitle": "آموزش منظم؛ تمرین هدفمند",
+  "oxfordIntro": "Got it! مجموعهٔ چهارسطحی انگلیسی امریکایی از Oxford University Press است که در اصل برای زبان‌آموزان دورهٔ متوسطه تدوین شده است. درس‌های منتخب آن لغات و گرامر را با ارتباط عملی پیوند می‌دهند.",
   "oxfordFeatures": [
-   "آموزش لغات و گرامر در موقعیت‌های معنادار و تمرین کاربرد آن‌ها.",
-   "شنیدن و خواندن برای درک مطلب، همراه با فرصت صحبت‌کردن و نوشتن.",
-   "گفت‌وگو، فعالیت‌های دونفری و تمرین‌های ارتباطی برای مشارکت فعال.",
-   "مرور و خودارزیابی برای شناخت پیشرفت و بخش‌هایی که به تمرین بیشتر نیاز دارند."
+   "یادگیری زبان در متن و موقعیت، نه صرفاً حفظ قواعد.",
+   "پیوند شنیدن و خواندن با صحبت‌کردن و نوشتن.",
+   "گفت‌وگو، فعالیت‌های دونفری و تمرین ارتباطی.",
+   "مرور درس‌ها و خودارزیابی برای شناخت پیشرفت."
   ],
   "oxfordLevelsLabel": "سطح‌های کتاب‌های ناشر",
   "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
   "oxfordNote": "پنج سطح تافل هوس با چهار سطح کتاب‌های ناشر یکسان نیستند. کتاب و ویرایش مورد استفاده را از پذیرش بپرسید. استفاده از کتاب آکسفورد به معنای تأیید یا اعتباردهی رسمی این ناشر نیست.",
   "speakingLabel": "چپتر اختصاصی Speaking",
-  "speakingTitle": "انگلیسی آموخته‌شده را به کار ببرید",
-  "speakingText": "دانستن یک لغت با توانایی استفاده از آن در مکالمه تفاوت دارد. چپتر تکمیلی Speaking فرصتی برای تمرین تلفظ، پرسش و پاسخ، بیان افکار و کاربرد زبان در موقعیت‌های آشنای روزمره فراهم می‌کند.",
+  "speakingTitle": "انگلیسی را به زبان گفت‌وگوی خود تبدیل کنید",
+  "speakingText": "از دانستن پاسخ روی کاغذ فراتر بروید. چپتر اختصاصی Speaking فرصت تمرین تلفظ، پرسش و پاسخ، بیان افکار و مشارکت در مکالمات روزمره را فراهم می‌کند.",
   "feeLabel": "برای آموزش خود برنامه‌ریزی کنید",
-  "feeTitle": "مدت و فیس آموزشی، به‌صورت شفاف",
-  "feeIntro": "فیس ماهانه ۵۰۰ افغانی است. Pre-Starter یک ماه دوام دارد؛ هر سطح بعدی دو ماه است و فیس تدریس آن ۱٬۰۰۰ افغانی می‌شود. پرداخت به‌صورت سمستر تنظیم می‌شود؛ زمان پرداخت و قیمت کتاب را از پذیرش بپرسید.",
+  "feeTitle": "مدت آموزش و فیس، کاملاً روشن",
+  "feeIntro": "فیس ماهانه ۵۰۰ افغانی است. سطح مقدماتی یک ماه و هر سطح بعدی یک سمستر دوماهه دوام دارد. پرداخت فیس به‌صورت سمستر تنظیم می‌شود.",
   "colLevel": "سطح آموزشی",
   "colDuration": "مدت",
   "colFee": "فیس سطح",
   "totalTitle": "مجموع مسیر در صورت تکمیل پی‌هم",
   "totalDuration": "۹ ماه",
   "totalFee": "۴٬۵۰۰ افغانی",
-  "totalNote": "نُه ماه و ۴٬۵۰۰ افغانی مجموع مسیر کامل است، نه پرداخت اجباری پیشاپیش. سطح آغازین شما ممکن است متفاوت باشد. هزینهٔ کتاب و مصارف احتمالی دیگر را پیش از ثبت‌نام تأیید کنید.",
+  "totalNote": "مجموع مسیر بر اساس تکمیل پی‌هم پنج سطح محاسبه شده است؛ پرداخت کامل پیشاپیش الزامی نیست. زمان پرداخت و قیمت کتاب‌ها را از پذیرش بپرسید.",
   "faqTitle": "با معلومات کامل تصمیم بگیرید",
   "faqs": [
    [
@@ -185,26 +193,34 @@ const V2_GENERAL_ENGLISH={
   "sourcesTitle": "مراجع معلومات کتاب‌ها",
   "sourcesNote": "معلومات کتاب‌های Got it! بر اساس منابع کتاب‌شناسی و فهرست نشرات Oxford University Press تهیه شده است. استفاده از کتاب‌های Oxford به معنی تأیید رسمی یا اعتباردهی این ناشر به تافل هوس نیست.",
   "cta": "درخواست تعیین سطح رایگان",
-  "ctaSub": "از سطح فعلی خود آغاز کنید. دربارهٔ تقسیم اوقات، ظرفیت صنف و کتاب‌ها معلومات بگیرید. ایمیل ضروری نیست.",
+  "ctaSub": "سطح آغازین و صنف متناسب با نیاز خود را بشناسید. ایمیل ضروری نیست.",
   "heroTitle": "انگلیسی عمومی",
-  "heroIntro": "انگلیسی را برای مکالمات روزمره، ادامهٔ تحصیل و فرصت‌های تازه بیاموزید. از سطح مناسب خود آغاز کنید و در یک مسیر پنج‌مرحله‌ای، مهارت‌های ارتباطی زبان را گام‌به‌گام پرورش دهید.",
+  "heroIntro": "از آنچه امروز می‌دانید آغاز کنید و مهارت‌هایی را پرورش دهید که برای مکالمات روزمره، بیان افکار و ادامهٔ تحصیل نیاز دارید. پنج سطح آموزشی، درس‌های Got it! آکسفورد و تمرین اختصاصی مکالمه، مسیر یادگیری شما را شکل می‌دهند.",
   "heroDuration": "۱ تا ۲ ماه برای هر سطح",
   "heroSkills": [
-   "درک بهتر انگلیسی گفتاری روزمره",
-   "بیان روشن‌تر افکار در مکالمه",
-   "خواندن و نوشتن با اطمینان بیشتر",
-   "کاربرد لغات و گرامر در موقعیت‌های واقعی"
+   "شنیدن و درک بهتر پیام‌ها",
+   "مکالمه با اعتماد به نفس بیشتر",
+   "خواندن و نوشتن به‌صورت روشن",
+   "کاربرد عملی لغات و گرامر"
   ],
   "overviewTitle": "بنیادی استوار برای گام بعدی شما",
-  "overview": "یادگیری انگلیسی فراتر از حفظ لغات و قواعد گرامر است. در این برنامه، آموخته‌های زبانی با کاربرد عملی پیوند می‌خورند: شنیدن و درک پیام، بیان افکار، فهم متن و نوشتن روشن. هدف این است که مهارت‌های زبان را به‌صورت مرتبط و متناسب با سطح فعلی خود تقویت کنید.",
-  "audience": "برای شاگردان مبتدی و کسانی که می‌خواهند پایهٔ زبان خود را تقویت کنند، مستقل‌تر صحبت کنند یا برای ادامهٔ آموزش انگلیسی آماده شوند. سطح آغازین با تعیین سطح رایگان پیشنهاد می‌شود.",
+  "overview": "هدف هر درس روشن است: بهتر بفهمید، افکار خود را دقیق‌تر بیان کنید و انگلیسی را بیرون از صنف نیز به کار ببرید. چهار مهارت زبان، لغات و گرامر را در مسیری متناسب با سطح فعلی خود تقویت کنید.",
+  "audience": "تازه انگلیسی را آغاز می‌کنید؟ پس از وقفه دوباره به یادگیری روی آورده‌اید؟ یا برای آموزش پیشرفته‌تر آماده می‌شوید؟ این برنامه برای تقویت پایهٔ زبان شما طراحی شده است. تعیین سطح رایگان، نقطهٔ آغاز مناسب را مشخص می‌کند.",
   "seoTitle": "کورس انگلیسی عمومی در کابل | تافل هوس",
-  "seoDescription": "آموزش کاربردی انگلیسی در پنج سطح با درس‌های Got it! آکسفورد و بخش اختصاصی مکالمه. فیس ماهانه ۵۰۰ افغانی؛ تعیین سطح رایگان در کابل."
+  "seoDescription": "آموزش کاربردی انگلیسی در پنج سطح با درس‌های Got it! آکسفورد و بخش اختصاصی مکالمه. فیس ماهانه ۵۰۰ افغانی؛ تعیین سطح رایگان در کابل.",
+  "heroTagline": "انگلیسی برای زندگی؛ بنیادی برای آینده.",
+  "stageFocus": [
+   "آشنایی با پایه‌های زبان",
+   "ارتباط در موقعیت‌های روزمره",
+   "بیان افکار با جمله‌های مرتبط",
+   "مکالمهٔ مستقل‌تر",
+   "آمادگی برای گام بعدی"
+  ]
  },
  "ps": {
-  "eyebrow": "ستاسو د زده‌کړې بهیر",
-  "title": "له لومړنیو جملو څخه تر مانا لرونکو خبرو پورې",
-  "intro": "پنځه پرله‌پسې کچې د ژبې څلور مهارتونه، لغتونه او ګرامر یوځای پیاوړي کوي. دوه ښوونکي د Oxford University Press د Got it! له ټاکلو درسونو او د Speaking له ځانګړي څپرکي څخه کار اخلي.",
+  "eyebrow": "د زده‌کړې تجربه",
+  "title": "له زده‌کړې څخه تر عملي کارونې روښانه لار",
+  "intro": "دوه ښوونکي د Oxford University Press د Got it! ټاکلي درسونه د Speaking له ځانګړي څپرکي سره یوځای تدریسوي.",
   "facts": [
    [
     "۲ ښوونکي",
@@ -223,14 +239,14 @@ const V2_GENERAL_ENGLISH={
     "د سویې ارزونه"
    ]
   ],
-  "levelsTitle": "په هره کچه څه موخه لرئ؟",
-  "levelsIntro": "له خپلې اوسنۍ پوهې سره سم پیل وکړئ. Pre-Starter یوه میاشت او ورپسې څلور کچې هره یوه دوه میاشتې دوام کوي. لاندې موخې ښوونیزې دي، د ټولو لپاره د یو شان پایلې تضمین نه دی.",
+  "levelsTitle": "پنځه کچې؛ پنځه موخمن ګامونه",
+  "levelsIntro": "له خپلې مناسبې کچې پیل وکړئ. هر پړاو ځانګړې ښوونیزه موخه لري؛ پرمختګ ستاسو له لومړنۍ کچې، حضور او تمرین سره تړاو لري.",
   "stageDescs": [
-   "له اړینو لغتونو، لومړنیو عبارتونو او د ټولګي له ساده لارښوونو سره اشنا شئ؛ د غږونو پېژندنه او د لنډو جملو جوړول تمرین کړئ.",
-   "په اشنا لغتونو او ساده جوړښتونو ځان معرفي کړئ، پوښتنې وکړئ او په لنډو ورځنیو خبرو کې ګډون وکړئ.",
-   "د لنډو متنونو او شفاهي پیغامونو درک پیاوړی کړئ؛ د ورځنیو عادتونو، خوښو او اشنا تجربو په اړه تړلې جملې وکاروئ.",
-   "د لا خپلواکو خبرو، روښانه تشریح او د نظریو بیان پر لور پرمختګ وکړئ؛ د جملو تړل او د اوږدو متنونو لوستل او لیکل تمرین کړئ.",
-   "په څلورو مهارتونو کې دقت، درک او پر ځان باور پیاوړی کړئ او د لا پرمختللو یا اکاډمیکو زده‌کړو لپاره بنسټ جوړ کړئ."
+   "اړین غږونه او لغتونه وپېژنئ، په ساده لارښوونو پوه شئ او خپلې لومړنۍ لنډې جملې جوړې کړئ.",
+   "ځان معرفي کړئ، ساده پوښتنې او ځوابونه تمرین کړئ او په اشنا حالاتو کې معلومات شریک کړئ.",
+   "لنډ متنونه او شفاهي پیغامونه درک کړئ؛ د عادتونو، خوښو او اشنا تجربو په اړه خبرې وکړئ.",
+   "خپلې نظریې تشریح کړئ، په اوږدو خبرو کې ګډون وکړئ او د لوستلو او لیکلو معلومات منظم کړئ.",
+   "په څلورو مهارتونو کې دقت او درک پیاوړی کړئ، څو د انګلیسي نورو زده‌کړو ته چمتو شئ."
   ],
   "foundation": "۱ میاشت",
   "semester": "۲ میاشتې / یو سمستر",
@@ -238,33 +254,33 @@ const V2_GENERAL_ENGLISH={
   "tuition": "فیس",
   "monthlyRate": "۵۰۰ افغانۍ د یوې میاشتې",
   "semesterRate": "۱٬۰۰۰ افغانۍ د هر سمستر",
-  "twoTitle": "دوه ښوونکي، یو همغږی درسي بهیر",
-  "twoText": "دوه ښوونکي په دې پروګرام کې تدریس کوي او اصلي درسونه د خبرو له ځانګړي تمرین سره تړي. د خپل ټولګي د ښوونکو او مهالوېش په اړه له نوم‌لیکنې څانګې معلومات واخلئ.",
+  "twoTitle": "دوه ښوونکي؛ همغږی تدریس",
+  "twoText": "اصلي درسونه او د خبرو تمرین د دوو ښوونکو په تدریسي پروګرام کې یو بل بشپړوي. د ښوونکو او مهالوېش په اړه له ادارې معلومات واخلئ.",
   "oxfordLabel": "درسي سرچینې",
-  "oxfordTitle": "له Got it! سره په متن او حالت کې ژبه زده کړئ",
-  "oxfordIntro": "Got it! د Oxford University Press د امریکایي انګلیسي څلورکچیزه لړۍ ده چې په اصل کې د منځني ښوونځي زده‌کوونکو لپاره جوړه شوې ده. ټاکلي درسونه یې د ژبې د پوهې او عملي اړیکو لپاره منظمه سرچینه برابروي.",
+  "oxfordTitle": "منظمه زده‌کړه، موخمن تمرین",
+  "oxfordIntro": "Got it! د Oxford University Press د امریکایي انګلیسي څلورکچیزه لړۍ ده چې په اصل کې د منځني ښوونځي زده‌کوونکو لپاره جوړه شوې ده. ټاکلي درسونه یې لغتونه او ګرامر له عملي اړیکو سره تړي.",
   "oxfordFeatures": [
-   "په مانا لرونکو حالتونو کې د لغتونو او ګرامر زده‌کړه او عملي تمرین.",
-   "د مطلب د درک لپاره اورېدل او لوستل، ورسره د خبرو او لیکلو فرصتونه.",
-   "خبرې اترې، دوه‌کسیز تمرینونه او ارتباطي فعالیتونه.",
-   "د درسونو بیاکتنه او ځان‌ارزونه، څو پرمختګ او د نورو تمرینونو اړتیا معلومه شي."
+   "په متن او حالت کې د ژبې زده‌کړه، نه یوازې د قواعدو یادول.",
+   "اورېدل او لوستل له خبرو او لیکلو سره تړل.",
+   "خبرې اترې، دوه‌کسیز تمرینونه او عملي فعالیتونه.",
+   "د پرمختګ لپاره بیاکتنه او ځان‌ارزونه."
   ],
   "oxfordLevelsLabel": "د خپرندوی د کتابونو کچې",
   "oxfordLevels": "Got it! Starter · Got it! Level 1 · Got it! Level 2 · Got it! Level 3",
   "oxfordNote": "د تافل هوس پنځه کچې د خپرندوی له څلورو کتابي کچو سره یو شان نه دي. د کتاب چاپ او درسي مواد له ادارې معلوم کړئ. د Oxford کتابونو کارول د خپرندوی رسمي تایید نه ښيي.",
   "speakingLabel": "د Speaking ځانګړی څپرکی",
-  "speakingTitle": "زده کړې انګلیسي په خبرو کې وکاروئ",
-  "speakingText": "د یوه لغت پېژندل او په خبرو کې کارول یې توپیر لري. د Speaking اضافي څپرکی د تلفظ، پوښتنو او ځوابونو، د نظریو د شریکولو او په ورځنیو حالتونو کې د ژبې د کارولو فرصتونه برابروي.",
+  "speakingTitle": "انګلیسي په خپلو خبرو کې وکاروئ",
+  "speakingText": "یوازې په کاغذ د ځواب له پېژندلو وړاندې لاړ شئ. د Speaking ځانګړی څپرکی د تلفظ، پوښتنو او ځوابونو، د نظریو بیان او ورځنیو خبرو د تمرین فرصت برابروي.",
   "feeLabel": "خپلې زده‌کړې پلان کړئ",
   "feeTitle": "روښانه موده او درسي فیس",
-  "feeIntro": "میاشتنی فیس ۵۰۰ افغانۍ دی. Pre-Starter یوه میاشت دی؛ هره بله کچه دوه میاشتې دوام کوي او درسي فیس یې ۱٬۰۰۰ افغانۍ دی. فیس د سمستر له مخې تنظیمېږي؛ د ورکړې وخت او د کتاب بیه له ادارې وپوښتئ.",
+  "feeIntro": "میاشتنی فیس ۵۰۰ افغانۍ دی. لومړنۍ کچه یوه میاشت او هره بله کچه یو دوه میاشتنی سمستر دی. فیس د سمستر له مخې تنظیمېږي.",
   "colLevel": "درسي کچه",
   "colDuration": "موده",
   "colFee": "د کچې فیس",
   "totalTitle": "د پرله‌پسې پنځو کچو ټولیز بهیر",
   "totalDuration": "۹ میاشتې",
   "totalFee": "۴٬۵۰۰ افغانۍ",
-  "totalNote": "نهه میاشتې او ۴٬۵۰۰ افغانۍ د بشپړ بهیر مجموعه ده، نه اجباري مخکېنۍ ورکړه. ستاسو د پیل کچه توپیر لرلای شي. د کتابونو او نورو احتمالي لګښتونو په اړه مخکې معلومات واخلئ.",
+  "totalNote": "ټولیزه موده او فیس د پنځو پرله‌پسې کچو لپاره محاسبه شوي؛ مخکېنۍ بشپړه ورکړه اجباري نه ده. د کتاب بیه او د پیسو وخت له ادارې وپوښتئ.",
   "faqTitle": "په بشپړو معلوماتو پرېکړه وکړئ",
   "faqs": [
    [
@@ -283,21 +299,29 @@ const V2_GENERAL_ENGLISH={
   "sourcesTitle": "د کتابونو باوري سرچینې",
   "sourcesNote": "د Got it! د کتابونو معلومات د Oxford University Press د کتاب‌پېژندنې او خپرونو پر بنسټ دي. د Oxford له کتابونو ګټه اخیستل د دې معنا نه لري چې دغه خپرندوی تافل هوس ته رسمي تایید ورکړی دی.",
   "cta": "د سویې د وړیا ارزونې غوښتنه",
-  "ctaSub": "له خپلې اوسنۍ کچې پیل وکړئ. د ټولګي وخت، شته ځایونو او درسي موادو په اړه معلومات واخلئ. ایمیل اړین نه دی.",
+  "ctaSub": "خپله مناسبه لومړنۍ کچه او ټولګی وپېژنئ. ایمیل اړین نه دی.",
   "heroTitle": "عمومي انګلیسي",
-  "heroIntro": "د ورځنیو خبرو، نورو زده‌کړو او نویو فرصتونو لپاره انګلیسي زده کړئ. له خپلې مناسبې کچې پیل وکړئ او په پنځو پړاوونو کې د ژبې عملي مهارتونه ورو ورو پیاوړي کړئ.",
+  "heroIntro": "له خپلې اوسنۍ پوهې پیل وکړئ او د ورځنیو خبرو، د نظریو بیان او نورو زده‌کړو لپاره مهارتونه پیاوړي کړئ. پنځه کچې، د Got it! درسونه او د خبرو ځانګړی تمرین ستاسو د زده‌کړې بهیر جوړوي.",
   "heroDuration": "د هرې کچې لپاره ۱ تر ۲ میاشتو",
   "heroSkills": [
-   "د ورځنیو انګلیسي خبرو ښه درک",
-   "په خبرو کې د نظریو روښانه بیان",
-   "په ډېر باور لوستل او لیکل",
-   "په واقعي حالتونو کې د لغتونو او ګرامر کارول"
+   "د پیغامونو ښه اورېدل او درک",
+   "په ډېر باور خبرې کول",
+   "روښانه لوستل او لیکل",
+   "د لغتونو او ګرامر عملي کارول"
   ],
   "overviewTitle": "د راتلونکي ګام لپاره پیاوړی بنسټ",
-  "overview": "د انګلیسي زده‌کړه یوازې د لغتونو او قواعدو یادول نه دي. دا پروګرام د ژبې پوهه له عملي کارونې سره تړي: د پیغامونو اورېدل او درک، د نظریو بیان، د متن لوستل او روښانه لیکل. موخه دا ده چې دغه مهارتونه د خپلې اوسنۍ کچې مطابق یوځای پیاوړي کړئ.",
-  "audience": "د پیل کوونکو او هغو زده‌کوونکو لپاره چې غواړي د ژبې بنسټ پیاوړی کړي، په خپلواکه توګه خبرې وکړي یا د انګلیسي نورو زده‌کړو ته چمتو شي. د پیل مناسبه کچه د سویې له وړیا ارزونې وروسته وړاندیز کېږي.",
+  "overview": "د هر درس موخه روښانه ده: ښه پوه شئ، خپلې نظریې په روښانه ډول بیان کړئ او له ټولګي بهر هم انګلیسي وکاروئ. د ژبې څلور مهارتونه، لغتونه او ګرامر له خپلې اوسنۍ کچې سره سم پیاوړي کړئ.",
+  "audience": "ایا تازه انګلیسي پیلوئ، له یوې وقفې وروسته بېرته زده‌کړه کوئ او که نورو زده‌کړو ته چمتو کېږئ؟ دا پروګرام ستاسو د ژبې د بنسټ د پیاوړتیا لپاره دی. د سویې وړیا ارزونه د مناسب پیل په ټاکلو کې مرسته کوي.",
   "seoTitle": "په کابل کې د عمومي انګلیسي کورس | تافل هوس",
-  "seoDescription": "په پنځو کچو کې عملي انګلیسي زده کړئ، د Got it! درسونه او د خبرو ځانګړی تمرین. میاشتنی فیس ۵۰۰ افغانۍ؛ د سویې ارزونه وړیا ده."
+  "seoDescription": "په پنځو کچو کې عملي انګلیسي زده کړئ، د Got it! درسونه او د خبرو ځانګړی تمرین. میاشتنی فیس ۵۰۰ افغانۍ؛ د سویې ارزونه وړیا ده.",
+  "heroTagline": "د ژوند لپاره انګلیسي؛ د راتلونکي لپاره بنسټ.",
+  "stageFocus": [
+   "د ژبې له بنسټ سره اشنايي",
+   "په ورځنیو حالاتو کې خبرې",
+   "د تړلو نظریو بیان",
+   "لا خپلواکې خبرې",
+   "راتلونکي ګام ته چمتووالی"
+  ]
  }
 };
 const V2_GE_STAGE_IDS=["Pre-Starter","Starter","Prep One","Prep Two","Prep Three"];
@@ -310,7 +334,7 @@ function v2GeneralEnglish(locale){
    ["۵۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ"];
  const levelItems=V2_GE_STAGE_IDS.map((name,i)=>
   '<li class="ge-stage"><span class="ge-number" aria-hidden="true">'+String(i+1).padStart(2,"0")+'</span>'+
-  '<div><h4 dir="ltr">'+esc(name)+'</h4><p>'+esc(c.stageDescs[i])+'</p>'+
+  '<div><h4 dir="ltr">'+esc(name)+'</h4><p><strong>'+esc(c.stageFocus[i])+'</strong></p><p>'+esc(c.stageDescs[i])+'</p>'+
   '<span class="ge-stage-meta">'+esc(i===0?c.foundation:c.semester)+'</span></div></li>'
  ).join("");
  const facts=c.facts.map(pair=>
