@@ -241,6 +241,30 @@ test("General English exposes five school levels, realistic AFN tuition and Oxfo
   assert.doesNotMatch(html,/<img[^>]+(?:got-it|gotit|oxford-cover)/i,"No unlicensed Oxford images");
  }
 });
+
+test("General English editorial is localized, coherent and preserves the CMS schedule without mutation",async()=>{
+ const edited=structuredClone(main),p=structuredClone(ps);
+ for(const lang of ["en","fa"]){const x=edited.locales[lang].programs[0];Object.assign(x,{summary:"STALE_GE_SUMMARY",details:"STALE_GE_DETAILS",duration:"STALE_GE_DURATION",levels:"STALE_GE_LEVELS",schedule:"GE_CMS_SCHEDULE"});}
+ Object.assign(p.programs[0],{summary:"STALE_GE_SUMMARY",details:"STALE_GE_DETAILS",duration:"STALE_GE_DURATION",levels:"STALE_GE_LEVELS",schedule:"GE_CMS_SCHEDULE"});
+ const cases=[
+  ["/courses/general-english/","General English","1–2 months per stage","A practical foundation for your next step","Understand everyday spoken English","General English Courses in Kabul"],
+  ["/fa/courses/general-english/","انگلیسی عمومی","۱ تا ۲ ماه برای هر سطح","بنیادی استوار برای گام بعدی شما","درک بهتر انگلیسی گفتاری روزمره","کورس انگلیسی عمومی در کابل"],
+  ["/ps/courses/general-english/","عمومي انګلیسي","د هرې کچې لپاره ۱ تر ۲ میاشتو","د راتلونکي ګام لپاره پیاوړی بنسټ","د ورځنیو انګلیسي خبرو ښه درک","په کابل کې د عمومي انګلیسي کورس"]
+ ];
+ for(const [path,title,duration,overview,skill,seo] of cases){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env(edited,p));
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.ok(html.includes("<h1>"+title+"</h1>"),path);
+  for(const value of [duration,overview,skill,seo,"GE_CMS_SCHEDULE"])assert.ok(html.includes(value),path+" "+value);
+  assert.doesNotMatch(html,/STALE_GE_(SUMMARY|DETAILS|DURATION|LEVELS)/);
+  assert.equal((html.match(/class="ge-stage"/g)||[]).length,5);
+  assert.equal((html.match(/class="ge-faq"/g)||[]).length,3);
+ }
+ assert.equal(edited.locales.en.programs[0].summary,"STALE_GE_SUMMARY");
+ assert.equal(p.programs[0].details,"STALE_GE_DETAILS");
+});
+
 test("General English supplement is exclusive to General English; other courses unchanged",async()=>{
  for(const route of ["/courses/toefl-preparation/","/fa/courses/academic-english/","/ps/courses/special-speaking/"]){
   const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
