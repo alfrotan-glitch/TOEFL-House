@@ -930,9 +930,9 @@ test("Sitemap carries a truthful lastmod on every URL",async()=>{
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml"),env());
  assert.equal(r.status,200);
  const xml=await r.text();
- assert.equal((xml.match(/<loc>/g)||[]).length,39);
+ assert.equal((xml.match(/<loc>/g)||[]).length,51);
  const lastmods=xml.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g)||[];
- assert.equal(lastmods.length,39,"every sitemap URL must carry lastmod");
+ assert.equal(lastmods.length,51,"every sitemap URL must carry lastmod");
  assert.equal(new Set(lastmods).size,1,"all lastmod dates must be the single build date");
  const date=lastmods[0].replace(/<\/?lastmod>/g,"");
  assert.ok(!Number.isNaN(Date.parse(date+"T00:00:00Z")),"lastmod must be a valid date");
@@ -1144,5 +1144,30 @@ test("homepage learner habits and original localized learning guides are discove
   }
   assert.ok(section[1].includes('href="'+prefix+'guides/"'));
   assert.doesNotMatch(section[1],/zabanshenas\.com|<script|<iframe/);
+ }
+});
+
+
+test("Textbook library: 12 localized routes, canonical alternates, course links and preview isolation",async()=>{
+ const slugs=["got-it-series","active-skills-for-reading","longman-academic-writing","contemporary-topics"];
+ const site="https://toeflhouse.pages.dev";
+ const sitemap=await (await worker.fetch(new Request(site+"/sitemap.xml"),env())).text();
+ for(const [prefix,lang] of [["/","en"],["/fa/","fa-AF"],["/ps/","ps-AF"]]){
+  const library=await (await worker.fetch(new Request(site+prefix+"guides/"),env())).text();
+  for(const [i,slug] of slugs.entries()){
+   const path=prefix+"guides/"+slug+"/",program=i===0?"general-english":"academic-english";
+   assert.ok(library.includes('href="'+path+'"'),path);
+   assert.ok(sitemap.includes("<loc>"+site+path+"</loc>"),path);
+   const res=await worker.fetch(new Request(site+path),env());assert.equal(res.status,200,path);
+   const html=await res.text();assert.ok(html.includes('lang="'+lang+'"'),path);
+   assert.ok(html.includes('rel="canonical" href="'+site+path+'"'),path);
+   assert.equal((html.match(/<h1(?:\\s|>)/g)||[]).length,1,path);
+   for(const alt of ["/","/fa/","/ps/"])assert.ok(html.includes(site+alt+"guides/"+slug+"/"),path+" alternate "+alt);
+   assert.ok(html.includes('href="'+prefix+'courses/'+program+'/"'),path);
+   assert.ok(html.includes('href="'+prefix+'admissions/?program='+program+'"'),path);
+   const course=await (await worker.fetch(new Request(site+prefix+"courses/"+program+"/"),env())).text();assert.ok(course.includes('href="'+path+'"'),path+" inbound");
+   const preview=await worker.fetch(new Request("https://abcdef12.toeflhouse.pages.dev"+path),env());assert.match(preview.headers.get("x-robots-tag")||"",/noindex/);
+   assert.equal((await worker.fetch(new Request(site+path,{method:"POST"}),env())).status,405);
+  }
  }
 });
