@@ -284,6 +284,24 @@ test("General English premium introduction and five distinct learning focuses ar
  }
 });
 
+test("General English presents all four distinct skills in a localized accessible section",async()=>{
+ const cases=[
+  ["/courses/general-english/",["Listening","Speaking","Reading","Writing"]],
+  ["/fa/courses/general-english/",["شنیدن (Listening)","مکالمه (Speaking)","خواندن (Reading)","نوشتن (Writing)"]],
+  ["/ps/courses/general-english/",["اورېدل (Listening)","خبرې کول (Speaking)","لوستل (Reading)","لیکل (Writing)"]]
+ ];
+ for(const [path,skills] of cases){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),env());
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.equal((html.match(/id="ge-skills-title"/g)||[]).length,1,path);
+  const section=html.match(/<section class="ge-stages-block" aria-labelledby="ge-skills-title">([\s\S]*?)<\/section>/);
+  assert.ok(section,path);
+  assert.equal((section[1].match(/<article class="ge-fact">/g)||[]).length,4,path);
+  for(const skill of skills)assert.ok(section[1].includes("<h4>"+skill+"</h4>"),path+" "+skill);
+ }
+});
+
 test("General English supplement is exclusive to General English; other courses unchanged",async()=>{
  for(const route of ["/courses/toefl-preparation/","/fa/courses/academic-english/","/ps/courses/special-speaking/"]){
   const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+route),env());
