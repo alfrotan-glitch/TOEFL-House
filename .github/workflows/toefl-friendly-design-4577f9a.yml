@@ -1,0 +1,229 @@
+name: Friendly academic design — exact preview acceptance
+on:
+  push:
+    branches: [qa/friendly-design-4577f9a]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TOEFL_QA_BASE: https://5abfb195.toeflhouse.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4577f9afbe71c3a344d868014e09863cae02ca0d
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify candidate source and served CSS/JS fingerprint
+        run: |
+          test "$(git rev-parse HEAD)" = "4577f9afbe71c3a344d868014e09863cae02ca0d"
+          node --input-type=module <<'NODE'
+          import {readFile,writeFile} from "node:fs/promises";
+          const path="cloudflare/site-v2/build.mjs";
+          const s=await readFile(path,"utf8");
+          const marker="const buildDate=new Date().toISOString().slice(0,10);";
+          if(!s.includes(marker))throw Error("Build date expression moved");
+          await writeFile(path,s.replace(marker,'const buildDate="2026-11-27";'));
+          NODE
+          node cloudflare/site-v2/build.mjs
+          node --check cloudflare/site-v2/dist/_worker.js
+          echo 'a1749129226ef93ed759cc32cb74de813acb7c0699a0b0c64037c01983460a96  cloudflare/site-v2/dist/_worker.js' | sha256sum -c -
+          test "$(wc -c < cloudflare/site-v2/dist/_worker.js)" -eq 368610
+          test "$(wc -c < cloudflare/site-v2/dist/_worker.js)" -lt 400000
+          git restore cloudflare/site-v2/build.mjs
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import {readFile} from "node:fs/promises";
+          import {createHash} from "node:crypto";
+          const css=(await readFile("cloudflare/site-v2/site.css","utf8")).replace(/\/\*[\s\S]*?\*\//g,"").split("\n").map(x=>x.trim()).join("");
+          const js=await readFile("cloudflare/site-v2/site.js","utf8");
+          const rev=createHash("sha256").update(css).update(js).digest("hex").slice(0,12);
+          for(const [path,expected] of [["/__th/v2/site.css",css],["/__th/v2/site.js",js]]){
+            let r; for(let attempt=1;attempt<=4;attempt++){r=await fetch(process.env.TOEFL_QA_BASE+path,{signal:AbortSignal.timeout(15000)});console.log(JSON.stringify({asset:path,attempt,status:r.status}));if(r.status===200)break;if(attempt<4)await new Promise(resolve=>setTimeout(resolve,3000*attempt));} assert.equal(r.status,200,path);assert.equal(await r.text(),expected,path);
+          }
+          for(const p of ["/","/fa/","/ps/"]){
+            const r=await fetch(process.env.TOEFL_QA_BASE+p);assert.equal(r.status,200,p);
+            const h=await r.text();assert.ok(h.includes("site.css?v="+rev),p);assert.ok(h.includes("Google Meet"),p);
+            assert.equal(h.includes('rel="preload" href="/__th/v2/font/vazirmatn-33.003.woff2"'),p!=="/",p);
+            assert.match(r.headers.get("x-robots-tag")||"",/noindex/);
+          }
+          console.log({assetRevision:rev,workerSHA256:createHash("sha256").update(await readFile("cloudflare/site-v2/dist/_worker.js")).digest("hex")});
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: friendly-design-worker-a1749129
+          path: cloudflare/site-v2/dist/_worker.js
+          if-no-files-found: error
+      - run: node --test cloudflare/site-v2/tests/*.test.mjs
+      - run: node cloudflare/site-v2/general-english-live-acceptance.mjs
+      - name: Verify new course copy is actually served in each language
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          const cases=[["/courses/general-english/","A practical foundation for your next step","English for life. A foundation for what comes next.","1–2 months per stage"],["/fa/courses/general-english/","بنیادی استوار برای گام بعدی شما","انگلیسی برای زندگی؛ بنیادی برای آینده.","۱ تا ۲ ماه برای هر سطح"],["/ps/courses/general-english/","د راتلونکي ګام لپاره پیاوړی بنسټ","د ژوند لپاره انګلیسي؛ د راتلونکي لپاره بنسټ.","د هرې کچې لپاره ۱ تر ۲ میاشتو"]];
+          for(const [path,...markers] of cases){
+            const res=await fetch(process.env.TOEFL_QA_BASE+path);
+            assert.equal(res.status,200,path);
+            assert.match(res.headers.get("x-robots-tag")||"",/noindex/);
+            const html=await res.text();
+            for(const marker of markers)assert.ok(html.includes(marker),path+" "+marker);
+          }
+          NODE
+      - run: node cloudflare/site-v2/production-full-acceptance.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - run: node cloudflare/site-v2/final-production-navigation.mjs
+      - name: Record Pashto font use and screenshot without submitting data
+        run: |
+          mkdir -p visual
+          node <<'NODE'
+          const assert=require("node:assert/strict");
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          (async()=>{
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            try{
+              for(const width of [320,390,1440]){
+                const page=await browser.newPage({viewport:{width,height:900},serviceWorkers:"block"});
+                await page.route("**/*",r=>["GET","HEAD","OPTIONS"].includes(r.request().method())?r.continue():r.abort());
+                const r=await page.goto(process.env.TOEFL_QA_BASE+"/ps/",{waitUntil:"networkidle"});
+                assert.equal(r.status(),200);
+                await page.evaluate(()=>document.fonts.ready);
+                const loaded=await page.evaluate(()=>document.fonts.check('700 32px THDari','پښتو ښ ځ ږ څ ڼ ډ ټ ړ'));
+                assert.ok(loaded,"Pashto font not ready");
+                const cdp=await page.context().newCDPSession(page);
+                await cdp.send("DOM.enable");await cdp.send("CSS.enable");
+                const {root}=await cdp.send("DOM.getDocument");
+                const {nodeId}=await cdp.send("DOM.querySelector",{nodeId:root.nodeId,selector:"h1"});
+                const {fonts}=await cdp.send("CSS.getPlatformFontsForNode",{nodeId});
+                console.log(JSON.stringify({width,loaded,fonts}));
+                assert.ok(fonts.some(f=>f.isCustomFont&&/Vazirmatn/i.test(f.familyName+" "+f.postScriptName)),"Heading did not render with custom Vazirmatn");
+                await page.screenshot({path:"visual/pashto-"+width+".png"});
+                await page.close();
+              }
+            }finally{await browser.close();}
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: friendly-design-font-visual
+          path: visual/
+      - name: Verify actual visual identity in each language and viewport
+        run: |
+          mkdir -p design-visual
+          node <<'NODE'
+          const assert=require("node:assert/strict");
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          (async()=>{
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            try{
+              for(const locale of ["en","fa","ps"])for(const width of [320,390,768,1440]){
+                const page=await browser.newPage({viewport:{width,height:900},reducedMotion:"reduce",serviceWorkers:"block"});
+                await page.route("**/*",r=>["GET","HEAD","OPTIONS"].includes(r.request().method())?r.continue():r.abort());
+                const r=await page.goto(process.env.TOEFL_QA_BASE+(locale==="en"?"/":"/"+locale+"/"),{waitUntil:"networkidle"});
+                assert.equal(r.status(),200);
+                await page.evaluate(()=>document.fonts.ready);
+                const design=await page.evaluate(()=>{
+                  const get=(s)=>getComputedStyle(document.querySelector(s));
+                  return {hero:get(".hero").backgroundColor,headline:get(".hero h1 span").color,radius:get(".photo-frame").borderRadius,button:get(".hero-actions .button-primary").backgroundColor,cardRadius:get(".course-card").borderRadius,icons:document.querySelectorAll(".course-number svg[aria-hidden=true]").length,photo:document.querySelector(".photo-frame img").naturalWidth,quiz:document.querySelectorAll("#ge-mini-practice").length,overflow:document.documentElement.scrollWidth-innerWidth};
+                });
+                console.log(JSON.stringify({locale,width,...design}));
+                assert.equal(design.hero,"rgb(255, 255, 255)");
+                assert.equal(design.headline,"rgb(152, 6, 22)");
+                assert.equal(design.button,"rgb(192, 8, 24)");
+                assert.equal(design.radius,"28px");
+                assert.equal(design.cardRadius,"22px");
+                assert.equal(design.icons,6);
+                assert.ok(design.photo>0);
+                assert.equal(design.quiz,0);
+                assert.ok(design.overflow<=1);
+                await page.screenshot({path:"design-visual/"+locale+"-"+width+".png",fullPage:true});
+                await page.close();
+              }
+            }finally{await browser.close();}
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: friendly-design-screenshots
+          path: design-visual/
+      - name: Verify responsive geometry, heading, language and brand at four widths
+        run: |
+          node <<'NODE'
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          const assert=require("node:assert/strict");
+          const axe=require('/tmp/toefl-accessibility/node_modules/axe-core');
+          (async()=>{
+            const base=process.env.TOEFL_QA_BASE;
+            const xml=await (await fetch(base+"/sitemap.xml")).text();
+            const paths=[...new Set([...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(m=>new URL(m[1]).pathname))];
+            assert.ok(paths.length>=39);
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            const issues=[];let checked=0,axeChecked=0;
+            try{
+              for(const width of [320,390,768,1440]){
+                const page=await browser.newPage({viewport:{width,height:900},bypassCSP:true,serviceWorkers:"block"});
+                await page.route("**/*",r=>["GET","HEAD","OPTIONS"].includes(r.request().method())?r.continue():r.abort());
+                for(const path of paths){
+                  try{
+                    const response=await page.goto(base+path,{waitUntil:"domcontentloaded",timeout:30000});
+                    await page.evaluate(()=>document.fonts.ready);
+                    const v=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth-innerWidth,h1:document.querySelectorAll("h1").length,lang:document.documentElement.lang,dir:document.documentElement.dir,brand:getComputedStyle(document.documentElement).getPropertyValue("--red").trim()}));
+                    const lang=path.startsWith("/fa/")?"fa-AF":path.startsWith("/ps/")?"ps-AF":"en";
+                    if(response.status()!==200||v.overflow>1||v.h1!==1||v.lang!==lang||v.dir!==(lang==="en"?"ltr":"rtl")||v.brand!=="#c00818")issues.push({path,width,status:response.status(),...v});
+                    if(width===390){
+                      await page.addScriptTag({content:axe.source});
+                      const violations=await page.evaluate(async()=> (await axe.run(document,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21a","wcag21aa"]}})).violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>n.target)})));
+                      if(violations.length)issues.push({path,width,violations});
+                      axeChecked++;
+                    }
+                    checked++;
+                  }catch(e){issues.push({path,width,error:String(e)});}
+                }
+                await page.close();
+              }
+            }finally{await browser.close();}
+            console.log(JSON.stringify({checked,axeChecked,issues},null,2));assert.deepEqual(issues,[]);
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compare production and candidate with matched browser conditions
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          npm install --prefix /tmp/th-lh --no-save lighthouse@12.8.2 --silent
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            for target in production candidate; do
+              base="https://toeflhouse.pages.dev"
+              if [ "$target" = candidate ]; then base="https://5abfb195.toeflhouse.pages.dev"; fi
+              for page in home course; do
+                route="$suffix"
+                if [ "$page" = course ]; then route="${suffix}courses/general-english/"; fi
+                outfile="reports/$target-$locale-$page.json"
+                for attempt in 1 2 3; do
+                  if /tmp/th-lh/node_modules/.bin/lighthouse "$base/$route" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="$outfile" --quiet; then break; fi
+                  rm -f "$outfile"
+                  sleep 3
+                done
+                test -s "$outfile"
+              done
+            done
+          done
+          node -e 'const fs=require("fs");for(const file of fs.readdirSync("reports").sort()){const r=require("./reports/"+file);if(r.runtimeError)throw Error(JSON.stringify(r.runtimeError));console.log(JSON.stringify({file,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue}));}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: friendly-design-paired-performance
+          path: reports/
