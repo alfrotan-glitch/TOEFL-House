@@ -42,7 +42,7 @@ jobs:
           const js=await readFile("cloudflare/site-v2/site.js","utf8");
           const rev=createHash("sha256").update(css).update(js).digest("hex").slice(0,12);
           for(const [path,expected] of [["/__th/v2/site.css",css],["/__th/v2/site.js",js]]){
-            const r=await fetch(process.env.TOEFL_QA_BASE+path);assert.equal(r.status,200);assert.equal(await r.text(),expected,path);
+            let r; for(let attempt=1;attempt<=4;attempt++){r=await fetch(process.env.TOEFL_QA_BASE+path,{signal:AbortSignal.timeout(15000)});console.log(JSON.stringify({asset:path,attempt,status:r.status}));if(r.status===200)break;if(attempt<4)await new Promise(resolve=>setTimeout(resolve,3000*attempt));} assert.equal(r.status,200,path);assert.equal(await r.text(),expected,path);
           }
           for(const p of ["/","/fa/","/ps/"]){
             const r=await fetch(process.env.TOEFL_QA_BASE+p);assert.equal(r.status,200,p);
@@ -151,22 +151,39 @@ jobs:
           NODE
   lighthouse:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 25
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: |
+      - name: Compare production and candidate with matched browser conditions
+        run: |
+          set -euo pipefail
           mkdir -p reports
           export CHROME_PATH=/usr/bin/google-chrome
+          npm install --prefix /tmp/th-lh --no-save lighthouse@12.8.2 --silent
           for locale in en fa ps; do
             suffix=""
             if [ "$locale" != en ]; then suffix="$locale/"; fi
-            npx --yes lighthouse@12.8.2 "https://01da9969.toeflhouse.pages.dev/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale.json" --quiet
+            for target in production candidate; do
+              base="https://toeflhouse.pages.dev"
+              if [ "$target" = candidate ]; then base="https://01da9969.toeflhouse.pages.dev"; fi
+              for page in home course; do
+                route="$suffix"
+                if [ "$page" = course ]; then route="${suffix}courses/general-english/"; fi
+                outfile="reports/$target-$locale-$page.json"
+                for attempt in 1 2 3; do
+                  if /tmp/th-lh/node_modules/.bin/lighthouse "$base/$route" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="$outfile" --quiet; then break; fi
+                  rm -f "$outfile"
+                  sleep 3
+                done
+                test -s "$outfile"
+              done
+            done
           done
-          node -e 'for(const locale of ["en","fa","ps"]){const r=require("./reports/"+locale+".json");console.log(JSON.stringify({locale,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue}));}'
+          node -e 'const fs=require("fs");for(const file of fs.readdirSync("reports").sort()){const r=require("./reports/"+file);if(r.runtimeError)throw Error(JSON.stringify(r.runtimeError));console.log(JSON.stringify({file,scores:Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score])),LCP:r.audits["largest-contentful-paint"].numericValue,CLS:r.audits["cumulative-layout-shift"].numericValue,TBT:r.audits["total-blocking-time"].numericValue}));}'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: learning-habits-performance
+          name: learning-habits-paired-performance
           path: reports/
