@@ -1046,12 +1046,17 @@ test("Catalog text and narrow links can wrap without hiding content",async()=>{
 test("Signature editorial hero preserves accessible actions, true photography and reduced-motion preference",async()=>{
  const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  const css=await cssResponse.text();
- assert.match(css,/\.hero\{position:relative;overflow:hidden;background:var\(--red-dark\);color:#fff\}/);
- assert.match(css,/\.hero-actions \.button-primary\{background:#fff;color:var\(--red-dark\)\}/);
+ assert.match(css,/\.hero\{position:relative;overflow:hidden;background:#fff;color:var\(--ink\)\}/);
+ assert.match(css,/\.button-primary\{background:var\(--red\);color:#fff\}/);
+ assert.match(css,/\.hero a:focus-visible\{outline-color:var\(--red\)\}/);
+ assert.match(css,/\.photo-frame\{[^}]*border-radius:28px/);
+ assert.match(css,/\.course-card\{border:2px solid var\(--line\);border-radius:22px/);
+ assert.match(css,/\.button-primary:active\{transform:translateY\(2px\)/);
  assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\.photo-label\{animation:hero-caption/);
  for(const root of ["/","/fa/","/ps/"]){
   const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
   assert.match(html,/<div class="photo-frame"><img[^>]*alt="[^"]+"/);
+  assert.equal((html.match(/<span class="course-number"><svg[^>]*aria-hidden="true" focusable="false"/g)||[]).length,6,root+" must have six decorative course illustrations");
   assert.match(html,/<div class="photo-side"><span>/);
   assert.doesNotMatch(html,/<div class="photo-accent"/);
   assert.ok(html.includes('href="'+root+'admissions/"'));

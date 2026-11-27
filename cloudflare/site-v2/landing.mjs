@@ -231,6 +231,16 @@ const V2_GOALS={
  fa:{title:"هدف شما از یادگیری انگلیسی چیست؟",hint:"هدف خود را انتخاب کنید و برنامهٔ مناسب را بشناسید.",label:"انتخاب برنامه بر اساس هدف آموزشی",items:[["general-english","از پایه شروع کنم"],["special-speaking","با اطمینان صحبت کنم"],["academic-english","برای دانشگاه آماده شوم"],["toefl-preparation","برای TOEFL آماده شوم"]]},
  ps:{title:"له انګلیسي زده‌کړې موخه مو څه ده؟",hint:"خپله موخه وټاکئ او مناسب پروګرام ومومئ.",label:"د زده‌کړې د موخې له مخې د پروګرام ټاکنه",items:[["general-english","له بنسټ څخه پیل کوم"],["special-speaking","په ډاډه زړه خبرې کوم"],["academic-english","پوهنتون ته چمتو کېږم"],["toefl-preparation","TOEFL ته چمتو کېږم"]]}
 };
+// Original, decorative program illustrations. Shared stroke geometry, no third-party assets.
+const V2_COURSE_GLYPHS=[
+ '<path d="M3 4h7a5 5 0 0 1 5 5v15a5 5 0 0 0-5-5H3zM27 4h-7a5 5 0 0 0-5 5v15a5 5 0 0 1 5-5h7z"/><path d="M6 8h4m10 0h4M6 12h4m10 0h4"/>',
+ '<path d="m2 10 13-6 13 6-13 6zM7 13v7c5 4 11 4 16 0v-7M28 10v10"/>',
+ '<circle cx="15" cy="15" r="11"/><circle cx="15" cy="15" r="6"/><path d="m15 15 10-10m-1 0h4v4"/>',
+ '<path d="M4 5h22v14H14l-6 5v-5H4z"/><path d="M9 10h12M9 14h8"/>',
+ '<path d="M5 23l3-8L20 3l7 7-12 12zM8 15l7 7M17 6l7 7M5 27h22"/>',
+ '<rect x="3" y="4" width="24" height="16" rx="3"/><path d="M15 20v7m-7 0h14M8 15l5-5 4 3 5-6"/>'
+];
+function v2CourseGlyph(i){return '<svg viewBox="0 0 30 30" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+V2_COURSE_GLYPHS[i]+'</svg>';}
 function v2Programs(c,content,locale){
  const prefix=v2Prefix(locale);
  const src=locale==="ps"?content.pashto.programs:content.main.locales[locale].programs;
@@ -252,7 +262,7 @@ function v2Programs(c,content,locale){
     ps:{"special-speaking":"دوه میاشتنی سمستر د Master Speaking او د خبرو ګرامر له کتابونو سره؛ ټول فیس ۲٬۰۰۰ افغانۍ.","toefl-preparation":"د ۲۰۲۶ نوې TOEFL iBT بڼې ته څلور میاشتنی چمتووالی؛ د انګلیسي څلور مهارتونه."}
   };
   if(reviewed[locale]?.[id])desc=reviewed[locale][id];
-  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+String(i+1).padStart(2,"0")+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(c.courseNames[i]||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
+  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(i)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(c.courseNames[i]||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
  }).join("");
  return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div>'+goalNav+'<div class="courses-grid">'+cards+'</div></div></section>';
 }
