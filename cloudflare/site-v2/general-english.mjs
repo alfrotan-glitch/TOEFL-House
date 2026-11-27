@@ -334,7 +334,7 @@ function v2GeneralEnglish(locale){
    ["۵۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ"];
  const levelItems=V2_GE_STAGE_IDS.map((name,i)=>
   '<li class="ge-stage"><span class="ge-number" aria-hidden="true">'+String(i+1).padStart(2,"0")+'</span>'+
-  '<div><h4 dir="ltr">'+esc(name)+'</h4><p><strong>'+esc(c.stageFocus[i])+'</strong></p><p>'+esc(c.stageDescs[i])+'</p>'+
+  '<div><h4 dir="ltr">'+esc(name)+'</h4><p><strong>'+esc(c.stageFocus[i])+'</strong><br>'+esc(c.stageDescs[i])+'</p>'+
   '<span class="ge-stage-meta">'+esc(i===0?c.foundation:c.semester)+'</span></div></li>'
  ).join("");
  const facts=c.facts.map(pair=>
