@@ -165,6 +165,45 @@ if(enquiry){
 }
 
 
+/* Mini-practice: answers stay in this page only. */
+var practice=document.querySelector("[data-ge-practice]");
+if(practice){
+ var questions=Array.from(practice.querySelectorAll("[data-ge-question]"));
+ var result=practice.querySelector("[data-ge-result]");
+ var progress=practice.querySelector("[data-ge-progress]");
+ var outcomes=new Map();
+ function updatePractice(){
+  var score=Array.from(outcomes.values()).filter(Boolean).length;
+  progress.textContent=practice.dataset.geProgressLabel+": "+outcomes.size+"/"+questions.length+" · "+practice.dataset.geScoreLabel+": "+score+"/"+questions.length;
+ }
+ questions.forEach(function(q){
+  var controls=q.querySelector("[data-ge-controls]"),check=q.querySelector("[data-ge-check]"),feedback=q.querySelector("[data-ge-feedback]"),answer=q.querySelector("[data-ge-answer]"),fallback=q.querySelector("[data-ge-fallback]");
+  controls.hidden=false;fallback.hidden=true;answer.hidden=true;
+  q.addEventListener("change",function(){if(!outcomes.has(q))check.disabled=!q.querySelector("input:checked");});
+  check.addEventListener("click",function(){
+   var selected=q.querySelector("input:checked");
+   if(!selected||outcomes.has(q))return;
+   var correct=selected.value===q.dataset.correct;
+   outcomes.set(q,correct);
+   feedback.textContent=correct?practice.dataset.geCorrectLabel:practice.dataset.geIncorrectLabel;
+   answer.hidden=false;answer.open=true;
+   check.disabled=true;q.querySelectorAll("input").forEach(function(input){input.disabled=true;});
+   updatePractice();
+  });
+ });
+ result.hidden=false;updatePractice();
+ practice.querySelector("[data-ge-reset]").addEventListener("click",function(){
+  outcomes.clear();
+  questions.forEach(function(q){
+   q.querySelectorAll("input").forEach(function(input){input.checked=false;input.disabled=false;});
+   q.querySelector("[data-ge-check]").disabled=true;
+   q.querySelector("[data-ge-feedback]").textContent="";
+   var answer=q.querySelector("[data-ge-answer]");answer.open=false;answer.hidden=true;
+  });
+  updatePractice();questions[0].querySelector("input").focus();
+ });
+}
+
 /* Accessible, click-to-play semester poster; native video controls remain as fallback. */
 var semesterVideo=document.querySelector(".semester-video");
 var semesterCover=document.querySelector(".semester-video-cover");
