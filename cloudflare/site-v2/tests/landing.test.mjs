@@ -1212,3 +1212,53 @@ test("Mini-practice is original, localized, accessible without JavaScript and sc
  assert.match(code,/outcomes\.clear\(\)/);
  assert.doesNotMatch(code,/fetch\(|localStorage|sessionStorage|sendBeacon|XMLHttpRequest/);
 });
+
+test("Admissions message builder fails safely and exposes direct contact in all languages",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"admissions/"),env())).text();
+  assert.match(html,/<button class="button button-primary form-submit" type="submit" disabled>/,prefix+" builder starts disabled");
+  assert.match(html,/<p id="v2-enquiry-fallback" class="form-privacy">[\s\S]*?<a href="https:\/\/wa\.me\/93794357509">[\s\S]*?<a href="tel:\+93745651844">/,prefix+" independent contact methods");
+ }
+});
+
+test("All sitemap routes remain usable when the CMS is unavailable",async()=>{
+ const sitemap=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml"),{})).text();
+ const paths=[...sitemap.matchAll(/<loc>https:\/\/toeflhouse\.pages\.dev([^<]+)<\/loc>/g)].map(x=>x[1]);
+ assert.equal(paths.length,51);
+ for(const path of paths){
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),{});
+  assert.equal(r.status,200,"unavailable CMS "+path);
+ }
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const page=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"courses/online-individual-zoom/"),{})).text();
+  assert.match(page,/Google Meet/,prefix+" online delivery");
+  assert.match(page,/class="detail-grid detail-grid-single"/,prefix+" no empty summary column");
+  assert.doesNotMatch(page,/<aside class="detail-summary"/,prefix+" no invented schedule or skills");
+  assert.ok(page.includes('class="mobile-quick-apply" href="'+prefix+'admissions/?program=online-individual-zoom"'),prefix+" online header keeps program");
+  assert.ok(page.includes('class="button button-primary desktop-apply" href="'+prefix+'admissions/?program=online-individual-zoom"'),prefix+" online desktop header keeps program");
+  const admission=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"admissions/"),{})).text();
+  assert.match(admission,/<option value="online-individual-zoom"/,prefix+" admissions choice");
+ }
+});
+
+test("A valid CMS omission is not silently replaced by fallback content",async()=>{
+ const m=structuredClone(main),p=structuredClone(ps);
+ for(const data of [m.locales.en,m.locales.fa,p])data.programs=data.programs.filter(x=>x.id!=="online-individual-zoom");
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const admission=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"admissions/"),env(m,p))).text();
+  assert.doesNotMatch(admission,/<option value="online-individual-zoom"/,prefix);
+ }
+});
+
+test("Course summary displays only CMS fields actually supplied",async()=>{
+ for(const [duration,highlights] of [["",[]],["Example duration",[]],["",["Example skill"]],["Example duration",["Example skill"]]]){
+  const m=structuredClone(main),p=structuredClone(ps);
+  Object.assign(m.locales.en.programs.find(x=>x.id==="professional-writing"),{duration,highlights});
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/courses/professional-writing/"),env(m,p))).text();
+  assert.equal(html.includes('<aside class="detail-summary"'),!!(duration||highlights.length));
+  assert.equal(html.includes('class="detail-summary-head"'),!!duration);
+  assert.equal(html.includes('class="detail-small-label"'),!!highlights.length);
+  assert.equal(html.includes('class="detail-summary-line"'),!!(duration&&highlights.length));
+  assert.equal(html.includes('class="detail-grid detail-grid-single"'),!(duration||highlights.length));
+ }
+});

@@ -156,6 +156,8 @@ document.body.appendChild(link);
 link.click();
 link.remove();
 });
+enquiry.querySelector(".form-submit")?.removeAttribute("disabled");
+enquiry.querySelector("#v2-enquiry-fallback")?.setAttribute("hidden","");
 }
 
 /* Mini-practice: answers stay in this page only. */

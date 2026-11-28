@@ -169,10 +169,12 @@ function v2DariEditorial(html,locale){
 }
 
 function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
+// The legacy online URL is advertised in the sitemap even when CMS data is unavailable.
+function v2OnlineFallback(locale){const c=V2_COPY[locale];return {id:"online-individual-zoom",title:c.onlineLabel,summary:c.onlineText};}
 async function v2FallbackCms(){
  const ids=V2_COURSE_IDS;
  const duration={en:["Pre-Starter: 1 month; other levels: 2 months","2 months per level","4 months","2 months","2 months","2 months"],fa:["Pre-Starter: یک ماه؛ سایر سطح‌ها: دو ماه","دو ماه برای هر سطح","چهار ماه","دو ماه","دو ماه","دو ماه"],ps:["Pre-Starter: یوه میاشت؛ نورې کچې: دوه میاشتې","د هرې کچې لپاره دوه میاشتې","څلور میاشتې","دوه میاشتې","دوه میاشتې","دوه میاشتې"]};
- const programs=locale=>ids.map((id,i)=>({id,title:V2_COPY[locale].courseNames[i]||id,summary:V2_COPY[locale].subtitle,duration:duration[locale][i]||""}));
+ const programs=locale=>[...ids.map((id,i)=>({id,title:V2_COPY[locale].courseNames[i]||id,summary:V2_COPY[locale].subtitle,duration:duration[locale][i]||""})),v2OnlineFallback(locale)];
  return {main:{locales:{en:{programs:programs("en")},fa:{programs:programs("fa")}},media:{},timetable:{}},pashto:{programs:programs("ps")},revision:0,psRevision:0,cmsStatus:"fallback"};
 }
 async function v2Cms(env){
@@ -202,7 +204,7 @@ function v2Header(c,locale,suffix=""){
  const l=v2Languages(locale,suffix);
  const anchorBase=suffix?v2Prefix(locale):"";
  const courseMatch=/^courses\/([a-z0-9-]+)\/$/.exec(suffix);
- const applyHref=prefix+"admissions/"+(courseMatch&&V2_COURSE_IDS.includes(courseMatch[1])?"?program="+courseMatch[1]:"");
+ const applyHref=prefix+"admissions/"+(courseMatch&&(V2_COURSE_IDS.includes(courseMatch[1])||courseMatch[1]==="online-individual-zoom")?"?program="+courseMatch[1]:"");
  const compactLabel=locale==="fa"?"تعیین سطح":locale==="ps"?"وړیا ارزونه":"Free assessment";
  const nav=[[anchorBase+"#programs",c.navPrograms],[prefix+"guides/",c.navGuides],[anchorBase+"#why-us",c.navWhy],[anchorBase+"#online",c.navOnline],[anchorBase+"#faq",c.navFaq],[anchorBase+"#contact",c.navContact]];
  const links=nav.map(([href,label])=>'<a href="'+href+'">'+v2T(label)+'</a>').join("");

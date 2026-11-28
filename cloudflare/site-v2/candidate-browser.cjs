@@ -121,6 +121,44 @@ const axe=require('axe-core');
    assert.equal(await page.locator('.mobile-menu').evaluate(e=>e.open),false);
    assert.equal(await toggle.evaluate(e=>document.activeElement===e),true);
   }
+  // Intercept every WhatsApp handoff: no request leaves this browser fixture.
+  for(const [prefix,lang] of [['/','en'],['/fa/','fa'],['/ps/','ps']]){
+   await page.setViewportSize({width:390,height:900});
+   await page.goto(origin+prefix+'admissions/?program=online-individual-zoom&format=campus&when=afternoon',{waitUntil:'load'});
+   const form=page.locator('#v2-enquiry-form'),program=form.locator('#v2-program'),format=form.locator('#v2-format'),when=form.locator('#v2-when');
+   assert.equal(await form.locator('.form-submit').isEnabled(),true,`${lang} message builder ready`);
+   assert.equal(await form.locator('#v2-enquiry-fallback').isHidden(),true,`${lang} fallback hidden when ready`);
+   assert.equal(await format.inputValue(),'online',`${lang} online-only program`);
+   assert.equal(await format.locator('option[value="campus"]').isDisabled(),true);
+   await program.selectOption('general-english');
+   assert.equal(await format.locator('option[value="campus"]').isDisabled(),false);
+   await program.selectOption('toefl-preparation');await format.selectOption('online');await when.selectOption('afternoon');
+   assert.equal(await form.locator('#v2-program-preview').isVisible(),true,`${lang} program guidance`);
+   const other=page.locator('.mobile-language a[hreflang="'+(lang==='en'?'fa-AF':'en')+'"]');
+   const href=new URL(await other.getAttribute('href'),origin);
+   assert.equal(href.searchParams.get('program'),'toefl-preparation');
+   assert.equal(href.searchParams.get('format'),'online');
+   assert.equal(href.searchParams.get('when'),'afternoon');
+   const labels=await Promise.all([program,format,when].map(x=>x.locator('option:checked').textContent()));
+   const draftRequest=page.waitForRequest(req=>req.url().startsWith('https://wa.me/')&&req.url().includes('?text='));
+   await form.locator('.form-submit').click();
+   const draft=new URL((await draftRequest).url()).searchParams.get('text');
+   for(const label of labels)assert.ok(draft.includes(label),`${lang} selected option included in intercepted draft`);
+  }
+  // Simulate a broken client bundle, not just a browser with scripting disabled.
+  const blockClient=route=>route.abort();
+  await page.route('**/__th/v2/site.js?*',blockClient);
+  for(const [prefix,lang] of [['/','en'],['/fa/','fa'],['/ps/','ps']]){
+   await page.goto(origin+prefix+'admissions/',{waitUntil:'load'});
+   const enquiry=page.locator('#v2-enquiry-form'),fallback=enquiry.locator('#v2-enquiry-fallback');
+   assert.equal(await enquiry.locator('.form-submit').isDisabled(),true,`${lang} failed script keeps builder disabled`);
+   assert.equal(await fallback.isVisible(),true,`${lang} failed script shows contact fallback`);
+   await page.addScriptTag({content:axe.source});
+   const violations=await fallback.evaluate(async e=>(await window.axe.run(e,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa']}})).violations.map(v=>v.id));
+   assert.deepEqual(violations,[],`${lang} contact fallback axe`);
+   await enquiry.screenshot({path:join(out,`admissions-fallback-${lang}-390.png`),animations:'disabled'});
+  }
+  await page.unroute('**/__th/v2/site.js?*',blockClient);
   // Verify the expanded native hit area, including keyboard focus, after CSS changes.
   for(const prefix of ['/','/fa/','/ps/'])for(const width of [390,1440]){
    await page.setViewportSize({width,height:900});
@@ -173,6 +211,12 @@ const axe=require('axe-core');
     const answer=panel.locator('[data-ge-answer]').first();
     await answer.locator('summary').click();
     assert.equal(await answer.evaluate(e=>e.open),true);
+    await fallback.goto(origin+prefix+'admissions/',{waitUntil:'load'});
+    const enquiry=fallback.locator('#v2-enquiry-form');
+    assert.equal(await enquiry.locator('.form-submit').isDisabled(),true,'unavailable builder cannot submit');
+    assert.equal(await enquiry.locator('#v2-enquiry-fallback').isVisible(),true,'direct contact fallback visible');
+    assert.equal(await enquiry.locator('#v2-enquiry-fallback a[href^="https://wa.me/"]').count(),1);
+    assert.equal(await enquiry.locator('#v2-enquiry-fallback a[href^="tel:"]').count(),1);
     await fallback.goto(origin+prefix+'guides/active-skills-for-reading/',{waitUntil:'load'});
     const feedback=fallback.locator('.book-feedback');
     await feedback.locator('summary').click();
