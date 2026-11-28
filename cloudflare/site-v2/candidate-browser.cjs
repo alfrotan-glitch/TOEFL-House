@@ -56,12 +56,36 @@ const axe=require('axe-core');
     assert.equal(response.status(),200,`${width} ${path}`);
     assert.match(response.headers()['x-robots-tag']||'',/noindex/,path);
     assert.equal(await page.locator('h1').count(),1,`${width} ${path} h1`);
+    if(process.env.TOEFL_VISUAL_DIR||process.env.TOEFL_FULLPAGE_DIR){
+     await page.evaluate(()=>document.fonts.ready);
+     const name=encodeURIComponent(path)+`-${width}.png`;
+     if(process.env.TOEFL_VISUAL_DIR){
+      await mkdir(process.env.TOEFL_VISUAL_DIR,{recursive:true});
+      await page.screenshot({path:join(process.env.TOEFL_VISUAL_DIR,name),animations:'disabled'});
+     }
+     if(process.env.TOEFL_FULLPAGE_DIR&&[390,1440].includes(width)){
+      await mkdir(process.env.TOEFL_FULLPAGE_DIR,{recursive:true});
+      await page.screenshot({path:join(process.env.TOEFL_FULLPAGE_DIR,name),animations:'disabled',fullPage:true});
+     }
+    }
     const overflow=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));
     if(overflow.scroll>overflow.client+2){
      const offenders=await page.evaluate(()=>[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:e.className,left:Math.round(e.getBoundingClientRect().left),right:Math.round(e.getBoundingClientRect().right)})).filter(e=>e.left < -2 || e.right > document.documentElement.clientWidth+2).slice(0,20));
      assert.fail(`${width} ${path} overflow ${JSON.stringify(overflow)} ${JSON.stringify(offenders)}`);
     }
    }
+  }
+  if(process.env.TOEFL_AXE_ALL==='1'){
+   const violations=[];
+   await page.setViewportSize({width:390,height:900});
+   for(const path of paths){
+    await page.goto(origin+path,{waitUntil:'load'});
+    await page.addScriptTag({content:axe.source});
+    const found=await page.evaluate(async()=>(await window.axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa']}})).violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.length})));
+    if(found.length)violations.push({path,found});
+   }
+   console.log(JSON.stringify({fullPageAxeRoutes:paths.length,violations},null,2));
+   assert.deepEqual(violations,[],'full-page automated accessibility checks');
   }
   const bookSlugs=['got-it-series','active-skills-for-reading','longman-academic-writing','contemporary-topics'];
   for(const [prefix,lang] of [['/','en'],['/fa/','fa'],['/ps/','ps']]){
@@ -90,6 +114,19 @@ const axe=require('axe-core');
    await page.keyboard.press('Escape');
    assert.equal(await page.locator('.mobile-menu').evaluate(e=>e.open),false);
    assert.equal(await toggle.evaluate(e=>document.activeElement===e),true);
+  }
+  // Verify the expanded native hit area, including keyboard focus, after CSS changes.
+  for(const prefix of ['/','/fa/','/ps/'])for(const width of [390,1440]){
+   await page.setViewportSize({width,height:900});
+   await page.goto(origin+prefix,{waitUntil:'load'});
+   const card=page.locator('#course-special-speaking');
+   await card.scrollIntoViewIfNeeded();
+   assert.deepEqual(await card.evaluate(e=>{
+    const link=e.querySelector('.course-bottom a'),r=e.getBoundingClientRect();
+    const hit=document.elementFromPoint(r.left+8,r.top+8);
+    link.focus();
+    return {position:getComputedStyle(e).position,hit:hit===link,focus:document.activeElement===link};
+   }),{position:'relative',hit:true,focus:true},`${prefix} ${width} whole-card native link`);
   }
   for(const [prefix,lang] of [['/','en'],['/fa/','fa'],['/ps/','ps']]){
    await page.setViewportSize({width:390,height:900});

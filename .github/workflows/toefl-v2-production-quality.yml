@@ -97,12 +97,18 @@ jobs:
           NODE_PATH: /tmp/toefl-candidate/node_modules
           CHROME_PATH: /usr/bin/google-chrome
           TOEFL_SCREENSHOTS: ${{ runner.temp }}/toefl-candidate-screenshots
+          TOEFL_VISUAL_DIR: ${{ runner.temp }}/toefl-candidate-screenshots/matrix
+          TOEFL_FULLPAGE_DIR: ${{ runner.temp }}/toefl-candidate-screenshots/fullpage
+          TOEFL_AXE_ALL: '1'
         run: node cloudflare/site-v2/candidate-browser.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: candidate-browser-screenshots
-          path: ${{ runner.temp }}/toefl-candidate-screenshots/*.png
+          path: |
+            ${{ runner.temp }}/toefl-candidate-screenshots/*.png
+            ${{ runner.temp }}/toefl-candidate-screenshots/matrix/*.png
+            ${{ runner.temp }}/toefl-candidate-screenshots/fullpage/*.png
           retention-days: 7
           if-no-files-found: ignore
 
