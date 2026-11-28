@@ -629,7 +629,8 @@ test("Program tiles expose a full tap target, and EAP level order is stable in R
  const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(cssResponse.status,200);
  const css=await cssResponse.text();
- assert.ok(css.includes('.course-card{position:relative}.course-bottom a::after{content:"";position:absolute;inset:0}'));
+ assert.match(css,/\.course-card\{[^}]*position:relative(?:;|\})/);
+ assert.ok(css.includes('.course-bottom a::after{content:"";position:absolute;inset:0}'));
  for(const root of ["/","/fa/","/ps/"]){
   const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root+"courses/academic-english/"),env());
   assert.equal(response.status,200);
