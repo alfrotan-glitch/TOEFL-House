@@ -106,26 +106,32 @@ function v2Stats(c,content,locale){
 // V2_COURSE_GLYPHS is compiled from the trusted, validated graphic data in content/home.json.
 function v2CourseGlyph(id){return '<svg viewBox="0 0 30 30" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+V2_COURSE_GLYPHS[id]+'</svg>';}
 // V2_HOME_PATHS is compiled from content/home.json.
-function v2HomeQuickPaths(locale){
+function v2HomeQuickPaths(locale,content){
  const c=V2_HOME_PATHS.locales[locale],p=v2Prefix(locale);
- return '<div class="shell home-paths"><nav class="goal-finder" aria-label="'+v2T(c.label)+'"><div class="goal-finder-intro"><strong>'+v2T(c.label)+'</strong><span>'+v2T(c.hint)+'</span></div><div class="goal-finder-links">'+V2_HOME_PATHS.catalog.map(({id,tag})=>'<a href="'+p+'courses/'+id+'/">'+'<span class="home-path-label"><small lang="en" dir="ltr">'+v2T(tag)+'</small><strong>'+v2T(c.links[id])+'</strong></span><span aria-hidden="true">↗</span></a>').join("")+'</div></nav></div>';
+ const programs=locale==="ps"?content.pashto.programs:content.main.locales[locale].programs;
+ const paths=V2_HOME_PATHS.catalog.filter(({id})=>programs.some(program=>program.id===id));
+ if(!paths.length)return "";
+ return '<div class="shell home-paths"><nav class="goal-finder" aria-label="'+v2T(c.label)+'"><div class="goal-finder-intro"><strong>'+v2T(c.label)+'</strong><span>'+v2T(c.hint)+'</span></div><div class="goal-finder-links">'+paths.map(({id,tag})=>'<a href="'+p+'courses/'+id+'/">'+'<span class="home-path-label"><small lang="en" dir="ltr">'+v2T(tag)+'</small><strong>'+v2T(c.links[id])+'</strong></span><span aria-hidden="true">↗</span></a>').join("")+'</div></nav></div>';
 }
 function v2Programs(c,content,locale){
  const prefix=v2Prefix(locale);
  const src=locale==="ps"?content.pashto.programs:content.main.locales[locale].programs;
- const goal=V2_GOALS[locale],goalNav='<nav class="goal-finder" aria-label="'+v2T(goal.label)+'"><div class="goal-finder-intro"><strong>'+v2T(goal.title)+'</strong><span>'+v2T(goal.hint)+'</span></div><div class="goal-finder-links">'+goal.items.map(([id,label])=>'<a href="#course-'+id+'">'+v2T(label)+' <span aria-hidden="true">↗</span></a>').join("")+'</div></nav>';
- const cards=V2_COURSE_IDS.map(id=>{
-  const program=src.find(x=>x.id===id)||{};
-  let duration=program.duration;
-  const card=V2_HOME_COURSE_CARDS[locale][id];
-  duration=card.shortDuration||duration;
-  let desc=program.summary||program.subtitle||"";
+ const available=V2_COURSE_IDS.filter(id=>src.some(program=>program.id===id));
+ const goal=V2_GOALS[locale],goals=goal.items.filter(([id])=>available.includes(id));
+ const goalNav=goals.length?'<nav class="goal-finder" aria-label="'+v2T(goal.label)+'"><div class="goal-finder-intro"><strong>'+v2T(goal.title)+'</strong><span>'+v2T(goal.hint)+'</span></div><div class="goal-finder-links">'+goals.map(([id,label])=>'<a href="#course-'+id+'">'+v2T(label)+' <span aria-hidden="true">↗</span></a>').join("")+'</div></nav>':"";
+ const items=available.map(id=>{
+  const program=src.find(x=>x.id===id),card=V2_HOME_COURSE_CARDS[locale][id];
+  const duration=card.shortDuration||program.duration||"";
   // Owner-confirmed program facts take precedence over older CMS summaries.
-  const reviewed=V2_HOME_REVIEWED_CARDS;
-  if(reviewed[locale]?.[id])desc=reviewed[locale][id];
-  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(id)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(card.name||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(v2String(program.title)||card.name))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
- }).join("");
- return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div>'+goalNav+'<div class="courses-grid">'+cards+'</div></div></section>';
+  const desc=V2_HOME_REVIEWED_CARDS[locale]?.[id]||program.summary||program.subtitle||"";
+  return {id,program,card,duration,desc};
+ });
+ const cards=items.map(({id,program,card,duration,desc})=>'<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(id)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(card.name||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(v2String(program.title)||card.name))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>').join("");
+ // A compact native comparison remains usable with no JavaScript and contains
+ // exactly the same available programs and facts as the visual cards.
+ const rows=items.map(({id,card,duration,desc})=>'<tr><th scope="row"><a href="'+prefix+'courses/'+id+'/">'+v2T(card.name)+' <span aria-hidden="true">↗</span></a></th><td>'+v2Short(duration||c.compareUnknown,85)+'</td><td>'+v2Short(desc||c.compareUnknown,160)+'</td></tr>').join("");
+ const comparison=rows?'<details class="program-comparison"><summary>'+v2T(c.compareTitle)+'</summary><p class="comparison-scroll-hint">'+v2T(c.compareScroll)+'</p><div class="schedule-table-wrap" tabindex="0" role="region" aria-label="'+v2T(c.compareTitle)+'"><table class="schedule-table"><thead><tr><th scope="col">'+v2T(c.navPrograms)+'</th><th scope="col">'+v2T(c.courseDuration)+'</th><th scope="col">'+v2T(c.compareFocus)+'</th></tr></thead><tbody>'+rows+'</tbody></table></div></details>':"";
+ return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div>'+(available.length===V2_COURSE_IDS.length?'<p class="section-intro">'+v2T(c.coursesLead)+'</p>':'')+'</div>'+goalNav+(cards?'<div class="courses-grid">'+cards+'</div>'+comparison:'<a class="button button-primary button-xl" href="'+prefix+'admissions/">'+v2T(c.heroCta)+' <span aria-hidden="true">↗</span></a>')+'</div></section>';
 }
 function v2ShiftRaw(shift,locale){
  const fa=typeof shift.timeFa==="string"?shift.timeFa:"",en=typeof shift.timeEn==="string"?shift.timeEn:"";
@@ -211,8 +217,8 @@ function v2CourseListSchema(locale,content){
  const cards=V2_HOME_COURSE_CARDS[locale],root=v2Prefix(locale);
  const programs=locale==="ps"?content.pashto.programs:content.main.locales[locale].programs;
  const provider={"@type":"Organization","name":"The TOEFL House","url":V2_ORIGIN+"/"};
- return {"@context":"https://schema.org","@type":"ItemList","itemListElement":V2_COURSE_IDS.map((id,i)=>{
-  const course=programs.find(p=>p.id===id)||{};
+ return {"@context":"https://schema.org","@type":"ItemList","itemListElement":V2_COURSE_IDS.filter(id=>programs.some(program=>program.id===id)).map((id,i)=>{
+  const course=programs.find(p=>p.id===id);
   const url=V2_ORIGIN+root+"courses/"+id+"/";
   const name=v2String(course.title||cards[id].name).trim().slice(0,180)||cards[id].name;
   const summary=v2String(course.summary||course.details||"").replace(/\s+/g," ").trim();
@@ -235,7 +241,7 @@ function v2Page(locale,content){
  return '<!doctype html><html lang="'+c.lang+'" dir="'+c.dir+'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>'+v2T(title)+'</title><meta name="description" content="'+v2T(desc,400)+'"><meta name="theme-color" content="#faf9f8"><meta property="og:type" content="website"><meta property="og:locale" content="'+V2_OG_LOCALE[locale]+'"><meta property="og:title" content="'+v2T(title)+'"><meta property="og:description" content="'+v2T(desc)+'"><meta property="og:url" content="'+canonical+'"><meta property="og:image" content="'+V2_ORIGIN+V2_OG+'"><meta property="og:image:alt" content="'+v2T(c.photoSub,180)+'"><meta property="og:site_name" content="The TOEFL House"><meta name="twitter:card" content="summary_large_image"><link rel="canonical" href="'+canonical+'">'+language+v2FontPreload(locale)+'<link rel="icon" href="' + V2_LOGO + '"><link rel="preload"'+(locale==="fa"?'':' media="(min-width: 761px)"')+' href="'+V2_IMG_640+'" as="image" fetchpriority="high"><link rel="stylesheet" href="/__th/v2/site.css?v='+V2_REV+'"><script defer src="/__th/v2/site.js?v='+V2_REV+'"></script><script defer src="/__th/engagement-v1.js"></script><script type="application/ld+json">'+ld+'</script></head><body class="home-editorial">'
  +v2Header(c,locale)
  +'<main id="main"><section class="hero"><div class="shell hero-grid"><div class="hero-copy"><span class="eyebrow eyebrow-hero"><span class="eyebrow-rule"></span>'+v2T(c.tag)+'</span><a class="semester-hero-pill" href="#semester-qaws-1405"><span class="semester-mini-dot" aria-hidden="true"></span>'+v2T(V2_SEMESTER[locale].heroTeaser)+' <span aria-hidden="true">↗</span></a><h1>'+v2T(c.lead)+' <span>'+v2T(c.leadAccent)+'</span></h1><p class="hero-lead">'+v2T(c.subtitle)+'</p><div class="hero-actions"><a class="button button-primary button-xl" href="'+prefix+'admissions/">'+v2T(c.heroCta)+' <span aria-hidden="true">↗</span></a><a class="button button-quiet button-xl" href="#programs">'+v2T(c.heroSecondary)+'</a></div><div class="hero-fine"><span aria-hidden="true">✦</span>'+v2T(c.heroBottom)+'</div></div><div class="hero-art"><div class="photo-frame"><img src="'+V2_IMG_640+'" width="680" height="820" alt="'+v2T(V2_CAMPUS_ALT[locale])+'" '+(locale==="fa"?'loading="eager" fetchpriority="high"':'loading="lazy"')+' decoding="async"><div class="photo-shade"></div><div class="photo-label"><strong>'+v2T(c.photoBadge)+'</strong><small>'+v2T(c.photoSub)+'</small></div></div><div class="photo-side"><span>'+v2T(c.micro)+'</span></div></div></div></section>'
- +v2HomeQuickPaths(locale)
+ +v2HomeQuickPaths(locale,content)
  +v2Programs(c,content,locale)
  +v2Stats(c,content,locale)
  +v2SemesterCampaign(locale)

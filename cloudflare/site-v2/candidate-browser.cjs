@@ -248,6 +248,22 @@ const axe=require('axe-core');
     return {position:getComputedStyle(e).position,hit:hit===link,focus:document.activeElement===link};
    }),{position:'relative',hit:true,focus:true},`${prefix} ${width} whole-card native link`);
   }
+  for(const [prefix,lang] of [['/','en'],['/fa/','fa'],['/ps/','ps']])for(const width of [390,1440]){
+   await page.setViewportSize({width,height:900});await page.goto(origin+prefix,{waitUntil:'load'});
+   const comparison=page.locator('.program-comparison'),summary=comparison.locator('summary');
+   await summary.focus();await page.keyboard.press('Enter');
+   assert.equal(await comparison.evaluate(e=>e.open),true,`${lang} ${width} comparison opens by keyboard`);
+   assert.equal(await comparison.locator('tbody tr').count(),6);
+   const region=comparison.locator('[role="region"]');
+   await region.focus();assert.equal(await region.evaluate(e=>e===document.activeElement),true,`${lang} ${width} scroll region keyboard focus`);
+   if(width===390)assert.equal(await comparison.locator('.comparison-scroll-hint').isVisible(),true,`${lang} scroll instruction`);
+   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth+2);
+   assert.equal(overflow,false,`${lang} ${width} comparison does not widen page`);
+   await comparison.screenshot({path:join(out,`comparison-${lang}-${width}.png`),animations:'disabled'});
+   const link=comparison.locator('tbody th a').first(),href=await link.getAttribute('href');
+   await link.focus();await Promise.all([page.waitForURL(origin+href),page.keyboard.press('Enter')]);
+   assert.equal(new URL(page.url()).pathname,href,`${lang} ${width} comparison link`);
+  }
   for(const [prefix,lang] of [['/','en'],['/fa/','fa'],['/ps/','ps']]){
    await page.setViewportSize({width:390,height:900});
    await page.goto(origin+prefix+'courses/general-english/',{waitUntil:'load'});
@@ -278,6 +294,11 @@ const axe=require('axe-core');
    const fallback=await noScript.newPage();
    await fallback.setViewportSize({width:1024,height:900});
    for(const prefix of ['/','/fa/','/ps/']){
+    await fallback.goto(origin+prefix,{waitUntil:'load'});
+    const comparison=fallback.locator('.program-comparison');
+    await comparison.locator('summary').focus();await fallback.keyboard.press('Enter');
+    assert.equal(await comparison.evaluate(e=>e.open),true,'comparison works without JavaScript');
+    assert.equal(await comparison.locator('tbody tr').count(),6);
     await fallback.goto(origin+prefix+'courses/general-english/',{waitUntil:'load'});
     await fallback.locator('.mobile-menu summary').click();
     assert.equal(await fallback.locator('.mobile-menu nav a').first().isVisible(),true,'navigation without JavaScript');

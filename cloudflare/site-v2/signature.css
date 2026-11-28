@@ -84,6 +84,12 @@ html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissio
 .photo-frame { background: linear-gradient(145deg, #fff3f3, #f8d7dc); }
 .photo-label { background: #242427f0; border-inline-start: 4px solid var(--logo-red); }
 .journey-step { border-block-start: 2px solid var(--signature-red); }
+.program-comparison { margin-block-start: 24px; border-block: 1px solid var(--signature-line); }
+.program-comparison summary { padding: 18px 0; cursor: pointer; color: var(--signature-red); font-weight: 800; }
+.program-comparison table { min-width: 580px; background: #fff; }
+.program-comparison th a { color: var(--signature-red); text-decoration: underline; text-underline-offset: 3px; }
+.comparison-scroll-hint { display: none; }
+@media (max-width:760px) { .comparison-scroll-hint { display: block; color: var(--reading); font-size: 14px; margin: 0 0 12px; } }
 .footer { border-block-start: 5px solid var(--logo-red); }
 .footer a:focus-visible { outline-color: #fff; }
 

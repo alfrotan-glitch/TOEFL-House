@@ -32,6 +32,10 @@
       "coursesLead": "Six English language programs, from foundational learning to academic and professional communication. Confirm fees, class times and availability with admissions.",
       "courseDetail": "View program",
       "courseDuration": "Duration",
+      "compareTitle": "Compare programs at a glance",
+      "compareFocus": "What you will study",
+      "compareUnknown": "Ask admissions",
+      "compareScroll": "Scroll sideways to see all columns.",
       "scheduleEyebrow": "CLASS SCHEDULE",
       "scheduleTitle": "Seven shifts a day, six days a week.",
       "scheduleLead": "Seventy-minute sessions, Saturday–Thursday. Friday is closed.",
@@ -152,6 +156,10 @@
       "coursesLead": "شش برنامهٔ آموزشی، از انگلیسی عمومی تا مهارت‌های اکادمیک و مسلکی. برای دریافت معلومات دقیق دربارهٔ فیس، تقسیم اوقات و ظرفیت صنف‌ها با پذیرش تماس بگیرید.",
       "courseDetail": "معرفی کامل برنامه",
       "courseDuration": "مدت دوره",
+      "compareTitle": "مقایسهٔ برنامه‌ها در یک نگاه",
+      "compareFocus": "آنچه می‌آموزید",
+      "compareUnknown": "از پذیرش بپرسید",
+      "compareScroll": "برای دیدن تمام ستون‌ها، جدول را به پهلو حرکت دهید.",
       "scheduleEyebrow": "تقسیم اوقات صنف‌ها",
       "scheduleTitle": "هفت شیفت در روز، شش روز در هفته.",
       "scheduleLead": "هر جلسه ۷۰ دقیقه، شنبه تا پنج‌شنبه. جمعه رخصت است.",
@@ -272,6 +280,10 @@
       "coursesLead": "د انګلیسي شپږ پروګرامونه، له بنسټیزې زده‌کړې تر اکاډمیکو او مسلکي مهارتونو پورې. د فیس، مهالوېش او شته ځایونو په اړه له نوم‌لیکنې څانګې سره اړیکه ونیسئ.",
       "courseDetail": "د پروګرام بشپړ معلومات",
       "courseDuration": "د کورس موده",
+      "compareTitle": "پروګرامونه په یوه کتنه کې پرتله کړئ",
+      "compareFocus": "څه زده کوئ",
+      "compareUnknown": "له نوم‌لیکنې وپوښتئ",
+      "compareScroll": "د ټولو ستنو د لیدلو لپاره جدول څنګ ته وښویوئ.",
       "scheduleEyebrow": "ورځنی مهالوېش",
       "scheduleTitle": "خپل مناسب وخت وټاکئ",
       "scheduleLead": "هره درسي غونډه ۷۰ دقیقې ده او درسي ورځې له شنبې تر پنجشنبې دي. جمعه د مرکز اوونیزه رخصتي ده.",
@@ -521,7 +533,7 @@
     "locales": {
       "en": {
         "label": "Start with your goal",
-        "hint": "Three direct routes to the right course",
+        "hint": "Explore a path that matches your goal",
         "links": {
           "general-english": "Build your English",
           "academic-english": "Study academic English",
@@ -530,7 +542,7 @@
       },
       "fa": {
         "label": "از هدف خود آغاز کنید",
-        "hint": "سه مسیر مستقیم برای انتخاب کورس مناسب",
+        "hint": "مسیر متناسب با هدف خود را پیدا کنید",
         "links": {
           "general-english": "تقویت انگلیسی عمومی",
           "academic-english": "انگلیسی برای اهداف اکادمیک",
@@ -539,7 +551,7 @@
       },
       "ps": {
         "label": "له خپل هدف څخه پیل وکړئ",
-        "hint": "د مناسب کورس د ټاکلو درې مستقیمې لارې",
+        "hint": "له خپل هدف سره برابره لاره ومومئ",
         "links": {
           "general-english": "عمومي انګلیسي پیاوړې کړئ",
           "academic-english": "اکاډمیکه انګلیسي زده کړئ",

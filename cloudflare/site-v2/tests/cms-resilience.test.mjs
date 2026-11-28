@@ -48,6 +48,54 @@ test('valid editorial omission is preserved and does not trigger fallback',async
  assert.equal((await request('/api/content',env)).status,503);
 }));
 
+test('home course discovery and structured data respect valid per-locale omissions',async()=>{
+ const {main,ps}=fixtures();
+ main.locales.en.programs=main.locales.en.programs.filter(p=>p.id!=='general-english');
+ main.locales.fa.programs=main.locales.fa.programs.filter(p=>p.id!=='academic-english');
+ ps.programs=ps.programs.filter(p=>p.id!=='toefl-preparation');
+ const {env}=binding(main,ps);
+ for(const [prefix,missing] of [['/','general-english'],['/fa/','academic-english'],['/ps/','toefl-preparation']]){
+  const html=await (await request(prefix,env)).text();
+  const quick=html.match(/<div class="shell home-paths">([\s\S]*?)<\/nav><\/div>/)?.[1];
+  assert.ok(quick);assert.doesNotMatch(quick,new RegExp('courses/'+missing+'/'));
+  const catalog=html.match(/<section class="programs-section section"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(catalog);assert.doesNotMatch(catalog,new RegExp('(?:id="course-|href="#course-)'+missing+'"'));
+  assert.equal((catalog.match(/class="course-card /g)||[]).length,5);
+  const comparison=catalog.match(/<details class="program-comparison">([\s\S]*?)<\/details>/)?.[1];
+  assert.ok(comparison);assert.equal((comparison.match(/<th scope="row">/g)||[]).length,5);
+  assert.doesNotMatch(comparison,new RegExp('courses/'+missing+'/'));
+  const blocks=[...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].flatMap(m=>JSON.parse(m[1]));
+  const list=blocks.find(x=>x['@type']==='ItemList');assert.ok(list);
+  assert.equal(list.itemListElement.length,5);
+  assert.ok(list.itemListElement.every((entry,index)=>entry.position===index+1&&!entry.url.endsWith('/'+missing+'/')));
+ }
+ for(const locale of [main.locales.en,main.locales.fa,ps])locale.programs=[];
+ const empty=binding(main,ps).env;
+ for(const prefix of ['/','/fa/','/ps/']){
+  const html=await (await request(prefix,empty)).text();
+  assert.doesNotMatch(html,/class="shell home-paths"/);
+  const catalog=html.match(/<section class="programs-section section"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(catalog);assert.doesNotMatch(catalog,/class="goal-finder"|class="course-card /);
+  assert.ok(catalog.includes('href="'+prefix+'admissions/"'));
+ }
+});
+
+test('comparison uses current course facts, escapes content and labels missing values',async()=>{
+ const {main,ps}=fixtures();
+ for(const locale of [main.locales.en,main.locales.fa,ps]){
+  const program=locale.programs.find(p=>p.id==='professional-writing');
+  program.summary='<script>untrusted</script>';
+  delete locale.programs.find(p=>p.id==='teacher-training').summary;
+ }
+ const {env}=binding(main,ps);
+ for(const [prefix,missing] of [['/','Ask admissions'],['/fa/','از پذیرش بپرسید'],['/ps/','له نوم‌لیکنې وپوښتئ']]){
+  const html=await (await request(prefix,env)).text();
+  const table=html.match(/<details class="program-comparison">([\s\S]*?)<\/details>/)?.[1];assert.ok(table);
+  assert.ok(table.includes(missing));assert.match(table,/&lt;script&gt;untrusted&lt;\/script&gt;/);
+  assert.doesNotMatch(table,/<script>untrusted<\/script>/);
+ }
+});
+
 test('related courses use localized names and never link to omitted records',async()=>{
  const {main,ps}=fixtures();
  for(const locale of [main.locales.en,main.locales.fa,ps])locale.programs=locale.programs.filter(p=>['professional-writing','teacher-training'].includes(p.id));
