@@ -107,8 +107,8 @@ function v2Stats(c,content,locale){
 function v2CourseGlyph(id){return '<svg viewBox="0 0 30 30" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+V2_COURSE_GLYPHS[id]+'</svg>';}
 // V2_HOME_PATHS is compiled from content/home.json.
 function v2HomeQuickPaths(locale){
- const c=V2_HOME_PATHS[locale],p=v2Prefix(locale),ids=["general-english","academic-english","toefl-preparation"];
- return '<div class="shell home-paths"><nav class="goal-finder" aria-label="'+v2T(c.label)+'"><div class="goal-finder-intro"><strong>'+v2T(c.label)+'</strong><span>'+v2T(c.hint)+'</span></div><div class="goal-finder-links">'+ids.map((id,i)=>'<a href="'+p+'courses/'+id+'/">'+'<span class="home-path-label"><small lang="en" dir="ltr">'+["GENERAL ENGLISH","EAP","TOEFL iBT"][i]+'</small><strong>'+v2T(c.links[i])+'</strong></span><span aria-hidden="true">↗</span></a>').join("")+'</div></nav></div>';
+ const c=V2_HOME_PATHS.locales[locale],p=v2Prefix(locale);
+ return '<div class="shell home-paths"><nav class="goal-finder" aria-label="'+v2T(c.label)+'"><div class="goal-finder-intro"><strong>'+v2T(c.label)+'</strong><span>'+v2T(c.hint)+'</span></div><div class="goal-finder-links">'+V2_HOME_PATHS.catalog.map(({id,tag})=>'<a href="'+p+'courses/'+id+'/">'+'<span class="home-path-label"><small lang="en" dir="ltr">'+v2T(tag)+'</small><strong>'+v2T(c.links[id])+'</strong></span><span aria-hidden="true">↗</span></a>').join("")+'</div></nav></div>';
 }
 function v2Programs(c,content,locale){
  const prefix=v2Prefix(locale);

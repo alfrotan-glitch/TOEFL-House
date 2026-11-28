@@ -23,12 +23,24 @@ test('course identity survives catalog reordering in cards, fallback, structured
   for(const locale of ['en','fa','ps'])for(const id of ids){
    home.courseCards[locale][id]={name:`NAME ${locale} ${id}`,shortDuration:`SHORT ${locale} ${id}`,fallbackDuration:`FALLBACK ${locale} ${id}`};
   }
+  home.paths.catalog.reverse();
+  for(const path of home.paths.catalog){
+   path.tag=`TAG ${path.id}`;
+   for(const locale of ['en','fa','ps'])home.paths.locales[locale].links[path.id]=`PATH ${locale} ${path.id}`;
+  }
   await writeFile(contentPath,JSON.stringify(home));
   execFileSync(process.execPath,[join(copy,'build.mjs')],{stdio:'pipe'});
   const {default:worker}=await import(pathToFileURL(join(copy,'dist/_worker.js')).href);
   for(const [locale,prefix] of [['en','/'],['fa','/fa/'],['ps','/ps/']]){
    const get=async path=>{const response=await worker.fetch(new Request('https://toeflhouse.pages.dev'+path),{});assert.equal(response.status,200,path);return response.text();};
    const html=await get(prefix);
+   const pathNav=html.match(/<div class="shell home-paths">([\s\S]*?)<\/nav><\/div>/)?.[1];
+   assert.ok(pathNav,`${locale} quick paths`);
+   let last=-1;
+   for(const path of home.paths.catalog){
+    const link=`<a href="${prefix}courses/${path.id}/"><span class="home-path-label"><small lang="en" dir="ltr">${path.tag}</small><strong>${home.paths.locales[locale].links[path.id]}</strong></span>`;
+    const index=pathNav.indexOf(link);assert.ok(index>last,`${locale} ${path.id} path label and order`);last=index;
+   }
    const list=[...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].flatMap(x=>JSON.parse(x[1])).find(x=>x['@type']==='ItemList');
    assert.ok(list,'course list schema');
    for(const [i,id] of reordered.entries()){

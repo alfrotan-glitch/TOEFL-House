@@ -51,7 +51,11 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
   for(const id of Object.keys(home.reviewedCards[locale]))if(!contract.courses.includes(id))throw Error('Unknown reviewed course: '+prefix+id);
   sameKeys(home.header[locale],['compact','skip','language'],prefix+'header');
   for(const value of Object.values(home.header[locale]))requireText(value,prefix+'header');
-  lengthIs(home.paths[locale].links,3,prefix+'home paths'); // Three renderer-owned quick paths.
+  sameKeys(home.paths.locales[locale],['label','hint','links'],prefix+'home paths');
+  requireText(home.paths.locales[locale].label,prefix+'home paths label');
+  requireText(home.paths.locales[locale].hint,prefix+'home paths hint');
+  sameKeys(home.paths.locales[locale].links,home.paths.catalog.map(path=>path.id),prefix+'home paths');
+  for(const value of Object.values(home.paths.locales[locale].links))requireText(value,prefix+'home path');
   sameKeys(general.locales[locale].stageData,general.catalog.map(stage=>stage.id),prefix+'General English stages');
   for(const stage of general.catalog){
    const data=general.locales[locale].stageData[stage.id];
@@ -60,7 +64,7 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
    requireText(general.locales[locale][stage.durationKey],prefix+'duration '+stage.durationKey);
   }
   lengthIs(ui.practice[locale].explanations,contract.practiceCount,prefix+'practice explanations');
-  for(const value of [...home.paths[locale].links,...ui.practice[locale].explanations])requireText(value,prefix+'indexed content');
+  for(const value of ui.practice[locale].explanations)requireText(value,prefix+'indexed content');
   lengthIs(academic[locale].levels,4,prefix+'academic levels'); // The fourth-level note is renderer-indexed.
   for(const key of ['seoTitle','seoDescription','feeMonthDisplay','feeLevelDisplay','levelDuration'])requireText(academic[locale][key],prefix+'academic.'+key);
   if(!Array.isArray(academic[locale].books)||!academic[locale].books.length)throw Error('Missing academic books: '+locale);
@@ -112,8 +116,17 @@ export function compileContent(general,academic,special,guides,home,ui,contract)
  for(const key of uiKeys)localized(ui[key],'ui.'+key);
  const homeKeys=['copy','courseCards','courseGlyphs','goals','habits','header','paths','reviewedCards','semester'];
  if(!home||JSON.stringify(Object.keys(home).sort())!==JSON.stringify(homeKeys))throw Error('Invalid home content');
- for(const key of homeKeys.filter(key=>key!=='courseGlyphs'))localized(home[key],'home.'+key);
+ for(const key of homeKeys.filter(key=>!['courseGlyphs','paths'].includes(key)))localized(home[key],'home.'+key);
  if(!contract)throw Error('Content contract required');
+ sameKeys(home.paths,['catalog','locales'],'home paths');
+ lengthIs(home.paths.catalog,3,'home path catalog');
+ const pathIds=new Set();
+ for(const path of home.paths.catalog){
+  sameKeys(path,['id','tag'],'home path');
+  if(!contract.courses.includes(path.id)||pathIds.has(path.id))throw Error('Invalid home path ID');
+  pathIds.add(path.id);requireText(path.tag,'home path tag');
+ }
+ localized(home.paths.locales,'home.paths.locales');
  sameKeys(home.courseGlyphs,contract.courses,'home course glyphs');
  // Trusted source graphics, not user markup. Limit to the exact primitive and
  // attribute forms used by these decorative icons before embedding as SVG.

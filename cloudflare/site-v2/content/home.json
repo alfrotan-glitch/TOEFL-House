@@ -501,32 +501,48 @@
     }
   },
   "paths": {
-    "en": {
-      "label": "Start with your goal",
-      "hint": "Three direct routes to the right course",
-      "links": [
-        "Build your English",
-        "Study academic English",
-        "Prepare for TOEFL iBT"
-      ]
-    },
-    "fa": {
-      "label": "از هدف خود آغاز کنید",
-      "hint": "سه مسیر مستقیم برای انتخاب کورس مناسب",
-      "links": [
-        "تقویت انگلیسی عمومی",
-        "انگلیسی برای اهداف اکادمیک",
-        "آمادگی آزمون TOEFL iBT"
-      ]
-    },
-    "ps": {
-      "label": "له خپل هدف څخه پیل وکړئ",
-      "hint": "د مناسب کورس د ټاکلو درې مستقیمې لارې",
-      "links": [
-        "عمومي انګلیسي پیاوړې کړئ",
-        "اکاډمیکه انګلیسي زده کړئ",
-        "TOEFL iBT ته چمتو شئ"
-      ]
+    "catalog": [
+      {
+        "id": "general-english",
+        "tag": "GENERAL ENGLISH"
+      },
+      {
+        "id": "academic-english",
+        "tag": "EAP"
+      },
+      {
+        "id": "toefl-preparation",
+        "tag": "TOEFL iBT"
+      }
+    ],
+    "locales": {
+      "en": {
+        "label": "Start with your goal",
+        "hint": "Three direct routes to the right course",
+        "links": {
+          "general-english": "Build your English",
+          "academic-english": "Study academic English",
+          "toefl-preparation": "Prepare for TOEFL iBT"
+        }
+      },
+      "fa": {
+        "label": "از هدف خود آغاز کنید",
+        "hint": "سه مسیر مستقیم برای انتخاب کورس مناسب",
+        "links": {
+          "general-english": "تقویت انگلیسی عمومی",
+          "academic-english": "انگلیسی برای اهداف اکادمیک",
+          "toefl-preparation": "آمادگی آزمون TOEFL iBT"
+        }
+      },
+      "ps": {
+        "label": "له خپل هدف څخه پیل وکړئ",
+        "hint": "د مناسب کورس د ټاکلو درې مستقیمې لارې",
+        "links": {
+          "general-english": "عمومي انګلیسي پیاوړې کړئ",
+          "academic-english": "اکاډمیکه انګلیسي زده کړئ",
+          "toefl-preparation": "TOEFL iBT ته چمتو شئ"
+        }
+      }
     }
   },
   "habits": {
