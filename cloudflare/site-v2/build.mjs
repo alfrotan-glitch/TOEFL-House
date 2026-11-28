@@ -4,6 +4,7 @@ import {dirname,join} from "node:path";
 import {createHash} from "node:crypto";
 import {buildStyles} from "./build-styles.mjs";
 import {loadContent} from "./content-compiler.mjs";
+import {extractContentContract} from "./content-contract.mjs";
 import {loadBrand} from "./brand-asset.mjs";
 import {composeEdge} from "./compose-edge.mjs";
 const here=dirname(fileURLToPath(import.meta.url));
@@ -16,7 +17,7 @@ const generalEnglish=await readFile(join(here,"general-english.mjs"),"utf8");
 const guides=await readFile(join(here,"guides.mjs"),"utf8");
 const publicContent=await readFile(join(here,"public-content.mjs"),"utf8");
 // Translation files remain readable and are validated and compacted at build time.
-const programContent=await loadContent();
+const programContent=await loadContent(extractContentContract(main,generalEnglish));
 const academicEnglish=await readFile(join(here,"academic-english.mjs"),"utf8");
 const specialPrograms=await readFile(join(here,"special-programs.mjs"),"utf8");
 // Compile the three source layers to the existing single, versioned CSS endpoint.

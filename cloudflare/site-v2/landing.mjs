@@ -45,7 +45,7 @@ function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();
 function v2OnlineFallback(locale){const c=V2_COPY[locale];return {id:"online-individual-zoom",title:c.onlineLabel,summary:c.onlineText};}
 async function v2FallbackCms(){
  const ids=V2_COURSE_IDS;
- const duration={en:["Pre-Starter: 1 month; other levels: 2 months","2 months per level","4 months","2 months","2 months","2 months"],fa:["Pre-Starter: یک ماه؛ سایر سطح‌ها: دو ماه","دو ماه برای هر سطح","چهار ماه","دو ماه","دو ماه","دو ماه"],ps:["Pre-Starter: یوه میاشت؛ نورې کچې: دوه میاشتې","د هرې کچې لپاره دوه میاشتې","څلور میاشتې","دوه میاشتې","دوه میاشتې","دوه میاشتې"]};
+ const duration=V2_HOME_FALLBACK_DURATIONS;
  const programs=locale=>[...ids.map((id,i)=>({id,title:V2_COPY[locale].courseNames[i]||id,summary:V2_COPY[locale].subtitle,duration:duration[locale][i]||""})),v2OnlineFallback(locale)];
  return {main:{locales:{en:{programs:programs("en")},fa:{programs:programs("fa")}},media:{},timetable:{}},pashto:{programs:programs("ps")},revision:0,psRevision:0,cmsStatus:"fallback"};
 }
@@ -77,14 +77,14 @@ function v2Header(c,locale,suffix=""){
  const anchorBase=suffix?v2Prefix(locale):"";
  const courseMatch=/^courses\/([a-z0-9-]+)\/$/.exec(suffix);
  const applyHref=prefix+"admissions/"+(courseMatch&&(V2_COURSE_IDS.includes(courseMatch[1])||courseMatch[1]==="online-individual-zoom")?"?program="+courseMatch[1]:"");
- const compactLabel=locale==="fa"?"تعیین سطح":locale==="ps"?"وړیا ارزونه":"Free assessment";
+ const header=V2_HOME_HEADER[locale],compactLabel=header.compact;
  const nav=[[anchorBase+"#programs",c.navPrograms],[prefix+"guides/",c.navGuides],[anchorBase+"#why-us",c.navWhy],[anchorBase+"#online",c.navOnline],[anchorBase+"#faq",c.navFaq],[anchorBase+"#contact",c.navContact]];
  const links=nav.map(([href,label])=>'<a href="'+href+'">'+v2T(label)+'</a>').join("");
- return '<a class="skip" href="#main">'+(locale==="en"?"Skip to content":locale==="fa"?"رفتن به محتوا":"منځپانګې ته لاړ شئ")+'</a>'
+ return '<a class="skip" href="#main">'+v2T(header.skip)+'</a>'
   +'<div class="topline"><div class="shell topline-inner"><span class="top-dots"></span><span>'+v2T(c.badge)+'</span><a class="toplink" href="https://wa.me/93794357509" rel="noopener noreferrer">'+v2T(c.wa)+' <span aria-hidden="true">↗</span></a></div></div>'
   +'<header class="site-header"><div class="shell header-inner"><a class="brand" href="'+prefix+'" aria-label="'+v2T(c.name)+'"><img src="'+V2_LOGO+'" width="48" height="48" alt="" decoding="async"><span><strong>THE TOEFL HOUSE</strong><small>'+v2T(c.localName)+'</small></span></a>'
   +'<nav class="main-nav" aria-label="'+v2T(c.navMenu)+'">'+links+'</nav>'
-  +'<div class="header-actions"><div class="language-links" role="group" aria-label="'+v2T(locale==="en"?"Choose language":locale==="fa"?"انتخاب زبان":"ژبه وټاکئ")+'">'+l+'</div><a class="button button-primary desktop-apply" href="'+applyHref+'">'+v2T(c.navApply)+' <span aria-hidden="true">↗</span></a></div>'
+  +'<div class="header-actions"><div class="language-links" role="group" aria-label="'+v2T(header.language)+'">'+l+'</div><a class="button button-primary desktop-apply" href="'+applyHref+'">'+v2T(c.navApply)+' <span aria-hidden="true">↗</span></a></div>'
   +'<a class="mobile-quick-apply" href="'+applyHref+'" aria-label="'+v2T(compactLabel)+' — '+v2T(c.heroCta)+'">'+v2T(compactLabel)+'</a>'
   +'<details class="mobile-menu"><summary aria-label="'+v2T(c.navMenu)+'"><span></span><span></span><span></span></summary><nav aria-label="'+v2T(c.navMenu)+'">'+links+'<div class="mobile-language">'+l+'</div><a class="mobile-apply" href="'+applyHref+'">'+v2T(c.navApply)+'</a></nav></details></div></header>';
 }
@@ -123,19 +123,11 @@ function v2Programs(c,content,locale){
  const cards=V2_COURSE_IDS.map((id,i)=>{
   const program=src.find(x=>x.id===id)||{};
   let duration=program.duration;
-  const shortDurations={
-    en:["Pre-Starter: 1 mo · Other levels: 2 mo","2 months per level","4 months","2 months","2 months","2 months"],
-    fa:["Pre-Starter: ۱ ماه · سایر سطوح: ۲ ماه","۲ ماه برای هر سطح","۴ ماه","۲ ماه","۲ ماه","۲ ماه"],
-    ps:["Pre-Starter: ۱ میاشت · نورې کچې: ۲ میاشتې","د هرې کچې لپاره ۲ میاشتې","څلور میاشتې","۲ میاشتې","۲ میاشتې","۲ میاشتې"]
-  };
+  const shortDurations=V2_HOME_SHORT_DURATIONS;
   duration=shortDurations[locale][i]||duration;
   let desc=program.summary||program.subtitle||"";
   // Owner-confirmed program facts take precedence over older CMS summaries.
-  const reviewed={
-    en:{"special-speaking":"Two-month semester with Master Speaking and grammar in conversation. Total semester fee: AFN 2,000.","toefl-preparation":"Four-month preparation for the updated 2026 TOEFL iBT: Reading, Listening, Writing and Speaking."},
-    fa:{"special-speaking":"سمستر دوماهه با کتاب اختصاصی Master Speaking و گرامر مکالمه؛ فیس مجموعی ۲٬۰۰۰ افغانی.","toefl-preparation":"آمادگی چهارماههٔ TOEFL iBT مطابق ساختار جدید سال ۲۰۲۶؛ چهار مهارت اصلی زبان."},
-    ps:{"special-speaking":"دوه میاشتنی سمستر د Master Speaking او د خبرو ګرامر له کتابونو سره؛ ټول فیس ۲٬۰۰۰ افغانۍ.","toefl-preparation":"د ۲۰۲۶ نوې TOEFL iBT بڼې ته څلور میاشتنی چمتووالی؛ د انګلیسي څلور مهارتونه."}
-  };
+  const reviewed=V2_HOME_REVIEWED_CARDS;
   if(reviewed[locale]?.[id])desc=reviewed[locale][id];
   return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(i)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(c.courseNames[i]||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
  }).join("");

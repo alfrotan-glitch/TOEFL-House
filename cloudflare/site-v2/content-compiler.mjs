@@ -21,11 +21,82 @@ function localized(data,name){
  if(!data||JSON.stringify(Object.keys(data).sort())!==JSON.stringify([...locales].sort()))throw Error('Missing or unexpected locales: '+name);
  for(const locale of locales)sameShape(data.en,data[locale],name+'.'+locale);
 }
-export function compileContent(general,academic,special,guides,home,ui){
+function lengthIs(value,length,path){
+ if(!Array.isArray(value)||value.length!==length)throw Error('Invalid indexed length: '+path+' (expected '+length+')');
+}
+function tuples(value,length,path){
+ if(!Array.isArray(value))throw Error('Invalid tuples: '+path);
+ for(const [i,tuple] of value.entries()){
+  lengthIs(tuple,length,path+'['+i+']');
+  for(const [j,text] of tuple.entries())requireText(text,path+'['+i+']['+j+']');
+ }
+}
+function sameKeys(value,keys,path){
+ if(!value||typeof value!=='object'||Array.isArray(value)||JSON.stringify(Object.keys(value).sort())!==JSON.stringify([...keys].sort()))throw Error('Invalid catalog keys: '+path);
+}
+function requireText(value,path){
+ if(typeof value!=='string'||!value.trim())throw Error('Missing required text: '+path);
+}
+function validateReferences(general,academic,special,guides,home,ui,contract){
+ if(!contract)throw Error('Content contract required');
+ for(const locale of locales){
+  const prefix=locale+'.';
+  const expectedLanguage={en:['en','ltr'],fa:['fa-AF','rtl'],ps:['ps-AF','rtl']}[locale];
+  if(home.copy[locale].lang!==expectedLanguage[0]||home.copy[locale].dir!==expectedLanguage[1])throw Error('Invalid language or direction: '+locale);
+  lengthIs(home.copy[locale].courseNames,contract.courses.length,prefix+'courseNames');
+  lengthIs(home.fallbackDurations[locale],contract.courses.length,prefix+'fallback durations');
+  lengthIs(home.shortDurations[locale],contract.courses.length,prefix+'short durations');
+  for(const value of [...home.copy[locale].courseNames,...home.fallbackDurations[locale],...home.shortDurations[locale]])requireText(value,prefix+'indexed course content');
+  for(const id of Object.keys(home.reviewedCards[locale]))if(!contract.courses.includes(id))throw Error('Unknown reviewed course: '+prefix+id);
+  sameKeys(home.header[locale],['compact','skip','language'],prefix+'header');
+  for(const value of Object.values(home.header[locale]))requireText(value,prefix+'header');
+  lengthIs(home.paths[locale].links,3,prefix+'home paths'); // Three renderer-owned quick paths.
+  lengthIs(general[locale].stageFocus,contract.stageCount,prefix+'stageFocus');
+  lengthIs(general[locale].stageDescs,contract.stageCount,prefix+'stageDescs');
+  lengthIs(ui.practice[locale].explanations,contract.practiceCount,prefix+'practice explanations');
+  for(const value of [...home.paths[locale].links,...general[locale].stageFocus,...general[locale].stageDescs,...ui.practice[locale].explanations])requireText(value,prefix+'indexed content');
+  lengthIs(academic[locale].books,3,prefix+'academic books'); // Three renderer-owned guide links.
+  for(const [value,size,path] of [
+   [general[locale].facts,2,'general facts'],[general[locale].faqs,2,'general FAQs'],[general[locale].skills,2,'general skills'],
+   [academic[locale].facts,2,'academic facts'],[academic[locale].outcomes,2,'academic outcomes'],[academic[locale].faq,2,'academic FAQs'],
+   [home.copy[locale].steps,3,'home steps'],[home.copy[locale].statsFallback,2,'home stats'],[home.copy[locale].fallbackFaq,2,'home FAQs'],
+   [home.goals[locale].items,2,'goals'],[home.habits[locale].habits,3,'habits'],[home.habits[locale].links,3,'habit links'],[ui.detail[locale].faqs,2,'admissions FAQs']
+  ])tuples(value,size,prefix+path);
+  for(const [id,page] of Object.entries(special.courses[locale])){
+   for(const [field,size] of [['facts',2],['outcomes',2],['method',3],['faq',2]])tuples(page[field],size,prefix+id+'.'+field);
+  }
+  sameKeys(guides.data[locale],contract.articles,prefix+'articles');
+  sameKeys(guides.bookData[locale],contract.books,prefix+'books');
+  sameKeys(guides.feedback[locale].hints,contract.books,prefix+'book feedback');
+  sameKeys(ui.facts[locale],contract.publicCourses,prefix+'admissions facts');
+  for(const [kind,entries] of [['article',guides.data[locale]],['book',guides.bookData[locale]]])for(const [id,item] of Object.entries(entries)){
+   for(const key of ['title','description','intro'])requireText(item[key],prefix+id+'.'+key);
+   if(typeof item.program!=='string'||(kind==='book'&&!item.program)||(item.program&&!contract.publicCourses.includes(item.program)))throw Error('Unknown guide program: '+prefix+id);
+   if(item.program!==guides[kind==='article'?'data':'bookData'].en[id].program)throw Error('Different guide program across locales: '+prefix+id);
+   if(!Array.isArray(item.sections)||!item.sections.length)throw Error('Missing guide sections: '+prefix+id);
+   for(const [index,section] of item.sections.entries()){
+    requireText(section.heading,prefix+id+'.sections['+index+'].heading');
+    if(!Array.isArray(section.paragraphs)||!section.paragraphs.length)throw Error('Missing guide paragraphs: '+prefix+id);
+    for(const paragraph of section.paragraphs)requireText(paragraph,prefix+id+'.paragraph');
+    if(section.bullets!==undefined){if(!Array.isArray(section.bullets))throw Error('Invalid guide bullets: '+prefix+id);for(const bullet of section.bullets)requireText(bullet,prefix+id+'.bullet');}
+   }
+   if(kind==='book'){
+    requireText(item.publisher,prefix+id+'.publisher');
+    let source;try{source=new URL(item.source);}catch{throw Error('Invalid book source: '+prefix+id);}
+    if(source.protocol!=='https:'||source.username||source.password)throw Error('Invalid book source: '+prefix+id);
+   }
+  }
+  for(const [items,allowed,path] of [[home.goals[locale].items,contract.courses,'goals'],[home.habits[locale].links,contract.guides,'habit links']]){
+   const reference=(path==='goals'?home.goals.en.items:home.habits.en.links).map(item=>item[0]);
+   if(items.some(item=>!allowed.includes(item[0]))||JSON.stringify(items.map(item=>item[0]))!==JSON.stringify(reference))throw Error('Invalid localized route references: '+prefix+path);
+  }
+ }
+}
+export function compileContent(general,academic,special,guides,home,ui,contract){
  const uiKeys=['breadcrumb','campusAlt','detail','facts','fallback','practice'];
  if(!ui||JSON.stringify(Object.keys(ui).sort())!==JSON.stringify(uiKeys))throw Error('Invalid shared UI content');
  for(const key of uiKeys)localized(ui[key],'ui.'+key);
- const homeKeys=['copy','goals','habits','paths','semester'];
+ const homeKeys=['copy','fallbackDurations','goals','habits','header','paths','reviewedCards','semester','shortDurations'];
  if(!home||JSON.stringify(Object.keys(home).sort())!==JSON.stringify(homeKeys))throw Error('Invalid home content');
  for(const key of homeKeys)localized(home[key],'home.'+key);
  localized(general,'general');
@@ -37,12 +108,13 @@ export function compileContent(general,academic,special,guides,home,ui){
  const guideKeys=['bookData','bookUi','data','feedback','nav','ui'];
  if(!guides||JSON.stringify(Object.keys(guides).sort())!==JSON.stringify(guideKeys))throw Error('Invalid guide content');
  for(const key of guideKeys)localized(guides[key],'guides.'+key);
+ validateReferences(general,academic,special,guides,home,ui,contract);
  return ['const V2_GENERAL_ENGLISH='+JSON.stringify(general)+';', 'const V2_EAP='+JSON.stringify(academic)+';', 'const V2_SPECIAL_UI='+JSON.stringify(special.ui)+';', 'const V2_SPECIAL_COURSES='+JSON.stringify(special.courses)+';',
   ...[['V2_GUIDE_UI','ui'],['V2_GUIDE_DATA','data'],['V2_BOOK_UI','bookUi'],['V2_BOOK_DATA','bookData'],['V2_BOOK_FEEDBACK','feedback'],['V2_GUIDE_NAV','nav']].map(([name,key])=>'const '+name+'='+JSON.stringify(guides[key])+';'),
-  ...[['V2_COPY','copy'],['V2_SEMESTER','semester'],['V2_GOALS','goals'],['V2_HOME_PATHS','paths'],['V2_LEARNING_HABITS','habits']].map(([name,key])=>'const '+name+'='+JSON.stringify(home[key])+';'),
+  ...[['V2_COPY','copy'],['V2_SEMESTER','semester'],['V2_GOALS','goals'],['V2_HOME_PATHS','paths'],['V2_LEARNING_HABITS','habits'],['V2_HOME_HEADER','header'],['V2_HOME_FALLBACK_DURATIONS','fallbackDurations'],['V2_HOME_SHORT_DURATIONS','shortDurations'],['V2_HOME_REVIEWED_CARDS','reviewedCards']].map(([name,key])=>'const '+name+'='+JSON.stringify(home[key])+';'),
   ...[['V2_BREADCRUMB','breadcrumb'],['V2_CAMPUS_ALT','campusAlt'],['V2_DETAIL_LABELS','detail'],['V2_ADMISSIONS_FACTS','facts'],['V2_ADMISSIONS_FALLBACK','fallback'],['V2_GE_PRACTICE_UI','practice']].map(([name,key])=>'const '+name+'='+JSON.stringify(ui[key])+';')].join('\n');
 }
-export async function loadContent(){
+export async function loadContent(contract){
  const [general,academic,special,guides,home,ui]=await Promise.all(['general.json','academic.json','special.json','guides.json','home.json','ui.json'].map(async name=>JSON.parse(await readFile(join(here,'content',name),'utf8'))));
- return compileContent(general,academic,special,guides,home,ui);
+ return compileContent(general,academic,special,guides,home,ui,contract);
 }

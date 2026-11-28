@@ -683,5 +683,88 @@
       "open": "لارښود ولولئ",
       "all": "ټول ښوونیز لارښودونه"
     }
+  },
+  "fallbackDurations": {
+    "en": [
+      "Pre-Starter: 1 month; other levels: 2 months",
+      "2 months per level",
+      "4 months",
+      "2 months",
+      "2 months",
+      "2 months"
+    ],
+    "fa": [
+      "Pre-Starter: یک ماه؛ سایر سطح‌ها: دو ماه",
+      "دو ماه برای هر سطح",
+      "چهار ماه",
+      "دو ماه",
+      "دو ماه",
+      "دو ماه"
+    ],
+    "ps": [
+      "Pre-Starter: یوه میاشت؛ نورې کچې: دوه میاشتې",
+      "د هرې کچې لپاره دوه میاشتې",
+      "څلور میاشتې",
+      "دوه میاشتې",
+      "دوه میاشتې",
+      "دوه میاشتې"
+    ]
+  },
+  "shortDurations": {
+    "en": [
+      "Pre-Starter: 1 mo · Other levels: 2 mo",
+      "2 months per level",
+      "4 months",
+      "2 months",
+      "2 months",
+      "2 months"
+    ],
+    "fa": [
+      "Pre-Starter: ۱ ماه · سایر سطوح: ۲ ماه",
+      "۲ ماه برای هر سطح",
+      "۴ ماه",
+      "۲ ماه",
+      "۲ ماه",
+      "۲ ماه"
+    ],
+    "ps": [
+      "Pre-Starter: ۱ میاشت · نورې کچې: ۲ میاشتې",
+      "د هرې کچې لپاره ۲ میاشتې",
+      "څلور میاشتې",
+      "۲ میاشتې",
+      "۲ میاشتې",
+      "۲ میاشتې"
+    ]
+  },
+  "reviewedCards": {
+    "en": {
+      "special-speaking": "Two-month semester with Master Speaking and grammar in conversation. Total semester fee: AFN 2,000.",
+      "toefl-preparation": "Four-month preparation for the updated 2026 TOEFL iBT: Reading, Listening, Writing and Speaking."
+    },
+    "fa": {
+      "special-speaking": "سمستر دوماهه با کتاب اختصاصی Master Speaking و گرامر مکالمه؛ فیس مجموعی ۲٬۰۰۰ افغانی.",
+      "toefl-preparation": "آمادگی چهارماههٔ TOEFL iBT مطابق ساختار جدید سال ۲۰۲۶؛ چهار مهارت اصلی زبان."
+    },
+    "ps": {
+      "special-speaking": "دوه میاشتنی سمستر د Master Speaking او د خبرو ګرامر له کتابونو سره؛ ټول فیس ۲٬۰۰۰ افغانۍ.",
+      "toefl-preparation": "د ۲۰۲۶ نوې TOEFL iBT بڼې ته څلور میاشتنی چمتووالی؛ د انګلیسي څلور مهارتونه."
+    }
+  },
+  "header": {
+    "en": {
+      "compact": "Free assessment",
+      "skip": "Skip to content",
+      "language": "Choose language"
+    },
+    "fa": {
+      "compact": "تعیین سطح",
+      "skip": "رفتن به محتوا",
+      "language": "انتخاب زبان"
+    },
+    "ps": {
+      "compact": "وړیا ارزونه",
+      "skip": "منځپانګې ته لاړ شئ",
+      "language": "ژبه وټاکئ"
+    }
   }
 }

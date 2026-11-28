@@ -2,23 +2,66 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {compileContent} from '../content-compiler.mjs';
+import {extractContentContract} from '../content-contract.mjs';
 const load=async name=>JSON.parse(await readFile(new URL('../content/'+name,import.meta.url),'utf8'));
+const sources=async()=>Promise.all(['../../pages-edge/worker.mjs','../general-english.mjs'].map(path=>readFile(new URL(path,import.meta.url),'utf8')));
+const content=async()=>Promise.all(['general.json','academic.json','special.json','guides.json','home.json','ui.json'].map(load));
 
-test('localized course content compiles deterministically and rejects missing or malformed translations',async()=>{
- const general=await load('general.json'),academic=await load('academic.json'),special=await load('special.json'),guides=await load('guides.json'),home=await load('home.json'),ui=await load('ui.json');
- const output=compileContent(general,academic,special,guides,home,ui);
- assert.equal(output,compileContent(general,academic,special,guides,home,ui));
+test('localized content compiles deterministically and rejects missing or malformed translations',async()=>{
+ const [general,academic,special,guides,home,ui]=await content(),contract=extractContentContract(...await sources());
+ const compile=(g=general,a=academic,s=special,d=guides,h=home,u=ui)=>compileContent(g,a,s,d,h,u,contract);
+ const output=compile();
+ assert.equal(output,compile());
  assert.match(output,/^const V2_GENERAL_ENGLISH=/);
  assert.match(output,/const V2_EAP=/);
  assert.match(output,/const V2_SPECIAL_COURSES=/);
  const missing=structuredClone(academic);delete missing.ps;
- assert.throws(()=>compileContent(general,missing,special,guides,home,ui),/locales/);
+ assert.throws(()=>compile(general,missing),/locales/);
  const keys=structuredClone(special);delete keys.ui.fa.cta;
- assert.throws(()=>compileContent(general,academic,keys,guides,home,ui),/keys/);
+ assert.throws(()=>compile(general,academic,keys),/keys/);
  const wrong=structuredClone(special);wrong.courses.ps.special.facts='invalid';
- assert.throws(()=>compileContent(general,academic,wrong,guides,home,ui),/array/);
+ assert.throws(()=>compile(general,academic,wrong),/array/);
  const missingUi=structuredClone(ui);delete missingUi.detail.ps.whatsapp;
- assert.throws(()=>compileContent(general,academic,special,guides,home,missingUi),/keys/);
+ assert.throws(()=>compile(general,academic,special,guides,home,missingUi),/keys/);
  const book=structuredClone(guides);delete book.bookData.fa['got-it-series'];
- assert.throws(()=>compileContent(general,academic,special,book,home,ui),/keys/);
+ assert.throws(()=>compile(general,academic,special,book),/keys/);
+});
+
+test('indexed content and routes fail closed even when all locales drift together',async()=>{
+ const [general,academic,special,guides,home,ui]=await content(),contract=extractContentContract(...await sources());
+ const compile=(g=general,a=academic,s=special,d=guides,h=home,u=ui)=>compileContent(g,a,s,d,h,u,contract);
+ const locales=['en','fa','ps'];
+ const short=structuredClone(general);for(const l of locales)short[l].stageFocus.pop();
+ assert.throws(()=>compile(short),/indexed length.*stageFocus/);
+ const pair=structuredClone(academic);for(const l of locales)pair[l].facts[0].pop();
+ assert.throws(()=>compile(general,pair),/indexed length.*facts/);
+ const deleted=structuredClone(guides);for(const l of locales)delete deleted.bookData[l]['got-it-series'];
+ assert.throws(()=>compile(general,academic,special,deleted),/catalog keys.*books/);
+ const badRoute=structuredClone(guides);for(const l of locales)badRoute.bookData[l]['got-it-series'].program='evil" onclick="alert(1)';
+ assert.throws(()=>compile(general,academic,special,badRoute),/Unknown guide program/);
+ const unsafe=structuredClone(guides);for(const l of locales)unsafe.bookData[l]['got-it-series'].source='javascript:alert(1)';
+ assert.throws(()=>compile(general,academic,special,unsafe),/Invalid book source/);
+ const missingSections=structuredClone(guides);for(const l of locales)delete missingSections.data[l]['english-courses-kabul'].sections;
+ assert.throws(()=>compile(general,academic,special,missingSections),/Missing guide sections/);
+ const brokenLink=structuredClone(home);for(const l of locales)brokenLink.habits[l].links[0][0]='not-a-guide';
+ assert.throws(()=>compile(general,academic,special,guides,brokenLink),/route references/);
+ const drift=structuredClone(home);drift.goals.ps.items[0][0]='academic-english';
+ assert.throws(()=>compile(general,academic,special,guides,drift),/route references/);
+ const language=structuredClone(home);language.copy.fa.dir='ltr';
+ assert.throws(()=>compile(general,academic,special,guides,language),/language or direction/);
+ const missingHeader=structuredClone(home);for(const l of locales)delete missingHeader.header[l].skip;
+ assert.throws(()=>compile(general,academic,special,guides,missingHeader),/catalog keys.*header/);
+ const blank=structuredClone(general);for(const l of locales)blank[l].stageDescs[1]=' ';
+ assert.throws(()=>compile(blank),/Missing required text/);
+ const explanations=structuredClone(ui);for(const l of locales)explanations.practice[l].explanations.pop();
+ assert.throws(()=>compile(general,academic,special,guides,home,explanations),/practice explanations/);
+});
+
+test('authoritative source catalog parsing rejects changed, invalid or ambiguous declarations',async()=>{
+ const [edge,renderer]=await sources(),contract=extractContentContract(edge,renderer);
+ assert.equal(contract.courses.length,6);assert.equal(contract.books.length,4);assert.equal(contract.guides.length,7);
+ assert.throws(()=>extractContentContract(edge+'\nconst V2_COURSE_IDS=["duplicate"];',renderer),/duplicate/);
+ assert.throws(()=>extractContentContract(edge.replace('const V2_PUBLIC_COURSES=', 'const REMOVED='),renderer),/Missing/);
+ assert.throws(()=>extractContentContract(edge.replace('"general-english","academic-english"','"bad/route","academic-english"'),renderer),/catalog IDs/);
+ assert.throws(()=>extractContentContract(edge,renderer.replace('"correct":1','"correct":9')),/practice question/);
 });
