@@ -97,6 +97,23 @@ const axe=require('axe-core');
     }
    }
    await page.setViewportSize({width:390,height:900});
+   for(const slug of ['english-courses-kabul','toefl-ibt-2026','speaking-practice',...bookSlugs]){
+    await page.goto(origin+prefix+'guides/'+slug+'/',{waitUntil:'load'});
+    const links=page.locator('.guide-contents ol a');
+    assert.ok(await links.count()>=2,`${lang} ${slug} contents`);
+    const href=await links.last().getAttribute('href');
+    await links.last().focus();await page.keyboard.press('Enter');
+    assert.equal(new URL(page.url()).hash,href,`${lang} ${slug} keyboard section navigation`);
+    assert.equal(await page.locator(href).count(),1,`${lang} ${slug} section target`);
+    const related=page.locator('.guide-related .growth-card');
+    assert.equal(await related.count(),2,`${lang} ${slug} related guides`);
+    const next=await related.first().getAttribute('href');
+    assert.ok(next.startsWith(prefix+'guides/'),`${lang} ${slug} related locale`);
+    await related.first().focus();
+    await Promise.all([page.waitForURL(origin+next),page.keyboard.press('Enter')]);
+    assert.equal(new URL(page.url()).pathname,next,`${lang} ${slug} keyboard related navigation`);
+    assert.equal(await page.locator('h1').count(),1,`${lang} ${slug} related page`);
+   }
    for(const slug of bookSlugs){
     await page.goto(origin+prefix+'guides/'+slug+'/',{waitUntil:'load'});
     const feedback=page.locator('.book-feedback'),notes=page.locator('#book-notes');
@@ -232,6 +249,9 @@ const axe=require('axe-core');
     assert.equal(await enquiry.locator('#v2-enquiry-fallback a[href^="https://wa.me/"]').count(),1);
     assert.equal(await enquiry.locator('#v2-enquiry-fallback a[href^="tel:"]').count(),1);
     await fallback.goto(origin+prefix+'guides/active-skills-for-reading/',{waitUntil:'load'});
+    const contentLink=fallback.locator('.guide-contents ol a').last(),fragment=await contentLink.getAttribute('href');
+    await contentLink.focus();await fallback.keyboard.press('Enter');
+    assert.equal(new URL(fallback.url()).hash,fragment,'guide contents work without JavaScript');
     const feedback=fallback.locator('.book-feedback'),notes=fallback.locator('#book-notes');
     await notes.fill('My practice answer');
     await notes.focus();await fallback.keyboard.press('Tab');

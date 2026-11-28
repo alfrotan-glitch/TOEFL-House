@@ -129,3 +129,74 @@ html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissio
 .growth-card small { font-size: 13px; letter-spacing: .08em; }
 .growth-card h2 { text-wrap: balance; }
 .growth-card:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 4px; }
+
+/* A complete reading journey: orient, study, practise, then continue. */
+.guide-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 250px) minmax(0, 850px);
+  gap: clamp(32px, 6vw, 80px);
+  align-items: start;
+}
+.guide-contents {
+  background: var(--paper);
+  border-block-start: 4px solid var(--signature-red);
+  padding: 22px;
+  border-radius: 0 0 14px 14px;
+}
+.guide-contents > p {
+  color: var(--signature-ink);
+  font-weight: 800;
+  margin: 0 0 14px;
+}
+.guide-contents ol { list-style: none; padding: 0; margin: 0; counter-reset: guide; }
+.guide-contents li { counter-increment: guide; border-block-start: 1px solid var(--signature-line); }
+.guide-contents li a {
+  display: flex;
+  gap: 10px;
+  padding-block: 12px;
+  color: var(--reading);
+  font-size: 14px;
+  line-height: 1.65;
+  text-decoration: none;
+}
+.guide-contents li a::before {
+  content: counter(guide, decimal-leading-zero);
+  color: var(--signature-red);
+  font: 800 11px/2 var(--ui);
+}
+.guide-contents li a:hover, .guide-back:hover, .guide-related-head a:hover { text-decoration: underline; }
+.guide-back, .guide-related-head a {
+  display: inline-flex;
+  gap: 8px;
+  color: var(--signature-red);
+  font-weight: 800;
+  font-size: 14px;
+  padding-block: 12px;
+  min-height: 44px;
+  align-items: center;
+}
+.guide-back { border-block-start: 1px solid var(--signature-line); width: 100%; }
+.guide-layout .growth-article { width: 100%; max-width: none; margin: 0; min-width: 0; }
+.guide-layout .growth-article > section { scroll-margin-block-start: 24px; }
+.editorial-guides .growth-article .guide-course {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 0;
+  min-height: 44px;
+  font-weight: 800;
+}
+.guide-related { margin-block-start: 40px; padding-block-start: 36px; border-block-start: 1px solid var(--signature-line); }
+.guide-related-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-block-end: 24px; }
+.guide-related-head h2 { color: var(--signature-ink); font-size: clamp(25px, 3vw, 34px); margin: 0 0 6px; }
+.guide-related-head p { color: var(--muted); margin: 0; }
+.guide-related .growth-card-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.guide-related .growth-card h3 { color: var(--ink); font-size: 22px; line-height: 1.55; margin: 0; }
+@media (max-width:760px) {
+  .guide-layout { grid-template-columns: minmax(0,1fr); gap: 32px; }
+  .guide-contents { padding: 18px 20px; }
+  .guide-related .growth-card-grid { grid-template-columns: minmax(0,1fr); }
+  .guide-related .growth-card h3 { font-size: 20px; }
+}
+/* Keep the short test name together in RTL headings without constraining long book titles. */
+.guide-hero h1 .guide-mark { white-space: nowrap; }

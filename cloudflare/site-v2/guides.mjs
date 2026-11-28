@@ -89,14 +89,34 @@ function v2BookGuideLink(locale,slug){
 function v2GuideText(text,locale,max=1000){
  const value=String(text??'').slice(0,max);
  if(locale==='en')return v2T(value,max);
- return value.split(/(A student reviews new vocabulary for ten minutes each evening and uses three words in a short paragraph\.|Longman Academic Writing Series|Longman Academic Writing|ACTIVE Skills for Reading|Contemporary Topics|Got it! Series|Got it!|Neil J\. Anderson|TOEFL iBT|Longman|Pearson|Starter|EAP)/g).map((part,i)=>i%2?'<bdi lang="en" dir="ltr">'+v2T(part,max)+'</bdi>':v2T(part,max)).join('');
+ return value.split(/(A student reviews new vocabulary for ten minutes each evening and uses three words in a short paragraph\.|Longman Academic Writing Series|Longman Academic Writing|ACTIVE Skills for Reading|Contemporary Topics|Got it! Series|Got it!|Neil J\. Anderson|TOEFL iBT|Longman|Pearson|Starter|EAP)/g).map((part,i)=>i%2?'<bdi'+(part==='TOEFL iBT'?' class="guide-mark"':'')+' lang="en" dir="ltr">'+v2T(part,max)+'</bdi>':v2T(part,max)).join('');
 }
+// One curated learning pathway per guide. These are navigation, not a claim
+// that a book is required or a substitute for institutional advice.
+const V2_RELATED_GUIDES={
+ 'english-courses-kabul':['toefl-ibt-2026','speaking-practice'],
+ 'toefl-ibt-2026':['english-courses-kabul','speaking-practice'],
+ 'speaking-practice':['english-courses-kabul','got-it-series'],
+ 'got-it-series':['speaking-practice','active-skills-for-reading'],
+ 'active-skills-for-reading':['longman-academic-writing','contemporary-topics'],
+ 'longman-academic-writing':['active-skills-for-reading','contemporary-topics'],
+ 'contemporary-topics':['active-skills-for-reading','longman-academic-writing']
+};
+const V2_GUIDE_NAV={
+ en:{contents:'In this guide',related:'Continue learning',relatedIntro:'Explore another guide at your own pace.',all:'All learning guides',course:'Explore the related program',ets:'Official ETS test information'},
+ fa:{contents:'در این رهنما',related:'یادگیری را ادامه دهید',relatedIntro:'رهنمای دیگری را با سرعت خودتان بررسی کنید.',all:'همهٔ رهنماهای یادگیری',course:'مشاهدهٔ برنامهٔ آموزشی مرتبط',ets:'معلومات رسمی آزمون از ETS'},
+ ps:{contents:'په دې لارښود کې',related:'زده‌کړې ته دوام ورکړئ',relatedIntro:'بل لارښود په خپل مناسب سرعت ولولئ.',all:'د زده‌کړې ټول لارښودونه',course:'اړوند پروګرام وګورئ',ets:'د ETS د ازموینې رسمي معلومات'}
+};
 function v2GuideSections(item,locale){
  return item.sections.map((section,index)=>{
   const exercise=item.publisher&&index===item.sections.length-1;
   const notes=exercise?'<label for="book-notes">'+v2T(V2_BOOK_FEEDBACK[locale].notes)+'</label><textarea id="book-notes" rows="4" dir="auto" autocomplete="off"></textarea>':'';
-  return '<section'+(exercise?' class="book-exercise"':'')+'><h2>'+v2GuideText(section.heading,locale,180)+'</h2>'+section.paragraphs.map(p=>'<p>'+v2GuideText(p,locale,900)+'</p>').join('')+(section.bullets?.length?'<ul>'+section.bullets.map(x=>'<li>'+v2GuideText(x,locale,360)+'</li>').join('')+'</ul>':'')+notes+'</section>';
+  return '<section id="guide-section-'+(index+1)+'"'+(exercise?' class="book-exercise"':'')+'><h2>'+v2GuideText(section.heading,locale,180)+'</h2>'+section.paragraphs.map(p=>'<p>'+v2GuideText(p,locale,900)+'</p>').join('')+(section.bullets?.length?'<ul>'+section.bullets.map(x=>'<li>'+v2GuideText(x,locale,360)+'</li>').join('')+'</ul>':'')+notes+'</section>';
  }).join('');
+}
+function v2GuideCards(ids,locale,p,heading='h2'){
+ const ui=V2_GUIDE_UI[locale];
+ return '<div class="growth-card-grid">'+ids.map((id,index)=>{const card=V2_GUIDE_DATA[locale][id],label=V2_BOOK_NAMES[id]?(heading==='h2'?'<bdi dir="ltr" aria-hidden="true">'+String(index+1).padStart(2,'0')+' / '+String(ids.length).padStart(2,'0')+'</bdi>':v2T(V2_BOOK_UI[locale].heading)):v2T(ui.section);return '<a class="growth-card" href="'+p+'guides/'+id+'/"><small>'+label+'</small><'+heading+'>'+v2GuideText(V2_BOOK_NAMES[id]||card.title,locale)+'</'+heading+'><p>'+v2GuideText(card.description,locale)+'</p><span class="growth-arrow">'+v2T(ui.open)+' ↗</span></a>';}).join('')+'</div>';
 }
 async function v2Guides(request,env,locale,slug){
  if(slug&&!V2_GUIDE_SLUGS.includes(slug))return null;
@@ -116,10 +136,15 @@ async function v2Guides(request,env,locale,slug){
  if(isArticle){
   const target=p+"admissions/"+(item.program?"?program="+item.program:"");
   const refs=item.publisher?'<section><h2>'+v2T(V2_BOOK_UI[locale].source)+'</h2><p><a href="'+v2T(item.source)+'" rel="noopener noreferrer" lang="en" dir="ltr">'+v2T(item.publisher)+'</a></p><p><a href="'+p+'courses/'+item.program+'/">'+v2T(V2_BOOK_UI[locale].course)+'</a></p></section>':"";
-  body='<article class="growth-article"><p>'+v2GuideText(item.intro,locale,900)+'</p>'+v2GuideSections(item,locale)+v2BookFeedback(locale,slug)+refs+'<div class="growth-cta"><div><strong>'+v2T(ui.ctaTitle)+'</strong><p>'+v2T(ui.ctaText)+'</p></div><a class="growth-action" href="'+target+'">'+v2T(ui.start)+'</a></div></article>';
+  const nav=V2_GUIDE_NAV[locale];
+  const contents='<nav class="guide-contents" aria-label="'+v2T(nav.contents)+'"><p>'+v2T(nav.contents)+'</p><ol>'+item.sections.map((section,index)=>'<li><a href="#guide-section-'+(index+1)+'">'+v2GuideText(section.heading,locale,180)+'</a></li>').join('')+'</ol><a class="guide-back" href="'+p+'guides/">'+v2T(nav.all)+' <span aria-hidden="true">↗</span></a></nav>';
+  const course=item.program&&!item.publisher?'<a class="guide-course" href="'+p+'courses/'+item.program+'/">'+v2T(nav.course)+' <span aria-hidden="true">↗</span></a>':'';
+  const official=slug==='toefl-ibt-2026'?'<p><a href="https://www.ets.org/toefl/test-takers/ibt/about/content.html?version=after-jan-2026" rel="noopener noreferrer">'+v2T(nav.ets)+' <span aria-hidden="true">↗</span></a></p>':'';
+  const related=V2_RELATED_GUIDES[slug];
+  if(!related||related.some(id=>!V2_GUIDE_SLUGS.includes(id)||id===slug))throw Error('Invalid related guides: '+slug);
+  body='<div class="guide-layout">'+contents+'<article class="growth-article"><p>'+v2GuideText(item.intro,locale,900)+'</p>'+v2GuideSections(item,locale)+v2BookFeedback(locale,slug)+refs+official+course+'<div class="growth-cta"><div><strong>'+v2T(ui.ctaTitle)+'</strong><p>'+v2T(ui.ctaText)+'</p></div><a class="growth-action" href="'+target+'">'+v2T(ui.start)+'</a></div></article></div><section class="guide-related" aria-labelledby="guide-related-title"><div class="guide-related-head"><div><h2 id="guide-related-title">'+v2T(nav.related)+'</h2><p>'+v2T(nav.relatedIntro)+'</p></div><a href="'+p+'guides/">'+v2T(nav.all)+' <span aria-hidden="true">↗</span></a></div>'+v2GuideCards(related,locale,p,'h3')+'</section>';
  }else{
-  const cards=ids=>'<div class="growth-card-grid">'+ids.map((id,index)=>{const card=V2_GUIDE_DATA[locale][id],label=V2_BOOK_NAMES[id]?'<bdi dir="ltr" aria-hidden="true">'+String(index+1).padStart(2,'0')+' / '+String(ids.length).padStart(2,'0')+'</bdi>':v2T(ui.section);return '<a class="growth-card" href="'+p+'guides/'+id+'/"><small>'+label+'</small><h2>'+v2GuideText(V2_BOOK_NAMES[id]||card.title,locale)+'</h2><p>'+v2GuideText(card.description,locale)+'</p><span class="growth-arrow">'+v2T(ui.open)+' ↗</span></a>';}).join('')+'</div>';
-  body='<section class="book-library" aria-labelledby="book-library-title"><h2 id="book-library-title">'+v2T(V2_BOOK_UI[locale].heading)+'</h2>'+cards(V2_BOOK_SLUGS)+'</section><section aria-labelledby="practical-guides-title"><h2 id="practical-guides-title">'+v2T(V2_BOOK_UI[locale].other)+'</h2>'+cards(V2_GUIDE_SLUGS.filter(id=>!V2_BOOK_SLUGS.includes(id)))+'</section>';
+  body='<section class="book-library" aria-labelledby="book-library-title"><h2 id="book-library-title">'+v2T(V2_BOOK_UI[locale].heading)+'</h2>'+v2GuideCards(V2_BOOK_SLUGS,locale,p)+'</section><section aria-labelledby="practical-guides-title"><h2 id="practical-guides-title">'+v2T(V2_BOOK_UI[locale].other)+'</h2>'+v2GuideCards(V2_GUIDE_SLUGS.filter(id=>!V2_BOOK_SLUGS.includes(id)),locale,p)+'</section>';
  }
  const page=top+'<main id="main" class="editorial-guides"><section class="guide-hero"><div class="shell">'+crumb+'<p class="eyebrow">'+v2T(ui.section)+'</p><h1>'+v2GuideText(displayTitle,locale)+'</h1><p>'+v2GuideText(description,locale)+'</p></div></section><section class="guide-body"><div class="shell">'+body+'</div></section></main>'+v2Footer(site,locale,cms);
  return v2SubpageResponse(request,page,locale);
