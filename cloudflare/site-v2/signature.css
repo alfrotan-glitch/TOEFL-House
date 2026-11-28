@@ -1,0 +1,232 @@
+/* Shared institutional design language. Tokens live in tokens.css; component
+   layout and locale-specific rules remain in site.css. Logical properties keep
+   the same composition in English, Dari and Pashto. */
+/* A recurring ruled edge gives each journey the same editorial frame. */
+.guide-hero, .detail-hero, .eap-editorial .eap-hero, .admissions-hero {
+  background-color: var(--paper);
+  background-image: radial-gradient(ellipse at 90% 0%, #fde8e9 0, transparent 48%);
+  border-block-end: 1px solid var(--signature-line);
+}
+.guide-hero .shell, .detail-hero .shell, .eap-hero .shell, .admissions-grid {
+  position: relative;
+}
+.guide-hero .eyebrow, .detail-intro .eyebrow, .eap-hero-copy .eyebrow, .admissions-copy .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.guide-hero .eyebrow::before, .detail-intro .eyebrow::before,
+.eap-hero-copy .eyebrow::before, .admissions-copy .eyebrow::before {
+  content: '';
+  width: 32px;
+  height: 2px;
+  flex: none;
+  background: var(--red);
+}
+.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissions-copy h1 {
+  color: var(--signature-ink);
+  text-wrap: balance;
+}
+html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissions-copy h1) {
+  letter-spacing: 0;
+}
+
+/* The same card language supports discovery, course comparison and study. */
+.course-card, .growth-card, .eap-goal, .eap-book, .detail-summary, .admissions-formbox {
+  border-color: var(--signature-line);
+  box-shadow: var(--signature-shadow);
+}
+.growth-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--signature-radius);
+  border-block-start: 1px solid var(--signature-line);
+  border-inline-start: 5px solid var(--signature-red);
+  background: linear-gradient(145deg, #fff 72%, var(--signature-wash));
+}
+.growth-card small, .eap-index, .step-no {
+  color: var(--signature-red);
+}
+.growth-card .growth-arrow {
+  border-block-start: 1px solid var(--signature-line);
+  padding-block-start: 15px;
+}
+.growth-article > section {
+  border-block-start: 1px solid var(--signature-line);
+  padding-block-start: 24px;
+}
+.growth-article > section.book-exercise {
+  border: 1px solid var(--signature-line);
+  border-inline-start: 4px solid var(--signature-red);
+  border-radius: var(--signature-radius);
+  background: var(--signature-wash);
+  padding: clamp(20px, 3vw, 32px);
+}
+.admissions-formbox {
+  border-block-start: 4px solid var(--signature-red);
+  border-radius: var(--signature-radius);
+}
+.admissions-formbox select {
+  border-radius: 9px;
+  background-color: var(--paper);
+}
+.eap-editorial .eap-hero-visual, .sp-page .eap-hero-visual {
+  border-radius: var(--signature-radius);
+  box-shadow: 0 20px 45px #6909122b;
+}
+.eap-editorial .eap-hero-visual {
+  background: radial-gradient(circle at 100% 0%, #c00818, transparent 55%), var(--signature-red);
+}
+
+/* The homepage remains grounded in the institution's real photography. */
+.hero-grid { box-shadow: 0 22px 55px #6909121a; }
+.hero-copy { background: var(--paper); }
+.photo-frame { background: linear-gradient(145deg, #fff3f3, #f8d7dc); }
+.photo-label { background: #242427f0; border-inline-start: 4px solid var(--logo-red); }
+.journey-step { border-block-start: 2px solid var(--signature-red); }
+.program-comparison { margin-block-start: 24px; border-block: 1px solid var(--signature-line); }
+.program-comparison summary { padding: 18px 0; cursor: pointer; color: var(--signature-red); font-weight: 800; }
+.program-comparison table { min-width: 580px; background: #fff; }
+.program-comparison th a { color: var(--signature-red); text-decoration: underline; text-underline-offset: 3px; }
+.comparison-scroll-hint { display: none; }
+@media (max-width:760px) { .comparison-scroll-hint { display: block; color: var(--reading); font-size: 14px; margin: 0 0 12px; } }
+.footer { border-block-start: 5px solid var(--logo-red); }
+.footer a:focus-visible { outline-color: #fff; }
+
+/* Motion reinforces affordances, never content visibility. */
+@media (hover:hover) and (prefers-reduced-motion:no-preference) {
+  .growth-card, .course-card, .button { transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease; }
+  .growth-card:hover, .course-card:hover { transform: translateY(-4px); box-shadow: 0 18px 38px #6909121c; }
+  .button:hover { transform: translateY(-2px); }
+}
+@media (max-width:760px) {
+  .guide-hero .eyebrow::before, .detail-intro .eyebrow::before,
+  .eap-hero-copy .eyebrow::before, .admissions-copy .eyebrow::before { width: 22px; }
+  .growth-article > section.book-exercise { padding: 20px; }
+}
+
+/* The library is a destination, not another generic marketing section.
+   Its dark cover and numbered cards echo a study volume's spine. */
+.guide-hero {
+  color: #fff;
+  background-color: var(--signature-red);
+  background-image: radial-gradient(ellipse at 100% 0%, var(--red) 0, transparent 60%);
+  border: 0;
+}
+.guide-hero .breadcrumbs, .guide-hero .breadcrumbs [aria-current],
+.guide-hero h1, .guide-hero .eyebrow, .guide-hero .shell > p { color: #fff; }
+.guide-hero .breadcrumbs a:hover { color: #fff; text-decoration: underline; }
+.guide-hero .eyebrow::before { background: #fff; }
+.book-library > h2, #practical-guides-title {
+  padding-block-end: 18px;
+  border-block-end: 1px solid var(--signature-line);
+}
+.growth-card small { letter-spacing: .08em; }
+.growth-card h2 { text-wrap: balance; }
+.growth-card:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 4px; }
+
+/* A complete reading journey: orient, study, practise, then continue. */
+.guide-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 250px) minmax(0, 850px);
+  gap: clamp(32px, 6vw, 80px);
+  align-items: start;
+}
+.guide-contents {
+  position: sticky;
+  inset-block-start: 110px;
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+  background: var(--paper);
+  border-block-start: 4px solid var(--signature-red);
+  padding: 22px;
+  border-radius: 0 0 14px 14px;
+}
+.guide-contents > p {
+  color: var(--signature-ink);
+  font-weight: 800;
+  margin: 0 0 14px;
+}
+.guide-contents ol { list-style: none; padding: 0; margin: 0; counter-reset: guide; }
+.guide-contents li { counter-increment: guide; border-block-start: 1px solid var(--signature-line); }
+.guide-contents li a {
+  display: flex;
+  gap: 10px;
+  padding-block: 12px;
+  color: var(--reading);
+  font-size: 14px;
+  line-height: 1.65;
+  text-decoration: none;
+}
+.guide-contents li a::before {
+  content: counter(guide, decimal-leading-zero);
+  color: var(--signature-red);
+  font: 800 11px/2 var(--ui);
+}
+.guide-contents li a:hover, .guide-back:hover, .guide-related-head a:hover { text-decoration: underline; }
+.guide-back, .guide-related-head a {
+  display: inline-flex;
+  gap: 8px;
+  color: var(--signature-red);
+  font-weight: 800;
+  font-size: 14px;
+  padding-block: 12px;
+  min-height: 44px;
+  align-items: center;
+}
+.guide-back { border-block-start: 1px solid var(--signature-line); width: 100%; }
+.guide-layout .growth-article { width: 100%; max-width: none; margin: 0; min-width: 0; }
+.editorial-guides .growth-article .guide-course {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 0;
+  min-height: 44px;
+  font-weight: 800;
+}
+.guide-related { margin-block-start: 40px; padding-block-start: 36px; border-block-start: 1px solid var(--signature-line); }
+.guide-related-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-block-end: 24px; }
+.guide-related-head h2 { color: var(--signature-ink); font-size: clamp(25px, 3vw, 34px); margin: 0 0 6px; }
+.guide-related-head p { color: var(--muted); margin: 0; }
+.guide-related .growth-card-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.guide-related .growth-card h3 { color: var(--ink); font-size: 22px; line-height: 1.55; margin: 0; }
+@media (max-width:760px) {
+  .guide-layout { grid-template-columns: minmax(0,1fr); gap: 32px; }
+  .guide-contents { position: static; max-height: none; overflow: visible; padding: 18px 20px; }
+  .guide-related .growth-card-grid { grid-template-columns: minmax(0,1fr); }
+  .guide-related .growth-card h3 { font-size: 20px; }
+}
+/* Keep the short test name together in RTL headings without constraining long book titles. */
+.guide-hero h1 .guide-mark { white-space: nowrap; }
+
+/* A library shelf rather than another set of marketing cards. The numbered
+   spine is decorative; the native link still contains the complete guide. */
+.book-library .growth-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0,1fr);
+  grid-template-rows: auto 1fr auto;
+  gap: 12px 24px;
+  padding: 0;
+  padding-inline-end: 26px;
+  border: 1px solid var(--signature-line);
+  border-start-start-radius: 4px;
+  border-end-start-radius: 4px;
+  border-start-end-radius: 14px;
+  border-end-end-radius: 14px;
+  background: #fff;
+}
+.book-library .growth-card small {
+  grid-row: 1 / 4;
+  padding: 26px 9px;
+  background: var(--signature-red);
+  color: #fff;
+  text-align: center;
+}
+.book-library .growth-card h2 { padding-block-start: 26px; }
+.book-library .growth-card p { margin: 0; }
+.book-library .growth-arrow { margin: 0 0 24px; }
+@media(max-width:460px) {
+  .book-library .growth-card { grid-template-columns: 54px minmax(0,1fr); gap: 10px 16px; padding-inline-end: 18px; }
+  .book-library .growth-card small { padding: 24px 4px; font-size: 10px; }
+  .book-library .growth-card h2 { padding-block-start: 24px; }
+}

@@ -48,7 +48,8 @@ if(![401,403].includes(adminApi.status))failures.push("CMS API is not rejecting 
 if(campus.status!==200||!(campus.headers.get("content-type")||"").includes("image/jpeg"))failures.push("campus photo unavailable");
 if(poster.status!==200||!(poster.headers.get("content-type")||"").includes("image/webp"))failures.push("teacher-training image unavailable");
 if(tools.status!==503||!tools.headers.get("x-robots-tag")?.includes("noindex")||!toolsText.includes("temporarily unavailable"))failures.push("retired tools endpoint is not safely disabled");
-if(sitemap.status!==200||!sitemapText.includes("toeflhouse.pages.dev")||sitemapText.split("<loc>").length-1!==39)failures.push("sitemap incomplete");
+const sitemapLocations=[...sitemapText.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match=>match[1]);
+if(sitemap.status!==200||new Set(sitemapLocations).size!==sitemapLocations.length||expected.some(path=>!sitemapLocations.includes("https://toeflhouse.pages.dev"+path)))failures.push("sitemap incomplete or duplicated");
 if(robots.status!==200||!robotsText.includes("Disallow: /"))failures.push("preview robots policy missing");
 console.log(JSON.stringify({base,routeCount:results.length,failures,api:api.status,css:css.status,js:js.status,cssBytes:cssText.length,jsBytes:jsText.length,admin:admin.status,adminApi:adminApi.status,campus:campus.status,poster:poster.status,tools:tools.status,sitemap:sitemap.status,robots:robots.status,knownLimitations:["Student tools remain safely disabled; the public admissions assessment link remains available."],results},null,2));
 assert.deepEqual(failures,[]);

@@ -27,14 +27,7 @@ jobs:
       - name: Verify locale, accessible headings, assets, CMS fallback
         run: node --test cloudflare/site-v2/tests/*.test.mjs
       - name: Check server bundle and browser payload sizes
-        run: |
-          # The complete reviewed EN/FA/PS site includes server-rendered course and guide copy.
-          echo "Worker bytes: $(wc -c < cloudflare/site-v2/dist/_worker.js); CSS source bytes: $(wc -c < cloudflare/site-v2/site.css); JS source bytes: $(wc -c < cloudflare/site-v2/site.js)"
-          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 400000
-          # CI checkout measures 74,206 bytes; the deployed minified CSS is 73,147 bytes.
-          # Keep a 75 KB source ceiling and preserve the 400 KB Worker / 10 KB JS ceilings.
-          test $(wc -c < cloudflare/site-v2/site.css) -lt 75000
-          test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
+        run: node cloudflare/site-v2/budgets.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: toefl-house-v2-compiled-worker

@@ -528,35 +528,21 @@ test("EAP four levels retain three series while distinguishing publisher edition
  }
 });
 
-test("Published read-only API restores the exact public CMS contract in all languages",async()=>{
- const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env());
- assert.equal(response.status,200);
- assert.match(response.headers.get("Content-Type"),/application\/json/);
- assert.match(response.headers.get("X-Robots-Tag"),/noindex/);
- const publicContent=await response.json();
- assert.deepEqual(Object.keys(publicContent).sort(),["locales","media","timetable","revision","psRevision","updatedAt","cmsStatus"].sort());
- assert.equal(publicContent.cmsStatus,"connected");
- assert.equal(publicContent.revision,40);
- assert.equal(publicContent.psRevision,40);
- for(const l of ["en","fa","ps"])assert.equal(publicContent.locales[l].programs.length,7);
- assert.deepEqual(publicContent.locales.en.programs.map(p=>p.id),allIds);
- const head=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content",{method:"HEAD"}),env());
- assert.equal(head.status,200);
- assert.equal(await head.text(),"");
-});
-test("Public CMS endpoint rejects protected fields and never leaks drafts",async()=>{
- const unsafe={...main,locales:{...main.locales,en:{...main.locales.en, password_hash:"secret-do-not-publish"}}};
- const bad=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env(unsafe,ps));
- assert.equal(bad.status,200);
- const safe=await bad.text();
- assert.ok(safe.includes('"cmsStatus":"connected"'));
- assert.ok(!safe.includes("secret-do-not-publish"));
- const missing=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),{});
- assert.equal(missing.status,503);
- const before=JSON.stringify(main)+JSON.stringify(ps);
- const normal=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env());
- assert.equal(normal.status,200);
- assert.equal(JSON.stringify(main)+JSON.stringify(ps),before,"GET may not mutate CMS fixtures");
+test("Candidate public CMS API fails closed before database access until schema approval",async()=>{
+ let queries=0;
+ const binding={CMS_DB:{prepare(){queries++;throw Error('must not read unclassified content');}}};
+ for(const method of ['GET','HEAD']){
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content",{method}),binding);
+  assert.equal(response.status,503);
+  assert.match(response.headers.get("Content-Type"),/application\/json/);
+  assert.match(response.headers.get("X-Robots-Tag"),/noindex/);
+  const body=await response.text();
+  if(method==='HEAD')assert.equal(body,'');
+  else assert.deepEqual(JSON.parse(body),{error:'Public content temporarily unavailable'});
+ }
+ const unsafe=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content",{method:'POST'}),binding);
+ assert.equal(unsafe.status,405);assert.equal(unsafe.headers.get('Allow'),'GET, HEAD');
+ assert.equal(queries,0);
 });
 
 test("Language selector labels and textbook pronunciation are accessible in all three languages",async()=>{
@@ -629,7 +615,8 @@ test("Program tiles expose a full tap target, and EAP level order is stable in R
  const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(cssResponse.status,200);
  const css=await cssResponse.text();
- assert.ok(css.includes('.course-card{position:relative}.course-bottom a::after{content:"";position:absolute;inset:0}'));
+ assert.match(css,/\.course-card\{[^}]*position:relative/);
+ assert.match(css,/\.course-bottom a::after\{[^}]*content:"";position:absolute;inset:0/);
  for(const root of ["/","/fa/","/ps/"]){
   const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root+"courses/academic-english/"),env());
   assert.equal(response.status,200);
@@ -926,17 +913,21 @@ test("Retired anchor-only routes show the branded 404",async()=>{
  }
 });
 
-test("Sitemap carries a truthful lastmod on every URL",async()=>{
- const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml"),env());
- assert.equal(r.status,200);
- const xml=await r.text();
- assert.equal((xml.match(/<loc>/g)||[]).length,39);
- const lastmods=xml.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g)||[];
- assert.equal(lastmods.length,39,"every sitemap URL must carry lastmod");
- assert.equal(new Set(lastmods).size,1,"all lastmod dates must be the single build date");
- const date=lastmods[0].replace(/<\/?lastmod>/g,"");
- assert.ok(!Number.isNaN(Date.parse(date+"T00:00:00Z")),"lastmod must be a valid date");
- assert.ok(Date.parse(date+"T00:00:00Z")<=Date.now(),"lastmod must not be in the future");
+test("Sitemap retains canonical URLs without invented modification dates",async()=>{
+ for(const host of ["toeflhouse.pages.dev","candidate.toeflhouse.pages.dev"]){
+  const r=await worker.fetch(new Request("https://"+host+"/sitemap.xml"),env());
+  assert.equal(r.status,200);
+  if(host!=="toeflhouse.pages.dev")assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
+  const xml=await r.text();
+  const locations=[...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match=>match[1]);
+  assert.equal(locations.length,51);
+  assert.equal(new Set(locations).size,51);
+  assert.ok(locations.every(url=>url.startsWith("https://toeflhouse.pages.dev/")));
+  assert.doesNotMatch(xml,/<lastmod>|<changefreq>/);
+ }
+ const head=await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml",{method:"HEAD"}),env());
+ assert.equal(head.status,200);
+ assert.equal(await head.text(),"");
 });
 
 test("TOEFL Listening tasks render as separate lines in English; FA/PS bilingual lines unchanged",async()=>{
@@ -969,13 +960,9 @@ test("Google Meet copy across three languages preserves legacy online routes and
    if(path.endsWith("online-individual-zoom/"))assert.match(h,/online-individual-zoom/);
   }
  }
+ // The public API is intentionally unavailable pending schema review.
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env(m,p));
- assert.equal(r.status,200);
- const data=await r.json();
- for(const locale of Object.values(data.locales)){
-  const item=locale.programs.find(x=>x.id==="online-individual-zoom");
-  assert.equal(item.title,"Private Google Meet classes");assert.equal(item.highlights[0],"Google Meet practice");
- }
+ assert.equal(r.status,503);
 });
 
 test("Desktop-only image preload and revision-qualified cache lifetime",async()=>{
@@ -1007,7 +994,7 @@ test("Public design system uses only approved red, white and neutral colors",asy
  assert.match(css,/\.detail-summary\{background:#fff;color:var\(--ink\);border:1px solid var\(--line\);border-inline-start:4px solid var\(--red\)/);
  assert.match(css,/\.detail-summary li::before\{[^}]*background:var\(--red\);color:#fff/);
  assert.match(css,/\.online-panel\{background:linear-gradient\(125deg,var\(--red-dark\),var\(--red\)\)/);
- assert.match(css,/\.footer\{background:var\(--red-dark\)/);
+ assert.match(css,/\.footer\{background:var\(--ink\)/);
 });
 
 test("Shared logo preserves exact artwork, versioned caching and preview indexing rules",async()=>{
@@ -1048,8 +1035,8 @@ test("Signature editorial hero preserves accessible actions, true photography an
  const css=await cssResponse.text();
  assert.match(css,/\.hero\{position:relative;overflow:hidden;background:#fff;color:var\(--ink\)\}/);
  assert.match(css,/\.button-primary\{background:var\(--red\);color:#fff\}/);
- assert.match(css,/\.hero a:focus-visible\{outline-color:#fff\}/);
- assert.match(css,/\.hero-grid\{[^}]*background:var\(--red-dark\);border-radius:18px/);
+ assert.match(css,/a:focus-visible,summary:focus-visible,button:focus-visible\{outline:3px solid var\(--red\)/);
+ assert.match(css,/\.hero-grid\{[^}]*background:var\(--paper\);border-radius:18px/);
  assert.match(css,/\.course-card\{border:1px solid var\(--line\);border-radius:14px/);
  assert.match(css,/\.button-primary:active\{transform:translateY\(2px\)/);
  assert.doesNotMatch(css,/animation:hero-caption/);
@@ -1164,7 +1151,7 @@ test("Homepage prioritizes course discovery over campaign and shares guide card 
  const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
  assert.match(css,/\.growth-card-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
  assert.match(css,/\.growth-card\{display:flex;flex-direction:column/);
- assert.match(css,/\.hero-actions \.button-primary\{background:#fff;color:var\(--red-dark\)/);
+ assert.match(css,/\.hero-actions \.button-primary\{background:var\(--red-dark\);color:#fff/);
  for(const prefix of ["/","/fa/","/ps/"]){
   const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env())).text();
   const program=html.indexOf('id="programs"'),campaign=html.indexOf('id="semester-qaws-1405"');
@@ -1180,5 +1167,119 @@ test("Signature course entry cards identify three academic pathways without modi
   const nav=html.match(/<div class="shell home-paths">([\s\S]*?)<\/nav><\/div>/)?.[1];assert.ok(nav,prefix);
   for(const code of ["GENERAL ENGLISH","EAP","TOEFL iBT"])assert.ok(nav.includes('lang="en" dir="ltr">'+code+'</small>'),prefix+code);
   assert.equal((nav.match(/class="home-path-label"/g)||[]).length,3);
+ }
+});
+
+
+test("Mini-practice is original, localized, accessible without JavaScript and scoped to General English",async()=>{
+ for(const [prefix,title] of [["/","Try a little English right now"],["/fa/","همین حالا کمی انگلیسی تمرین کنید"],["/ps/","همدا اوس لږ انګلیسي تمرین کړئ"]]){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"courses/general-english/"),env());
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.equal((html.match(/id="ge-mini-practice"/g)||[]).length,1);
+  assert.ok(html.includes(title),prefix);
+  assert.equal((html.match(/data-ge-question data-correct=/g)||[]).length,3);
+  assert.equal((html.match(/<details data-ge-answer>/g)||[]).length,3);
+  assert.equal((html.match(/type="radio" name="ge-practice-/g)||[]).length,9);
+  assert.equal((html.match(/data-ge-check disabled/g)||[]).length,3);
+  assert.match(html,/data-ge-result hidden/);
+  assert.match(html,/Could you repeat that, please/);
+  const home=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
+  assert.doesNotMatch(await home.text(),/id="ge-mini-practice"/);
+ }
+ const client=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.js"),env());
+ const source=await client.text();
+ const code=source.slice(source.indexOf("/* Mini-practice:"),source.indexOf("/* Accessible, click-to-play"));
+ assert.match(code,/new Map\(\)/);
+ assert.match(code,/outcomes\.clear\(\)/);
+ assert.doesNotMatch(code,/fetch\(|localStorage|sessionStorage|sendBeacon|XMLHttpRequest/);
+});
+
+test("Admissions message builder fails safely and exposes direct contact in all languages",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"admissions/"),env())).text();
+  assert.match(html,/<button class="button button-primary form-submit" type="submit" disabled>/,prefix+" builder starts disabled");
+  assert.match(html,/<p id="v2-enquiry-fallback" class="form-privacy">[\s\S]*?<a href="https:\/\/wa\.me\/93794357509">[\s\S]*?<a href="tel:\+93745651844">/,prefix+" independent contact methods");
+ }
+});
+
+test("All sitemap routes remain usable when the CMS is unavailable",async()=>{
+ const sitemap=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml"),{})).text();
+ const paths=[...sitemap.matchAll(/<loc>https:\/\/toeflhouse\.pages\.dev([^<]+)<\/loc>/g)].map(x=>x[1]);
+ assert.equal(paths.length,51);
+ for(const path of paths){
+  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev"+path),{});
+  assert.equal(r.status,200,"unavailable CMS "+path);
+ }
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const page=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"courses/online-individual-zoom/"),{})).text();
+  assert.match(page,/Google Meet/,prefix+" online delivery");
+  assert.match(page,/class="detail-grid detail-grid-single"/,prefix+" no empty summary column");
+  assert.doesNotMatch(page,/<aside class="detail-summary"/,prefix+" no invented schedule or skills");
+  assert.ok(page.includes('class="mobile-quick-apply" href="'+prefix+'admissions/?program=online-individual-zoom"'),prefix+" online header keeps program");
+  assert.ok(page.includes('class="button button-primary desktop-apply" href="'+prefix+'admissions/?program=online-individual-zoom"'),prefix+" online desktop header keeps program");
+  const admission=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"admissions/"),{})).text();
+  assert.match(admission,/<option value="online-individual-zoom"/,prefix+" admissions choice");
+ }
+});
+
+test("A valid CMS omission is not silently replaced by fallback content",async()=>{
+ const m=structuredClone(main),p=structuredClone(ps);
+ for(const data of [m.locales.en,m.locales.fa,p])data.programs=data.programs.filter(x=>x.id!=="online-individual-zoom");
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const admission=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"admissions/"),env(m,p))).text();
+  assert.doesNotMatch(admission,/<option value="online-individual-zoom"/,prefix);
+ }
+});
+
+test("Course summary displays only CMS fields actually supplied",async()=>{
+ for(const [duration,highlights] of [["",[]],["Example duration",[]],["",["Example skill"]],["Example duration",["Example skill"]]]){
+  const m=structuredClone(main),p=structuredClone(ps);
+  Object.assign(m.locales.en.programs.find(x=>x.id==="professional-writing"),{duration,highlights});
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/courses/professional-writing/"),env(m,p))).text();
+  assert.equal(html.includes('<aside class="detail-summary"'),!!(duration||highlights.length));
+  assert.equal(html.includes('class="detail-summary-head"'),!!duration);
+  assert.equal(html.includes('class="detail-small-label"'),!!highlights.length);
+  assert.equal(html.includes('class="detail-summary-line"'),!!(duration&&highlights.length));
+  assert.equal(html.includes('class="detail-grid detail-grid-single"'),!(duration||highlights.length));
+ }
+});
+
+test('General English stage fees and durations remain attached to the correct stage in each language',async()=>{
+ const cases=[
+  ['/','1 month','2 months / semester','500 AFN','1,000 AFN'],
+  ['/fa/','۱ ماه','۲ ماه / یک سمستر','۵۰۰ افغانی','۱٬۰۰۰ افغانی'],
+  ['/ps/','۱ میاشت','۲ میاشتې / یو سمستر','۵۰۰ افغانۍ','۱٬۰۰۰ افغانۍ']
+ ];
+ const names=['Pre-Starter','Starter','Prep One','Prep Two','Prep Three'];
+ for(const [prefix,foundation,semester,firstFee,otherFee] of cases){
+  const response=await worker.fetch(new Request('https://toeflhouse.pages.dev'+prefix+'courses/general-english/'),env());
+  assert.equal(response.status,200);const html=await response.text();
+  const body=html.match(/<table class="ge-fee-table">[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/)?.[1];
+  assert.ok(body,prefix+' fee table');
+  const rows=[...body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(match=>match[1]);
+  assert.equal(rows.length,5,prefix);
+  for(const [i,row] of rows.entries()){
+   assert.ok(row.includes('>'+names[i]+'</th>'),prefix+names[i]);
+   assert.ok(row.includes('<td>'+(i===0?foundation:semester)+'</td>'),prefix+names[i]+' duration');
+   assert.ok(row.includes('<strong>'+(i===0?firstFee:otherFee)+'</strong>'),prefix+names[i]+' fee');
+  }
+ }
+});
+
+test('home SEO title and specialized course durations retain their existing locale associations',async()=>{
+ const cases=[
+  ['/','The TOEFL House | English Classes &amp; TOEFL Preparation in Kabul','2 months','4 months'],
+  ['/fa/','تافل هوس | کورس زبان انگلیسی و آمادگی تافل در کابل','۲ ماه','۴ ماه'],
+  ['/ps/','The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه','۲ میاشتې','۴ میاشتې']
+ ];
+ for(const [prefix,title,speaking,toefl] of cases){
+  const get=async path=>{const response=await worker.fetch(new Request('https://toeflhouse.pages.dev'+path),{});assert.equal(response.status,200,path);return response.text();};
+  const home=await get(prefix);assert.ok(home.includes('<title>'+title+'</title>'),prefix+' SEO title');
+  for(const [id,duration] of [['special-speaking',speaking],['toefl-preparation',toefl]]){
+   const html=await get(prefix+'courses/'+id+'/');
+   const card=html.match(/<div class="eap-fee-card eap-fee-featured">([\s\S]*?)<\/div>/)?.[1];
+   assert.ok(card?.includes('<strong>'+duration+'</strong>'),prefix+id+' duration');
+  }
  }
 });

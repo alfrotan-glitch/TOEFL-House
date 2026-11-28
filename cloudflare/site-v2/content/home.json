@@ -1,0 +1,831 @@
+{
+  "copy": {
+    "en": {
+      "lang": "en",
+      "dir": "ltr",
+      "name": "THE TOEFL HOUSE",
+      "localName": "تافل هوس",
+      "tag": "ENGLISH LANGUAGE EDUCATION · KABUL",
+      "navPrograms": "Programs",
+      "navGuides": "Learning guides",
+      "navWhy": "Why The TOEFL House",
+      "navOnline": "Online classes",
+      "navFaq": "FAQ",
+      "navContact": "Contact",
+      "navMenu": "Menu",
+      "navApply": "Free assessment",
+      "badge": "Admissions are open · Placement assessment is free",
+      "lead": "Learn English with purpose.",
+      "leadAccent": "Move forward with confidence.",
+      "subtitle": "Develop the English you need for everyday communication, university study and TOEFL preparation. Start at a suitable level with a free placement assessment.",
+      "heroCta": "Request a free placement assessment",
+      "heroSecondary": "Explore our programs",
+      "heroBottom": "In-person classes in Kabul · Private online lessons by arrangement",
+      "photoBadge": "Learning together",
+      "photoSub": "Dasht-e-Barchi · Kabul",
+      "micro": "THE TOEFL HOUSE • EST. 2013",
+      "trustTitle": "Learning that opens doors",
+      "trustSub": "The TOEFL House community at a glance",
+      "courseEyebrow": "EXPLORE OUR PROGRAMS",
+      "coursesTitle": "Find the program that",
+      "coursesAccent": "fits your goals.",
+      "coursesLead": "Six English language programs, from foundational learning to academic and professional communication. Confirm fees, class times and availability with admissions.",
+      "courseDetail": "View program",
+      "courseDuration": "Duration",
+      "compareTitle": "Compare programs at a glance",
+      "compareFocus": "What you will study",
+      "compareUnknown": "Ask admissions",
+      "compareScroll": "Scroll sideways to see all columns.",
+      "scheduleEyebrow": "CLASS SCHEDULE",
+      "scheduleTitle": "Seven shifts a day, six days a week.",
+      "scheduleLead": "Seventy-minute sessions, Saturday–Thursday. Friday is closed.",
+      "scheduleShift": "Shift",
+      "scheduleMen": "Men",
+      "scheduleWomen": "Women",
+      "schedulePopular": "Popular",
+      "scheduleFull": "Full",
+      "scheduleNote": "Women's morning shifts start 10 minutes later and afternoon shifts 10 minutes earlier than men's.",
+      "onlineLabel": "Private online learning",
+      "onlineTitle": "Personalized English lessons, wherever you are.",
+      "onlineText": "Live, one-to-one Google Meet lessons can be arranged for learners in Kabul or abroad, including Europe and Canada. The curriculum, teacher availability, time zone and fees are confirmed before registration.",
+      "onlineCta": "Ask about online classes",
+      "whyLabel": "A CLEAR WAY FORWARD",
+      "whyTitle": "A clear route to your next class.",
+      "whyLead": "Choose your goal, assess your current level and confirm the class that suits you.",
+      "steps": [
+        [
+          "01",
+          "Tell us your goal",
+          "Share what you want to improve—speaking, academic English, TOEFL or everyday communication."
+        ],
+        [
+          "02",
+          "Find your level, free",
+          "Our team helps you select a suitable starting level through a free assessment."
+        ],
+        [
+          "03",
+          "Join the right class",
+          "Confirm available shifts, teaching format and tuition with our admissions team."
+        ]
+      ],
+      "toolsLabel": "ADMISSIONS SUPPORT",
+      "toolsTitle": "Need help choosing your next step?",
+      "toolsText": "Our admissions team can help you choose a suitable English program and arrange your free placement assessment.",
+      "toolsCta": "Request guidance",
+      "faqLabel": "GOOD TO KNOW",
+      "faqTitle": "Questions before you enroll?",
+      "faqLead": "Essential information about placement, tuition and available classes.",
+      "faqMore": "More questions? Message our team",
+      "visitLabel": "VISIT US",
+      "visitTitle": "Visit The TOEFL House in Kabul.",
+      "visitText": "Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi, Kabul, Afghanistan.",
+      "hours": "Classes Saturday–Thursday · Friday closed · Confirm class times with admissions",
+      "phone": "Call admissions",
+      "wa": "WhatsApp admissions",
+      "map": "Find our campus",
+      "finalEyebrow": "YOUR NEXT CHAPTER",
+      "finalTitle": "Your next step begins with the right level.",
+      "finalText": "Request a free placement assessment and ask our admissions team about current programs, fees and class times.",
+      "finalCta": "Request your free assessment",
+      "footerRights": "All rights reserved.",
+      "footPrograms": "Programs",
+      "footTools": "Student tools",
+      "notFoundTitle": "Page not found",
+      "notFoundText": "The page you were looking for may have moved, or the address may be incorrect. You can return to the homepage or explore our programs.",
+      "notFoundHome": "Back to the homepage",
+      "statsFallback": [
+        [
+          "6,000+",
+          "Graduates since 2013"
+        ],
+        [
+          "500+",
+          "TOEFL test-takers guided"
+        ],
+        [
+          "100+",
+          "University admissions worldwide"
+        ]
+      ],
+      "fallbackFaq": [
+        [
+          "Is the placement assessment free?",
+          "Yes. The placement assessment is free and helps identify a suitable starting level."
+        ],
+        [
+          "Can I enroll without an email?",
+          "Yes. You may contact admissions through WhatsApp or by phone."
+        ],
+        [
+          "Are online classes available?",
+          "Private online classes can be arranged based on teacher availability and time zones."
+        ]
+      ],
+      "seoTitle": "The TOEFL House | English Classes & TOEFL Preparation in Kabul"
+    },
+    "fa": {
+      "lang": "fa-AF",
+      "dir": "rtl",
+      "name": "THE TOEFL HOUSE",
+      "localName": "تافل هوس",
+      "tag": "آموزش تخصصی زبان انگلیسی · کابل",
+      "navPrograms": "برنامه‌ها",
+      "navGuides": "رهنماهای درسی",
+      "navWhy": "چرا تافل هوس؟",
+      "navOnline": "صنف‌های آنلاین",
+      "navFaq": "پرسش‌ها",
+      "navContact": "تماس",
+      "navMenu": "فهرست",
+      "navApply": "تعیین سطح رایگان",
+      "badge": "ثبت‌نام جریان دارد · تعیین سطح رایگان",
+      "lead": "انگلیسی را هدفمند بیاموزید.",
+      "leadAccent": "با اطمینان پیش بروید.",
+      "subtitle": "برای مکالمهٔ روزمره، تحصیل در دانشگاه و آمادگی امتحان TOEFL، مهارت‌های زبان انگلیسی خود را تقویت کنید. با تعیین سطح رایگان، از سطح مناسب آغاز نمایید.",
+      "heroCta": "درخواست تعیین سطح رایگان",
+      "heroSecondary": "دیدن برنامه‌های آموزشی",
+      "heroBottom": "صنف‌های حضوری در کابل · آموزش آنلاین انفرادی با هماهنگی قبلی",
+      "photoBadge": "یادگیری در کنار هم",
+      "photoSub": "دشت برچی · کابل",
+      "micro": "تافل هوس • از سال ۲۰۱۳",
+      "trustTitle": "آموزش برای فرصت‌های بیشتر",
+      "trustSub": "نگاهی به جامعهٔ آموزشی تافل هوس",
+      "courseEyebrow": "برنامه‌های آموزشی",
+      "coursesTitle": "برنامه‌ای متناسب با",
+      "coursesAccent": "هدف شما.",
+      "coursesLead": "شش برنامهٔ آموزشی، از انگلیسی عمومی تا مهارت‌های اکادمیک و مسلکی. برای دریافت معلومات دقیق دربارهٔ فیس، تقسیم اوقات و ظرفیت صنف‌ها با پذیرش تماس بگیرید.",
+      "courseDetail": "معرفی کامل برنامه",
+      "courseDuration": "مدت دوره",
+      "compareTitle": "مقایسهٔ برنامه‌ها در یک نگاه",
+      "compareFocus": "آنچه می‌آموزید",
+      "compareUnknown": "از پذیرش بپرسید",
+      "compareScroll": "برای دیدن تمام ستون‌ها، جدول را به پهلو حرکت دهید.",
+      "scheduleEyebrow": "تقسیم اوقات صنف‌ها",
+      "scheduleTitle": "هفت شیفت در روز، شش روز در هفته.",
+      "scheduleLead": "هر جلسه ۷۰ دقیقه، شنبه تا پنج‌شنبه. جمعه رخصت است.",
+      "scheduleShift": "شیفت",
+      "scheduleMen": "برادران",
+      "scheduleWomen": "خواهران",
+      "schedulePopular": "پرتقاضا",
+      "scheduleFull": "تکمیل ظرفیت",
+      "scheduleNote": "شیفت‌های صبح خواهران ۱۰ دقیقه دیرتر و شیفت‌های عصر ۱۰ دقیقه زودتر شروع می‌شوند.",
+      "onlineLabel": "صنف‌های آنلاین انفرادی",
+      "onlineTitle": "آموزش خصوصی انگلیسی، مطابق هدف و وقت شما.",
+      "onlineText": "صنف‌های زنده و انفرادی از طریق Google Meet برای علاقه‌مندان داخل و خارج از کابل، به‌شمول اروپا و کانادا، با هماهنگی قبلی برگزار می‌شوند. محتوای آموزشی، وقت صنف، دسترسی استاد و فیس پیش از ثبت‌نام تأیید می‌گردد.",
+      "onlineCta": "معلومات دربارهٔ صنف‌های آنلاین",
+      "whyLabel": "مسیر روشن ثبت‌نام",
+      "whyTitle": "با یک انتخاب آگاهانه آغاز کنید.",
+      "whyLead": "از تعیین هدف تا انتخاب صنف مناسب، سه گام مشخص پیش روی شماست.",
+      "steps": [
+        [
+          "۰۱",
+          "هدف‌تان را بگویید",
+          "مکالمه، انگلیسی اکادمیک، تافل یا انگلیسی روزمره؛ بگویید کدام مهارت را می‌خواهید بهتر سازید."
+        ],
+        [
+          "۰۲",
+          "سطح زبان خود را رایگان تعیین کنید",
+          "با رهنمایی تیم آموزشی، صنف و سطح مناسب خود را پیدا کنید."
+        ],
+        [
+          "۰۳",
+          "در صنف مناسب شامل شوید",
+          "تقسیم اوقات، شیوهٔ تدریس و فیس را با پذیرش تأیید کنید."
+        ]
+      ],
+      "toolsLabel": "رهنمایی پذیرش",
+      "toolsTitle": "برای انتخاب گام بعدی راهنمایی بگیرید.",
+      "toolsText": "بخش پذیرش در انتخاب برنامهٔ مناسب انگلیسی و هماهنگی ارزیابی رایگان سطح شما کمک می‌کند.",
+      "toolsCta": "درخواست راهنمایی",
+      "faqLabel": "معلومات ضروری",
+      "faqTitle": "پرسش‌های مهم پیش از ثبت‌نام",
+      "faqLead": "معلومات روشن دربارهٔ تعیین سطح، فیس و شیوهٔ اشتراک در صنف‌ها.",
+      "faqMore": "پرسش دیگری دارید؟ در واتساپ پیام بدهید",
+      "visitLabel": "نشانی مرکز",
+      "visitTitle": "تافل هوس در کابل",
+      "visitText": "کابل، دشت برچی، ایستگاه مغازه، روبروی مرکز جلیلی، افغانستان.",
+      "hours": "صنف‌ها از شنبه تا پنج‌شنبه · جمعه رخصت · وقت دقیق صنف را از پذیرش بپرسید",
+      "phone": "تماس با پذیرش",
+      "wa": "واتساپ پذیرش",
+      "map": "مسیریابی تا مرکز",
+      "finalEyebrow": "گام بعدی شما",
+      "finalTitle": "برای پیشرفت، از سطح مناسب آغاز کنید.",
+      "finalText": "تعیین سطح رایگان انجام دهید و دربارهٔ صنف‌های موجود، فیس و تقسیم اوقات از پذیرش معلومات بگیرید.",
+      "finalCta": "درخواست تعیین سطح رایگان",
+      "footerRights": "تمام حقوق محفوظ است.",
+      "footPrograms": "برنامه‌ها",
+      "footTools": "ابزارهای درسی",
+      "notFoundTitle": "صفحه پیدا نشد",
+      "notFoundText": "ممکن است این صفحه منتقل شده باشد یا نشانی آن را اشتباه وارد کرده باشید. می‌توانید به صفحهٔ اصلی برگردید یا برنامه‌های آموزشی را ببینید.",
+      "notFoundHome": "بازگشت به صفحهٔ اصلی",
+      "statsFallback": [
+        [
+          "۶٬۰۰۰+",
+          "فارغ‌التحصیل از سال ۲۰۱۳"
+        ],
+        [
+          "۵۰۰+",
+          "اشتراک‌کننده در تافل"
+        ],
+        [
+          "۱۰۰+",
+          "پذیرش در دانشگاه‌های جهان"
+        ]
+      ],
+      "fallbackFaq": [
+        [
+          "آیا تعیین سطح رایگان است؟",
+          "بلی، تعیین سطح رایگان است و برای انتخاب سطح مناسب کمک می‌کند."
+        ],
+        [
+          "آیا بدون ایمیل می‌توانم معلومات بگیرم؟",
+          "بلی. از طریق واتساپ یا تماس تلفونی با بخش پذیرش در ارتباط شوید."
+        ],
+        [
+          "آیا صنف آنلاین دارید؟",
+          "صنف‌های آنلاین انفرادی مطابق ظرفیت استاد و منطقهٔ زمانی با هماهنگی برگزار می‌شود."
+        ]
+      ],
+      "seoTitle": "تافل هوس | کورس زبان انگلیسی و آمادگی تافل در کابل"
+    },
+    "ps": {
+      "lang": "ps-AF",
+      "dir": "rtl",
+      "name": "THE TOEFL HOUSE",
+      "localName": "تافل هوس",
+      "tag": "د انګلیسي ژبې مسلکي زده‌کړه · کابل",
+      "navPrograms": "پروګرامونه",
+      "navGuides": "د زده‌کړې لارښود",
+      "navWhy": "ولې تافل هوس؟",
+      "navOnline": "آنلاین ټولګي",
+      "navFaq": "پوښتنې",
+      "navContact": "اړیکه",
+      "navMenu": "لړلیک",
+      "navApply": "د سویې وړیا ارزونه",
+      "badge": "نوم‌لیکنه روانه ده · د سویې ارزونه وړیا ده",
+      "lead": "انګلیسي په موخه زده کړئ.",
+      "leadAccent": "په ډاډه زړه پرمختګ وکړئ.",
+      "subtitle": "د ورځنیو خبرو، پوهنتوني زده‌کړو او د TOEFL ازموینې د چمتووالي لپاره خپل انګلیسي مهارتونه پیاوړي کړئ. د سویې له وړیا ارزونې وروسته له مناسبې کچې پیل وکړئ.",
+      "heroCta": "د سویې د وړیا ارزونې غوښتنه",
+      "heroSecondary": "زموږ پروګرامونه وګورئ",
+      "heroBottom": "په کابل کې حضوري ټولګي · د همغږۍ له مخې انفرادي آنلاین درسونه",
+      "photoBadge": "په ګډه زده کړه",
+      "photoSub": "دشت برچي · کابل",
+      "micro": "تافل هوس • له ۲۰۱۳ کال راهیسې",
+      "trustTitle": "د لا ډېرو فرصتونو لپاره زده‌کړه",
+      "trustSub": "د تافل هوس د زده‌کړې ټولنې پېژندنه",
+      "courseEyebrow": "زموږ ښوونیز پروګرامونه",
+      "coursesTitle": "د خپلې موخې لپاره",
+      "coursesAccent": "مناسب پروګرام وټاکئ.",
+      "coursesLead": "د انګلیسي شپږ پروګرامونه، له بنسټیزې زده‌کړې تر اکاډمیکو او مسلکي مهارتونو پورې. د فیس، مهالوېش او شته ځایونو په اړه له نوم‌لیکنې څانګې سره اړیکه ونیسئ.",
+      "courseDetail": "د پروګرام بشپړ معلومات",
+      "courseDuration": "د کورس موده",
+      "compareTitle": "پروګرامونه په یوه کتنه کې پرتله کړئ",
+      "compareFocus": "څه زده کوئ",
+      "compareUnknown": "له نوم‌لیکنې وپوښتئ",
+      "compareScroll": "د ټولو ستنو د لیدلو لپاره جدول څنګ ته وښویوئ.",
+      "scheduleEyebrow": "ورځنی مهالوېش",
+      "scheduleTitle": "خپل مناسب وخت وټاکئ",
+      "scheduleLead": "هره درسي غونډه ۷۰ دقیقې ده او درسي ورځې له شنبې تر پنجشنبې دي. جمعه د مرکز اوونیزه رخصتي ده.",
+      "scheduleShift": "شفټ",
+      "scheduleMen": "وروڼه",
+      "scheduleWomen": "خویندې",
+      "schedulePopular": "ډېر غوښتل شوی",
+      "scheduleFull": "ډک شوی",
+      "scheduleNote": "د خویندو د سهار شفټونه ۱۰ دقیقې وروسته او د ماسپښین شفټونه ۱۰ دقیقې مخکې پیلېږي.",
+      "onlineLabel": "انفرادي آنلاین زده‌کړه",
+      "onlineTitle": "انفرادي آنلاین زده‌کړه؛ ستاسو د موخې او وخت له مخې.",
+      "onlineText": "د Google Meet له لارې ژوندۍ انفرادي ټولګي په کابل او بهر کې، د اروپا او کاناډا په ګډون، د مخکینۍ همغږۍ له مخې برابرېږي. درسي مواد، د ښوونکي شتون، وخت او فیس تر نوم‌لیکنې مخکې تاییدېږي.",
+      "onlineCta": "د آنلاین ټولګیو معلومات",
+      "whyLabel": "روښانه پیل",
+      "whyTitle": "په روښانه پلان زده‌کړه پیل کړئ.",
+      "whyLead": "خپله موخه وټاکئ، سویه مو معلومه کړئ او مناسب ټولګی تایید کړئ.",
+      "steps": [
+        [
+          "۰۱",
+          "خپل هدف ووایئ",
+          "خبرې کول، اکاډمیکه انګلیسي، TOEFL یا ورځنۍ انګلیسي؛ خپل هدف راسره شریک کړئ."
+        ],
+        [
+          "۰۲",
+          "خپله سویه وړیا معلومه کړئ",
+          "زموږ ښوونیز ټیم له تاسو سره د مناسبې سویې په ټاکلو کې مرسته کوي."
+        ],
+        [
+          "۰۳",
+          "مناسب ټولګي ته لاړ شئ",
+          "مهالوېش، د زده‌کړې بڼه او فیس له ادارې سره تایید کړئ."
+        ]
+      ],
+      "toolsLabel": "د نوم‌لیکنې لارښوونه",
+      "toolsTitle": "د خپل راتلونکي ګام په ټاکلو کې مرسته وغواړئ.",
+      "toolsText": "زموږ د نوم‌لیکنې ډله د مناسب انګلیسي پروګرام په ټاکلو او د سویې د وړیا ارزونې په تنظیم کې مرسته کوي.",
+      "toolsCta": "لارښوونه وغواړئ",
+      "faqLabel": "اړین معلومات",
+      "faqTitle": "له نوم‌لیکنې مخکې مهمې پوښتنې",
+      "faqLead": "د سویې ارزونې، فیس او د ټولګیو د ګډون په اړه روښانه ځوابونه.",
+      "faqMore": "نورې پوښتنې لرئ؟ موږ ته په واټساپ پیغام واستوئ",
+      "visitLabel": "زموږ پته",
+      "visitTitle": "په کابل کې تافل هوس ته راشئ.",
+      "visitText": "کابل، دشت برچي، مغازه تمځای، د جلیلي مرکز مخامخ، افغانستان.",
+      "hours": "ټولګي له شنبې تر پنجشنبې · جمعه رخصتي · د ټولګي دقیق وخت له ادارې وپوښتئ",
+      "phone": "له ادارې سره اړیکه",
+      "wa": "د واټساپ اړیکه",
+      "map": "زموږ ځای ومومئ",
+      "finalEyebrow": "ستاسو راتلونکی ګام",
+      "finalTitle": "خپل پرمختګ له مناسبې کچې پیل کړئ.",
+      "finalText": "د سویې وړیا ارزونه وغواړئ او د شته ټولګیو، فیس او مهالوېش په اړه له ادارې معلومات واخلئ.",
+      "finalCta": "د وړیا سویې معلومولو غوښتنه",
+      "footerRights": "ټول حقونه خوندي دي.",
+      "footPrograms": "پروګرامونه",
+      "footTools": "د زده‌کړې وسایل",
+      "notFoundTitle": "پاڼه ونه موندل شوه",
+      "notFoundText": "کېدای شي دا پاڼه لېږدول شوې وي، یا یې پته غلطه لیکل شوې وي. تاسې کولای شئ کورپاڼې ته بېرته لاړ شئ یا پروګرامونه وګورئ.",
+      "notFoundHome": "کورپاڼې ته لاړ شئ",
+      "statsFallback": [
+        [
+          "۶٬۰۰۰+",
+          "له ۲۰۱۳ کال راهیسې فارغان"
+        ],
+        [
+          "۵۰۰+",
+          "د TOEFL ازموینې لارښوونه ترلاسه کوونکي"
+        ],
+        [
+          "۱۰۰+",
+          "په نړیوالو پوهنتونونو کې منل شوي"
+        ]
+      ],
+      "fallbackFaq": [
+        [
+          "آیا د سویې معلومول وړیا دي؟",
+          "هو. د سویې ارزونه وړیا ده او د مناسبې کچې په ټاکلو کې مرسته کوي."
+        ],
+        [
+          "له ایمیل پرته نوم‌لیکنه کېدای شي؟",
+          "هو. له ادارې سره په واټساپ یا ټیلیفون اړیکه ونیسئ."
+        ],
+        [
+          "آنلاین ټولګي شته؟",
+          "انفرادي آنلاین ټولګي د ښوونکي د وخت او ظرفیت له مخې همغږي کېږي."
+        ]
+      ],
+      "seoTitle": "The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه"
+    }
+  },
+  "semester": {
+    "en": {
+      "heroTeaser": "New semester · Qaws 1405",
+      "eyebrow": "ENROLLMENT · QAWS 1405",
+      "title": "A new semester.",
+      "accent": "A stronger start to your English journey.",
+      "lead": "Build practical English for conversation, university study, professional writing or TOEFL preparation. Explore six programs, choose a suitable level and begin with a free placement assessment.",
+      "chips": [
+        "General English",
+        "Academic English · EAP",
+        "Special Speaking"
+      ],
+      "cta": "Request a free placement assessment",
+      "secondary": "Explore all six programs",
+      "videoLabel": "Watch our new semester announcement",
+      "play": "Play the new semester video",
+      "playText": "Watch the video",
+      "videoCaption": "New semester announcement · 36-second video",
+      "videoFallback": "Watch the semester video",
+      "eapLabel": "ACADEMIC ENGLISH · EAP",
+      "eapTeaser": "Four levels · Three instructors and three books per level",
+      "eapDetail": "AFN 1,000 monthly · AFN 2,000 per two-month level",
+      "eapLink": "Explore the EAP pathway"
+    },
+    "fa": {
+      "heroTeaser": "ثبت‌نام سمستر قوس ۱۴۰۵",
+      "eyebrow": "ثبت‌نام سمستر جدید · قوس ۱۴۰۵",
+      "title": "سمستر جدید؛",
+      "accent": "آغاز یک مسیر روشن برای یادگیری انگلیسی.",
+      "lead": "برای مکالمهٔ روان‌تر، تحصیل در دانشگاه، نگارش مسلکی یا آمادگی TOEFL، برنامهٔ متناسب با هدف خود را انتخاب کنید. در تافل هوس شش برنامهٔ آموزشی ارائه می‌شود و تعیین سطح برای انتخاب سطح مناسب رایگان است.",
+      "chips": [
+        "General English",
+        "Academic English · EAP",
+        "Special Speaking"
+      ],
+      "cta": "درخواست تعیین سطح رایگان",
+      "secondary": "دیدن تمام شش برنامه",
+      "videoLabel": "ویدیوی معرفی سمستر جدید تافل هوس",
+      "play": "پخش ویدیوی معرفی سمستر جدید",
+      "playText": "ویدیو را تماشا کنید",
+      "videoCaption": "معرفی سمستر جدید · ویدیوی ۳۶ ثانیه‌ای",
+      "videoFallback": "تماشای ویدیوی سمستر",
+      "eapLabel": "انگلیسی اکادمیک · EAP",
+      "eapTeaser": "۴ سطح · ۳ استاد و ۳ کتاب درسی در هر سطح",
+      "eapDetail": "فیس ماهانه ۱٬۰۰۰ افغانی · هر سطح دوماهه ۲٬۰۰۰ افغانی",
+      "eapLink": "معرفی کامل برنامهٔ EAP"
+    },
+    "ps": {
+      "heroTeaser": "د قوس ۱۴۰۵ نوي سمستر نوم‌لیکنه",
+      "eyebrow": "د نوي سمستر نوم‌لیکنه · قوس ۱۴۰۵",
+      "title": "نوی سمستر؛",
+      "accent": "د انګلیسي زده‌کړې لپاره روښانه پیل.",
+      "lead": "د روانو خبرو، پوهنتوني زده‌کړو، مسلکي لیکنې او د TOEFL ازموینې د چمتووالي لپاره د خپلې موخې مناسب پروګرام وټاکئ. تافل هوس شپږ ښوونیز پروګرامونه لري او د مناسبې کچې د ټاکلو لپاره د سویې ارزونه وړیا ده.",
+      "chips": [
+        "General English",
+        "Academic English · EAP",
+        "Special Speaking"
+      ],
+      "cta": "د سویې د وړیا ارزونې غوښتنه",
+      "secondary": "ټول شپږ پروګرامونه وګورئ",
+      "videoLabel": "د تافل هوس د نوي سمستر معرفي ویډیو",
+      "play": "د نوي سمستر ویډیو پلې کړئ",
+      "playText": "ویډیو وګورئ",
+      "videoCaption": "د نوي سمستر پېژندنه · ۳۶ ثانیې ویډیو",
+      "videoFallback": "د سمستر ویډیو وګورئ",
+      "eapLabel": "اکاډمیکه انګلیسي · EAP",
+      "eapTeaser": "۴ کچې · په هره کچه کې ۳ ښوونکي او ۳ کتابونه",
+      "eapDetail": "میاشتنی فیس ۱٬۰۰۰ افغانۍ · د دوه میاشتنې کچې فیس ۲٬۰۰۰ افغانۍ",
+      "eapLink": "د EAP بشپړ معلومات"
+    }
+  },
+  "goals": {
+    "en": {
+      "title": "What do you want to achieve?",
+      "hint": "Choose your goal to find a suitable learning path.",
+      "label": "Explore English programs by goal",
+      "items": [
+        [
+          "general-english",
+          "Start with the foundations"
+        ],
+        [
+          "special-speaking",
+          "Speak with confidence"
+        ],
+        [
+          "academic-english",
+          "Prepare for university"
+        ],
+        [
+          "toefl-preparation",
+          "Prepare for TOEFL"
+        ]
+      ]
+    },
+    "fa": {
+      "title": "هدف شما از یادگیری انگلیسی چیست؟",
+      "hint": "هدف خود را انتخاب کنید و برنامهٔ مناسب را بشناسید.",
+      "label": "انتخاب برنامه بر اساس هدف آموزشی",
+      "items": [
+        [
+          "general-english",
+          "از پایه شروع کنم"
+        ],
+        [
+          "special-speaking",
+          "با اطمینان صحبت کنم"
+        ],
+        [
+          "academic-english",
+          "برای دانشگاه آماده شوم"
+        ],
+        [
+          "toefl-preparation",
+          "برای TOEFL آماده شوم"
+        ]
+      ]
+    },
+    "ps": {
+      "title": "له انګلیسي زده‌کړې موخه مو څه ده؟",
+      "hint": "خپله موخه وټاکئ او مناسب پروګرام ومومئ.",
+      "label": "د زده‌کړې د موخې له مخې د پروګرام ټاکنه",
+      "items": [
+        [
+          "general-english",
+          "له بنسټ څخه پیل کوم"
+        ],
+        [
+          "special-speaking",
+          "په ډاډه زړه خبرې کوم"
+        ],
+        [
+          "academic-english",
+          "پوهنتون ته چمتو کېږم"
+        ],
+        [
+          "toefl-preparation",
+          "TOEFL ته چمتو کېږم"
+        ]
+      ]
+    }
+  },
+  "paths": {
+    "catalog": [
+      {
+        "id": "general-english",
+        "tag": "GENERAL ENGLISH"
+      },
+      {
+        "id": "academic-english",
+        "tag": "EAP"
+      },
+      {
+        "id": "toefl-preparation",
+        "tag": "TOEFL iBT"
+      }
+    ],
+    "locales": {
+      "en": {
+        "label": "Start with your goal",
+        "hint": "Explore a path that matches your goal",
+        "links": {
+          "general-english": "Build your English",
+          "academic-english": "Study academic English",
+          "toefl-preparation": "Prepare for TOEFL iBT"
+        }
+      },
+      "fa": {
+        "label": "از هدف خود آغاز کنید",
+        "hint": "مسیر متناسب با هدف خود را پیدا کنید",
+        "links": {
+          "general-english": "تقویت انگلیسی عمومی",
+          "academic-english": "انگلیسی برای اهداف اکادمیک",
+          "toefl-preparation": "آمادگی آزمون TOEFL iBT"
+        }
+      },
+      "ps": {
+        "label": "له خپل هدف څخه پیل وکړئ",
+        "hint": "له خپل هدف سره برابره لاره ومومئ",
+        "links": {
+          "general-english": "عمومي انګلیسي پیاوړې کړئ",
+          "academic-english": "اکاډمیکه انګلیسي زده کړئ",
+          "toefl-preparation": "TOEFL iBT ته چمتو شئ"
+        }
+      }
+    }
+  },
+  "habits": {
+    "en": {
+      "label": "LEARN BEYOND THE CLASSROOM",
+      "title": "Make English part of your everyday life.",
+      "intro": "Your class gives you a structured place to learn. What you do between lessons can help turn that knowledge into a skill you use. Start with these three simple habits.",
+      "habits": [
+        [
+          "01",
+          "Listen and read for meaning",
+          "Choose a short, level-appropriate text or audio recording on a topic you enjoy. Understand the main idea before looking up every unfamiliar word."
+        ],
+        [
+          "02",
+          "Use what you learn",
+          "Try a short spoken summary, ask yourself a question or write a few sentences using new expressions. Bring questions you cannot answer to your next class."
+        ],
+        [
+          "03",
+          "Review and keep going",
+          "Revisit useful expressions over several days. Note what you can do more easily and what still needs practice. Choose one small goal for your next session."
+        ]
+      ],
+      "resourceTitle": "Free learning guides",
+      "resourceIntro": "Explore practical advice from The TOEFL House before choosing your next learning goal.",
+      "links": [
+        [
+          "speaking-practice",
+          "Improve your speaking",
+          "Explore practical ways to practice speaking."
+        ],
+        [
+          "english-courses-kabul",
+          "Find your learning pathway",
+          "Understand the English course options in Kabul."
+        ],
+        [
+          "toefl-ibt-2026",
+          "Prepare for the TOEFL iBT",
+          "Understand the 2026 test and plan your preparation."
+        ]
+      ],
+      "open": "Read guide",
+      "all": "Explore all learning guides"
+    },
+    "fa": {
+      "label": "یادگیری فراتر از صنف",
+      "title": "انگلیسی را بخشی از زندگی روزمرهٔ خود بسازید.",
+      "intro": "صنف، محیطی منظم برای یادگیری فراهم می‌کند. تمرین میان درس‌ها نیز به شما کمک می‌کند آموخته‌های خود را به مهارت کاربردی تبدیل کنید. با این سه عادت ساده آغاز کنید.",
+      "habits": [
+        [
+          "۰۱",
+          "برای درک مطلب بشنوید و بخوانید",
+          "متن یا فایل صوتی کوتاه و متناسب با سطح خود را در موضوعی که دوست دارید انتخاب کنید. پیش از جست‌وجوی تمام لغات ناآشنا، مفهوم اصلی را دریابید."
+        ],
+        [
+          "۰۲",
+          "آموخته‌های خود را به کار ببرید",
+          "خلاصه‌ای کوتاه به انگلیسی بگویید، از خود پرسشی مطرح کنید یا با عبارت‌های تازه چند جمله بنویسید. پرسش‌های دشوار را در درس بعدی مطرح کنید."
+        ],
+        [
+          "۰۳",
+          "مرور کنید و پیوسته پیش بروید",
+          "عبارت‌های مفید را در چند روز مرور کنید. آنچه آسان‌تر انجام می‌دهید و آنچه هنوز به تمرین نیاز دارد یادداشت کنید. برای تمرین بعدی یک هدف کوچک تعیین کنید."
+        ]
+      ],
+      "resourceTitle": "رهنمودهای رایگان یادگیری",
+      "resourceIntro": "پیش از انتخاب گام بعدی، رهنمایی‌های کاربردی تافل هوس را مطالعه کنید.",
+      "links": [
+        [
+          "speaking-practice",
+          "تقویت مهارت مکالمه",
+          "روش‌های عملی تمرین مکالمه را بشناسید."
+        ],
+        [
+          "english-courses-kabul",
+          "انتخاب مسیر آموزشی مناسب",
+          "با گزینه‌های آموزش انگلیسی در کابل آشنا شوید."
+        ],
+        [
+          "toefl-ibt-2026",
+          "آمادگی برای TOEFL iBT",
+          "ساختار آزمون ۲۰۲۶ را بشناسید و برای آن برنامه‌ریزی کنید."
+        ]
+      ],
+      "open": "مطالعهٔ رهنمود",
+      "all": "تمام رهنمودهای یادگیری"
+    },
+    "ps": {
+      "label": "له ټولګي بهر زده‌کړه",
+      "title": "انګلیسي د خپل ورځني ژوند برخه وګرځوئ.",
+      "intro": "ټولګی د منظمې زده‌کړې ځای دی. د درسونو ترمنځ تمرین له تاسو سره مرسته کوي چې زده کړې پوهه په عملي مهارت بدله کړئ. له دې درې ساده عادتونو پیل وکړئ.",
+      "habits": [
+        [
+          "۰۱",
+          "د مطلب د درک لپاره واورئ او ولولئ",
+          "د خپلې کچې او خوښې له مخې لنډ متن یا غږیز مطلب وټاکئ. د ټولو نابلدو لغتونو له لټون مخکې اصلي مانا درک کړئ."
+        ],
+        [
+          "۰۲",
+          "خپلې زده کړې وکاروئ",
+          "لنډیز په انګلیسي ووایئ، له ځانه پوښتنه وکړئ یا په نویو عبارتونو څو جملې ولیکئ. ستونزمنې پوښتنې په راتلونکي درس کې مطرح کړئ."
+        ],
+        [
+          "۰۳",
+          "بیاکتنه وکړئ او دوام ورکړئ",
+          "ګټور عبارتونه په څو ورځو کې بیا تمرین کړئ. هغه څه ولیکئ چې اوس یې اسانه ترسره کوئ او هغه چې لا تمرین ته اړتیا لري. د راتلونکي تمرین لپاره یوه کوچنۍ موخه وټاکئ."
+        ]
+      ],
+      "resourceTitle": "د زده‌کړې وړیا لارښودونه",
+      "resourceIntro": "د راتلونکي ګام له ټاکلو مخکې د تافل هوس عملي لارښوونې ولولئ.",
+      "links": [
+        [
+          "speaking-practice",
+          "د خبرو مهارت پیاوړی کړئ",
+          "د انګلیسي خبرو عملي تمرینونه وپېژنئ."
+        ],
+        [
+          "english-courses-kabul",
+          "مناسبه ښوونیزه لار ومومئ",
+          "په کابل کې د انګلیسي کورسونو له انتخابونو سره اشنا شئ."
+        ],
+        [
+          "toefl-ibt-2026",
+          "TOEFL iBT ته چمتووالی",
+          "د ۲۰۲۶ ازموینه وپېژنئ او د چمتووالي پلان جوړ کړئ."
+        ]
+      ],
+      "open": "لارښود ولولئ",
+      "all": "ټول ښوونیز لارښودونه"
+    }
+  },
+  "reviewedCards": {
+    "en": {
+      "special-speaking": "Two-month semester with Master Speaking and grammar in conversation. Total semester fee: AFN 2,000.",
+      "toefl-preparation": "Four-month preparation for the updated 2026 TOEFL iBT: Reading, Listening, Writing and Speaking."
+    },
+    "fa": {
+      "special-speaking": "سمستر دوماهه با کتاب اختصاصی Master Speaking و گرامر مکالمه؛ فیس مجموعی ۲٬۰۰۰ افغانی.",
+      "toefl-preparation": "آمادگی چهارماههٔ TOEFL iBT مطابق ساختار جدید سال ۲۰۲۶؛ چهار مهارت اصلی زبان."
+    },
+    "ps": {
+      "special-speaking": "دوه میاشتنی سمستر د Master Speaking او د خبرو ګرامر له کتابونو سره؛ ټول فیس ۲٬۰۰۰ افغانۍ.",
+      "toefl-preparation": "د ۲۰۲۶ نوې TOEFL iBT بڼې ته څلور میاشتنی چمتووالی؛ د انګلیسي څلور مهارتونه."
+    }
+  },
+  "header": {
+    "en": {
+      "compact": "Free assessment",
+      "skip": "Skip to content",
+      "language": "Choose language"
+    },
+    "fa": {
+      "compact": "تعیین سطح",
+      "skip": "رفتن به محتوا",
+      "language": "انتخاب زبان"
+    },
+    "ps": {
+      "compact": "وړیا ارزونه",
+      "skip": "منځپانګې ته لاړ شئ",
+      "language": "ژبه وټاکئ"
+    }
+  },
+  "courseCards": {
+    "en": {
+      "general-english": {
+        "name": "General English",
+        "fallbackDuration": "Pre-Starter: 1 month; other levels: 2 months",
+        "shortDuration": "Pre-Starter: 1 mo · Other levels: 2 mo"
+      },
+      "academic-english": {
+        "name": "Academic English",
+        "fallbackDuration": "2 months per level",
+        "shortDuration": "2 months per level"
+      },
+      "toefl-preparation": {
+        "name": "TOEFL Preparation",
+        "fallbackDuration": "4 months",
+        "shortDuration": "4 months"
+      },
+      "special-speaking": {
+        "name": "Special Speaking",
+        "fallbackDuration": "2 months",
+        "shortDuration": "2 months"
+      },
+      "professional-writing": {
+        "name": "Professional Writing",
+        "fallbackDuration": "2 months",
+        "shortDuration": "2 months"
+      },
+      "teacher-training": {
+        "name": "Teacher Training",
+        "fallbackDuration": "2 months",
+        "shortDuration": "2 months"
+      }
+    },
+    "fa": {
+      "general-english": {
+        "name": "انگلیسی عمومی",
+        "fallbackDuration": "Pre-Starter: یک ماه؛ سایر سطح‌ها: دو ماه",
+        "shortDuration": "Pre-Starter: ۱ ماه · سایر سطوح: ۲ ماه"
+      },
+      "academic-english": {
+        "name": "انگلیسی اکادمیک",
+        "fallbackDuration": "دو ماه برای هر سطح",
+        "shortDuration": "۲ ماه برای هر سطح"
+      },
+      "toefl-preparation": {
+        "name": "آمادگی تافل",
+        "fallbackDuration": "چهار ماه",
+        "shortDuration": "۴ ماه"
+      },
+      "special-speaking": {
+        "name": "مکالمهٔ ویژه",
+        "fallbackDuration": "دو ماه",
+        "shortDuration": "۲ ماه"
+      },
+      "professional-writing": {
+        "name": "نگارش مسلکی",
+        "fallbackDuration": "دو ماه",
+        "shortDuration": "۲ ماه"
+      },
+      "teacher-training": {
+        "name": "تربیهٔ استاد",
+        "fallbackDuration": "دو ماه",
+        "shortDuration": "۲ ماه"
+      }
+    },
+    "ps": {
+      "general-english": {
+        "name": "عمومي انګلیسي",
+        "fallbackDuration": "Pre-Starter: یوه میاشت؛ نورې کچې: دوه میاشتې",
+        "shortDuration": "Pre-Starter: ۱ میاشت · نورې کچې: ۲ میاشتې"
+      },
+      "academic-english": {
+        "name": "اکاډمیکه انګلیسي",
+        "fallbackDuration": "د هرې کچې لپاره دوه میاشتې",
+        "shortDuration": "د هرې کچې لپاره ۲ میاشتې"
+      },
+      "toefl-preparation": {
+        "name": "د TOEFL چمتووالی",
+        "fallbackDuration": "څلور میاشتې",
+        "shortDuration": "څلور میاشتې"
+      },
+      "special-speaking": {
+        "name": "ځانګړې خبرې",
+        "fallbackDuration": "دوه میاشتې",
+        "shortDuration": "۲ میاشتې"
+      },
+      "professional-writing": {
+        "name": "مسلکي لیکنه",
+        "fallbackDuration": "دوه میاشتې",
+        "shortDuration": "۲ میاشتې"
+      },
+      "teacher-training": {
+        "name": "د ښوونکو روزنه",
+        "fallbackDuration": "دوه میاشتې",
+        "shortDuration": "۲ میاشتې"
+      }
+    }
+  },
+  "courseGlyphs": {
+    "general-english": "<path d=\"M3 4h7a5 5 0 0 1 5 5v15a5 5 0 0 0-5-5H3zM27 4h-7a5 5 0 0 0-5 5v15a5 5 0 0 1 5-5h7z\"/><path d=\"M6 8h4m10 0h4M6 12h4m10 0h4\"/>",
+    "academic-english": "<path d=\"m2 10 13-6 13 6-13 6zM7 13v7c5 4 11 4 16 0v-7M28 10v10\"/>",
+    "toefl-preparation": "<circle cx=\"15\" cy=\"15\" r=\"11\"/><circle cx=\"15\" cy=\"15\" r=\"6\"/><path d=\"m15 15 10-10m-1 0h4v4\"/>",
+    "special-speaking": "<path d=\"M4 5h22v14H14l-6 5v-5H4z\"/><path d=\"M9 10h12M9 14h8\"/>",
+    "professional-writing": "<path d=\"M5 23l3-8L20 3l7 7-12 12zM8 15l7 7M17 6l7 7M5 27h22\"/>",
+    "teacher-training": "<rect x=\"3\" y=\"4\" width=\"24\" height=\"16\" rx=\"3\"/><path d=\"M15 20v7m-7 0h14M8 15l5-5 4 3 5-6\"/>"
+  }
+}

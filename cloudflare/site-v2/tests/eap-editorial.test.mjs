@@ -20,13 +20,27 @@ test("Academic fact grid is shared and editorial motion is preference-gated",asy
  assert.equal(r.status,200);
  const css=await r.text();
  assert.match(css,/\.eap-facts\{[^}]*gap:1px/);
- assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\.eap-editorial \.eap-faq-plus\{transition:transform/);
+ assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\s*\.eap-editorial \.eap-faq-plus\{transition:transform/);
 });
 
 test("Narrow EAP layouts align actions and preserve readable introduction spacing",async()=>{
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env);
  assert.equal(r.status,200);
  const css=await r.text();
- assert.match(css,/@media\(max-width:460px\)\{\.eap-editorial \.eap-hero \.breadcrumbs\{margin-bottom:20px\}[^}]*\}[^}]*\.eap-actions\{display:grid;grid-template-columns:1fr\}/);
+ assert.match(css,/@media\(max-width:460px\)\{\s*\.eap-editorial \.eap-hero \.breadcrumbs\{margin-bottom:20px\}[^}]*\}[^}]*\.eap-actions\{display:grid;grid-template-columns:1fr\}/);
  assert.match(css,/\.eap-editorial \.eap-lead\{margin-bottom:20px;line-height:1\.8\}/);
+});
+
+test('each localized academic book links to its own guide',async()=>{
+ const expected=[['ACTIVE Skills for Reading','active-skills-for-reading'],['Contemporary Topics','contemporary-topics'],['Longman Academic Writing Series','longman-academic-writing']];
+ for(const prefix of ['/','/fa/','/ps/']){
+  const response=await worker.fetch(new Request('https://toeflhouse.pages.dev'+prefix+'courses/academic-english/'),{});
+  assert.equal(response.status,200);const html=await response.text();
+  const articles=[...html.matchAll(/<article class="eap-book">([\s\S]*?)<\/article>/g)].map(x=>x[1]);
+  assert.equal(articles.length,expected.length);
+  for(const [index,[title,slug]] of expected.entries()){
+   assert.ok(articles[index].includes(title),prefix+title);
+   assert.ok(articles[index].includes('href="'+prefix+'guides/'+slug+'/"'),prefix+slug);
+  }
+ }
 });
