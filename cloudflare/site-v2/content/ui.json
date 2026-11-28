@@ -1,0 +1,272 @@
+{
+  "detail": {
+    "en": {
+      "back": "All programs",
+      "course": "PROGRAM OVERVIEW",
+      "duration": "Course duration",
+      "who": "Who is this program for?",
+      "learn": "Skills you'll develop",
+      "curriculum": "Program details",
+      "levels": "Levels and learning pathway",
+      "schedule": "Class schedule",
+      "notice": "Confirm current class times, tuition and availability with the admissions team.",
+      "start": "Request a free placement assessment",
+      "whatsapp": "Ask admissions on WhatsApp",
+      "related": "Explore related programs",
+      "all": "Discover more English programs",
+      "proof": "How to enroll",
+      "steps": [
+        "Choose your learning goal",
+        "Complete a free placement assessment",
+        "Confirm your class, schedule and tuition"
+      ],
+      "admissionEyebrow": "ADMISSIONS",
+      "admissionTitle": "Find the English program that fits your goals.",
+      "admissionIntro": "Choose your preferred program, learning format and class time. Review the WhatsApp message before sending it to our admissions team.",
+      "formTitle": "Tell us what you want to learn",
+      "program": "Your preferred program",
+      "programPlaceholder": "Choose a program",
+      "format": "Class format",
+      "campus": "In person · Kabul",
+      "online": "One-to-one online lessons · Google Meet",
+      "when": "Preferred class time",
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "flexible": "Flexible / discuss with admissions",
+      "submit": "Prepare my WhatsApp message",
+      "formNote": "This form prepares a WhatsApp message; it does not store your information on the website. Nothing is sent until you confirm in WhatsApp.",
+      "noEmail": "No email required",
+      "free": "Free placement assessment",
+      "legacy": "Explore student learning tools",
+      "need": "Not sure which program to choose?",
+      "needCopy": "Our admissions team can advise you about programs and placement. You can also contact reception by phone.",
+      "call": "Call reception",
+      "faqs": [
+        [
+          "Is the placement assessment free?",
+          "Yes. The placement assessment is free."
+        ],
+        [
+          "Is an email address required?",
+          "No. You can enquire through WhatsApp or by phone."
+        ],
+        [
+          "Can I attend online?",
+          "One-to-one classes via Google Meet may be arranged subject to teacher availability and scheduling."
+        ]
+      ]
+    },
+    "fa": {
+      "back": "تمام برنامه‌ها",
+      "course": "معرفی برنامهٔ آموزشی",
+      "duration": "مدت دوره",
+      "who": "این برنامه برای چه کسانی مناسب است؟",
+      "learn": "مهارت‌هایی که می‌آموزید",
+      "curriculum": "معرفی کامل برنامه",
+      "levels": "سطح‌ها و مسیر آموزشی",
+      "schedule": "تقسیم اوقات صنف‌ها",
+      "notice": "تقسیم اوقات، فیس و ظرفیت فعلی صنف‌ها را با بخش پذیرش تأیید کنید.",
+      "start": "درخواست تعیین سطح رایگان",
+      "whatsapp": "تماس با پذیرش در واتساپ",
+      "related": "برنامه‌های مرتبط",
+      "all": "دیگر برنامه‌های انگلیسی را بشناسید",
+      "proof": "مراحل ثبت‌نام",
+      "steps": [
+        "هدف آموزشی خود را مشخص کنید",
+        "تعیین سطح رایگان انجام دهید",
+        "صنف، تقسیم اوقات و فیس را تأیید کنید"
+      ],
+      "admissionEyebrow": "ثبت‌نام و پذیرش",
+      "admissionTitle": "برنامهٔ انگلیسی متناسب با هدف‌تان را انتخاب کنید.",
+      "admissionIntro": "برنامهٔ دلخواه، شیوهٔ آموزش و وقت مناسب خود را انتخاب کنید. پس از بررسی پیام آماده‌شده، می‌توانید آن را از طریق واتساپ به بخش پذیرش بفرستید.",
+      "formTitle": "معلومات صنف مورد نظر خود را مشخص کنید",
+      "program": "برنامهٔ مورد نظر",
+      "programPlaceholder": "برنامهٔ آموزشی را انتخاب کنید",
+      "format": "شیوهٔ برگزاری صنف",
+      "campus": "حضوری در کابل",
+      "online": "آنلاین انفرادی از طریق Google Meet",
+      "when": "وقت دلخواه صنف",
+      "morning": "صبح",
+      "afternoon": "بعد از ظهر",
+      "flexible": "با پذیرش هماهنگ می‌کنم",
+      "submit": "ساختن پیام واتساپ",
+      "formNote": "این فورم صرفاً پیام واتساپ را آماده می‌سازد و معلومات شما را در سایت ذخیره نمی‌کند. پیام تنها پس از تأیید شما در واتساپ فرستاده می‌شود.",
+      "noEmail": "ایمیل ضروری نیست",
+      "free": "تعیین سطح رایگان",
+      "legacy": "دیدن ابزارهای آموزشی شاگردان",
+      "need": "برای انتخاب برنامه به رهنمایی ضرورت دارید؟",
+      "needCopy": "بخش پذیرش در انتخاب برنامه و سطح مناسب کمک‌تان می‌کند. از طریق تماس تلفونی نیز می‌توانید معلومات دریافت کنید.",
+      "call": "تماس با پذیرش",
+      "faqs": [
+        [
+          "آیا تعیین سطح رایگان است؟",
+          "بلی. تعیین سطح رایگان است؛ صنف‌های آموزشی فیس دارند."
+        ],
+        [
+          "آیا برای دریافت معلومات ایمیل ضروری است؟",
+          "نخیر. می‌توانید از طریق واتساپ یا تماس تلفونی با پذیرش در ارتباط شوید."
+        ],
+        [
+          "آیا صنف آنلاین نیز برگزار می‌شود؟",
+          "صنف‌های آنلاین انفرادی از طریق Google Meet با توجه به وقت و دسترسی استاد، با هماهنگی قبلی برگزار می‌شوند."
+        ]
+      ]
+    },
+    "ps": {
+      "back": "ټول پروګرامونه",
+      "course": "د ښوونیز پروګرام پېژندنه",
+      "duration": "د کورس موده",
+      "who": "دا پروګرام د چا لپاره مناسب دی؟",
+      "learn": "د زده‌کړې مهارتونه",
+      "curriculum": "د پروګرام بشپړ معلومات",
+      "levels": "کچې او د زده‌کړې بهیر",
+      "schedule": "د ټولګیو مهالوېش",
+      "notice": "د ټولګیو مهالوېش، فیس او شته ځایونه له نوم‌لیکنې څانګې سره تایید کړئ.",
+      "start": "د سویې د وړیا ارزونې غوښتنه",
+      "whatsapp": "د واټساپ له لارې اړیکه",
+      "related": "اړوند پروګرامونه",
+      "all": "د انګلیسي نور پروګرامونه وګورئ",
+      "proof": "د نوم‌لیکنې پړاوونه",
+      "steps": [
+        "خپله زده‌کړیزه موخه وټاکئ",
+        "د سویې وړیا ارزونه ترسره کړئ",
+        "ټولګی، مهالوېش او فیس تایید کړئ"
+      ],
+      "admissionEyebrow": "نوم‌لیکنه",
+      "admissionTitle": "د خپلې موخې لپاره مناسب انګلیسي پروګرام وټاکئ.",
+      "admissionIntro": "خپل پروګرام، د زده‌کړې بڼه او مناسب وخت وټاکئ. چمتو شوی پیغام وڅېړئ او د واټساپ له لارې یې د نوم‌لیکنې څانګې ته واستوئ.",
+      "formTitle": "د خپلې خوښې ټولګي معلومات وټاکئ",
+      "program": "د خوښې پروګرام",
+      "programPlaceholder": "یو ښوونیز پروګرام وټاکئ",
+      "format": "د ټولګي بڼه",
+      "campus": "په کابل کې حضوري",
+      "online": "انفرادي آنلاین ټولګي د Google Meet له لارې",
+      "when": "د ټولګي مناسب وخت",
+      "morning": "سهار",
+      "afternoon": "ماسپښین",
+      "flexible": "له ادارې سره همغږي کوم",
+      "submit": "د واټساپ پیغام چمتو کول",
+      "formNote": "دا فورم یوازې د واټساپ پیغام چمتو کوي؛ ستاسو معلومات په ویب‌سایټ کې نه ساتل کېږي. پیغام ستاسو له تایید وروسته استول کېږي.",
+      "noEmail": "ایمیل ته اړتیا نشته",
+      "free": "د سویې وړیا ارزونه",
+      "legacy": "د زده‌کوونکو روزنیز وسایل",
+      "need": "د پروګرام په ټاکلو کې لارښوونې ته اړتیا لرئ؟",
+      "needCopy": "د نوم‌لیکنې څانګه د مناسب پروګرام او کچې په ټاکلو کې مرسته کوي. په ټیلیفون هم معلومات ترلاسه کولای شئ.",
+      "call": "ادارې ته زنګ ووهئ",
+      "faqs": [
+        [
+          "ایا د سویې ارزونه وړیا ده؟",
+          "هو. د سویې ارزونه وړیا ده."
+        ],
+        [
+          "ایا ایمیل اړین دی؟",
+          "نه. د واټساپ یا ټیلیفون له لارې معلومات ترلاسه کولای شئ."
+        ],
+        [
+          "ایا آنلاین ټولګي شته؟",
+          "انفرادي آنلاین ټولګي د Google Meet له لارې د ښوونکو د شتون او د وختونو د همغږۍ له مخې برابرېږي."
+        ]
+      ]
+    }
+  },
+  "facts": {
+    "en": {
+      "general-english": "Pre-Starter: 1 month; other levels: 2 months each. Tuition: AFN 500 per month. Confirm current class times.",
+      "academic-english": "Four levels, 2 months each. Tuition: AFN 1,000 per month (AFN 2,000 per level).",
+      "toefl-preparation": "Four-month preparation for the 2026 TOEFL iBT. Confirm tuition, class times and current enrollment.",
+      "special-speaking": "Two-month semester with a 16-lesson Grammar book and the Master Speaking schedule. Semester tuition: AFN 2,000; book cost is confirmed separately.",
+      "professional-writing": "Two-month course. Please confirm tuition, teaching materials and current class times.",
+      "teacher-training": "Two-month teacher-training course. Confirm tuition, practical requirements and available shifts.",
+      "online-individual-zoom": "One-to-one online learning via Google Meet by arrangement. Subject, instructor, time zone and fee are confirmed with admissions."
+    },
+    "fa": {
+      "general-english": "Pre-Starter: یک ماه؛ سایر سطح‌ها: هر کدام دو ماه. فیس ماهانه: ۵۰۰ افغانی. وقت فعلی صنف را از پذیرش بپرسید.",
+      "academic-english": "چهار سطح؛ هر سطح دو ماه. فیس ماهانه ۱٬۰۰۰ افغانی (هر سطح ۲٬۰۰۰ افغانی).",
+      "toefl-preparation": "دورهٔ چهارماهه مطابق ساختار TOEFL iBT سال ۲۰۲۶. فیس و تقسیم اوقات را با پذیرش تأیید کنید.",
+      "special-speaking": "سمستر دوماهه؛ کتاب Grammar (۱۶ درس) و برنامهٔ Master Speaking. فیس سمستر ۲٬۰۰۰ افغانی است؛ هزینهٔ کتاب جداگانه تأیید می‌شود.",
+      "professional-writing": "دورهٔ دوماههٔ نگارش مسلکی. فیس، کتاب‌های درسی و تقسیم اوقات را از پذیرش بپرسید.",
+      "teacher-training": "دورهٔ دوماههٔ تربیهٔ استاد. فیس، شرایط تمرین عملی و وقت صنف را با پذیرش تأیید کنید.",
+      "online-individual-zoom": "صنف آنلاین انفرادی از طریق Google Meet با هماهنگی قبلی. موضوع، استاد، منطقهٔ زمانی و فیس با پذیرش مشخص می‌شود."
+    },
+    "ps": {
+      "general-english": "Pre-Starter: یوه میاشت؛ نورې کچې: هره یوه دوه میاشتې. میاشتنی فیس: ۵۰۰ افغانۍ. دقیق مهالویش تایید کړئ.",
+      "academic-english": "څلور کچې، هره کچه دوه میاشتې. میاشتنی فیس ۱٬۰۰۰ افغانۍ (د هرې کچې فیس ۲٬۰۰۰ افغانۍ).",
+      "toefl-preparation": "د ۲۰۲۶ TOEFL iBT له نوې بڼې سره سم څلور میاشتنی چمتووالی. فیس او مهالویش له ادارې سره تایید کړئ.",
+      "special-speaking": "دوه میاشتنی سمستر؛ د Grammar ۱۶ درسي کتاب او د Master Speaking مهالویش. د سمستر فیس ۲٬۰۰۰ افغانۍ دی؛ د کتاب بیه جلا تاییدېږي.",
+      "professional-writing": "د مسلکي لیکنې دوه میاشتنی کورس. فیس، درسي کتابونه او مهالویش له ادارې وپوښتئ.",
+      "teacher-training": "د ښوونکو د روزنې دوه میاشتنی کورس. فیس، عملي شرایط او موجود وختونه تایید کړئ.",
+      "online-individual-zoom": "انفرادي آنلاین زده‌کړه د Google Meet له لارې د همغږۍ له مخې؛ موضوع، ښوونکی، مهالویش او فیس له ادارې سره ټاکل کېږي."
+    }
+  },
+  "fallback": {
+    "en": "The message builder is unavailable. Contact admissions directly; the selections above will not be included.",
+    "fa": "ساخت پیام در دسترس نیست. مستقیماً با پذیرش تماس بگیرید؛ انتخاب‌های بالا در پیام شامل نمی‌شوند.",
+    "ps": "د پیغام جوړولو اسانتیا نشته. له نوم‌لیکنې څانګې سره مستقیمه اړیکه ونیسئ؛ پورته انتخابونه په پیغام کې نه شاملېږي."
+  },
+  "practice": {
+    "en": {
+      "title": "Try a little English right now",
+      "intro": "Three short questions. Choose an answer, discover why it works, and practise again. This is a sample exercise, not a placement assessment.",
+      "question": "Question",
+      "choice": "Choose an answer",
+      "check": "Check answer",
+      "reveal": "Show answer and explanation",
+      "correct": "Correct!",
+      "incorrect": "Not quite. Keep practising.",
+      "progress": "Answered",
+      "score": "Correct answers",
+      "reset": "Try again",
+      "explanations": [
+        "Use “I'm from” to say where you come from.",
+        "With he, she or it, add -s to most verbs in the present simple: she studies.",
+        "“Could you repeat that, please?” is a polite way to ask someone to say something again."
+      ]
+    },
+    "fa": {
+      "title": "همین حالا کمی انگلیسی تمرین کنید",
+      "intro": "سه پرسش کوتاه؛ پاسخ را انتخاب کنید، دلیل درستی آن را بیاموزید و دوباره تمرین کنید. این یک نمونهٔ تمرین است، نه آزمون تعیین سطح.",
+      "question": "پرسش",
+      "choice": "یک پاسخ را انتخاب کنید",
+      "check": "بررسی پاسخ",
+      "reveal": "نمایش پاسخ و توضیح",
+      "correct": "آفرین! درست است.",
+      "incorrect": "هنوز درست نیست؛ تمرین را ادامه دهید.",
+      "progress": "پاسخ‌داده‌شده",
+      "score": "پاسخ‌های درست",
+      "reset": "تمرین دوباره",
+      "explanations": [
+        "برای بیان محل اصلی زندگی یا کشور خود، از عبارت «I'm from» استفاده می‌کنیم.",
+        "در زمان حال ساده، برای he، she و it معمولاً به فعل s اضافه می‌شود؛ study به studies تبدیل می‌شود.",
+        "عبارت «Could you repeat that, please?» راه مؤدبانه‌ای برای درخواست تکرار سخن است."
+      ]
+    },
+    "ps": {
+      "title": "همدا اوس لږ انګلیسي تمرین کړئ",
+      "intro": "درې لنډې پوښتنې؛ ځواب وټاکئ، دلیل یې زده کړئ او بیا تمرین وکړئ. دا نمونه‌یي تمرین دی، د سویې ارزونه نه ده.",
+      "question": "پوښتنه",
+      "choice": "یو ځواب وټاکئ",
+      "check": "ځواب وګورئ",
+      "reveal": "ځواب او تشریح وګورئ",
+      "correct": "سم ځواب!",
+      "incorrect": "لا سم نه دی؛ تمرین ته دوام ورکړئ.",
+      "progress": "ځواب شوې",
+      "score": "سم ځوابونه",
+      "reset": "بیا تمرین وکړئ",
+      "explanations": [
+        "د خپل هېواد یا اصلي ځای د ښودلو لپاره «I'm from» وکاروئ.",
+        "په ساده اوسني زمان کې له he، she او it سره فعل عموماً s اخلي؛ study په studies بدلېږي.",
+        "«Could you repeat that, please?» له چا څخه د خبرې د بیا ویلو مؤدبانه غوښتنه ده."
+      ]
+    }
+  },
+  "campusAlt": {
+    "en": "Exterior of The TOEFL House campus in Dasht-e-Barchi, Kabul",
+    "fa": "نمای ساختمان تافل هوس در دشت برچی، کابل",
+    "ps": "د کابل په دشت برچي کې د تافل هوس د ودانۍ بڼه"
+  },
+  "breadcrumb": {
+    "en": "Breadcrumb",
+    "fa": "مسیر دسترسی به صفحه",
+    "ps": "د پاڼې د لاسرسي لاره"
+  }
+}

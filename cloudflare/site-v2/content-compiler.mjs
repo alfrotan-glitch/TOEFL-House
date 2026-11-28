@@ -21,7 +21,10 @@ function localized(data,name){
  if(!data||JSON.stringify(Object.keys(data).sort())!==JSON.stringify([...locales].sort()))throw Error('Missing or unexpected locales: '+name);
  for(const locale of locales)sameShape(data.en,data[locale],name+'.'+locale);
 }
-export function compileContent(general,academic,special,guides,home){
+export function compileContent(general,academic,special,guides,home,ui){
+ const uiKeys=['breadcrumb','campusAlt','detail','facts','fallback','practice'];
+ if(!ui||JSON.stringify(Object.keys(ui).sort())!==JSON.stringify(uiKeys))throw Error('Invalid shared UI content');
+ for(const key of uiKeys)localized(ui[key],'ui.'+key);
  const homeKeys=['copy','goals','habits','paths','semester'];
  if(!home||JSON.stringify(Object.keys(home).sort())!==JSON.stringify(homeKeys))throw Error('Invalid home content');
  for(const key of homeKeys)localized(home[key],'home.'+key);
@@ -36,9 +39,10 @@ export function compileContent(general,academic,special,guides,home){
  for(const key of guideKeys)localized(guides[key],'guides.'+key);
  return ['const V2_GENERAL_ENGLISH='+JSON.stringify(general)+';', 'const V2_EAP='+JSON.stringify(academic)+';', 'const V2_SPECIAL_UI='+JSON.stringify(special.ui)+';', 'const V2_SPECIAL_COURSES='+JSON.stringify(special.courses)+';',
   ...[['V2_GUIDE_UI','ui'],['V2_GUIDE_DATA','data'],['V2_BOOK_UI','bookUi'],['V2_BOOK_DATA','bookData'],['V2_BOOK_FEEDBACK','feedback'],['V2_GUIDE_NAV','nav']].map(([name,key])=>'const '+name+'='+JSON.stringify(guides[key])+';'),
-  ...[['V2_COPY','copy'],['V2_SEMESTER','semester'],['V2_GOALS','goals'],['V2_HOME_PATHS','paths'],['V2_LEARNING_HABITS','habits']].map(([name,key])=>'const '+name+'='+JSON.stringify(home[key])+';')].join('\n');
+  ...[['V2_COPY','copy'],['V2_SEMESTER','semester'],['V2_GOALS','goals'],['V2_HOME_PATHS','paths'],['V2_LEARNING_HABITS','habits']].map(([name,key])=>'const '+name+'='+JSON.stringify(home[key])+';'),
+  ...[['V2_BREADCRUMB','breadcrumb'],['V2_CAMPUS_ALT','campusAlt'],['V2_DETAIL_LABELS','detail'],['V2_ADMISSIONS_FACTS','facts'],['V2_ADMISSIONS_FALLBACK','fallback'],['V2_GE_PRACTICE_UI','practice']].map(([name,key])=>'const '+name+'='+JSON.stringify(ui[key])+';')].join('\n');
 }
 export async function loadContent(){
- const [general,academic,special,guides,home]=await Promise.all(['general.json','academic.json','special.json','guides.json','home.json'].map(async name=>JSON.parse(await readFile(join(here,'content',name),'utf8'))));
- return compileContent(general,academic,special,guides,home);
+ const [general,academic,special,guides,home,ui]=await Promise.all(['general.json','academic.json','special.json','guides.json','home.json','ui.json'].map(async name=>JSON.parse(await readFile(join(here,'content',name),'utf8'))));
+ return compileContent(general,academic,special,guides,home,ui);
 }

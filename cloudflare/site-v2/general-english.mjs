@@ -7,62 +7,7 @@
 
 const V2_GE_STAGE_IDS=["Pre-Starter","Starter","Prep One","Prep Two","Prep Three"];
 // Original practice questions. Local-only, no placement inference or personal data.
-const V2_GE_PRACTICE_UI={
- "en": {
-  "title": "Try a little English right now",
-  "intro": "Three short questions. Choose an answer, discover why it works, and practise again. This is a sample exercise, not a placement assessment.",
-  "question": "Question",
-  "choice": "Choose an answer",
-  "check": "Check answer",
-  "reveal": "Show answer and explanation",
-  "correct": "Correct!",
-  "incorrect": "Not quite. Keep practising.",
-  "progress": "Answered",
-  "score": "Correct answers",
-  "reset": "Try again",
-  "explanations": [
-   "Use “I'm from” to say where you come from.",
-   "With he, she or it, add -s to most verbs in the present simple: she studies.",
-   "“Could you repeat that, please?” is a polite way to ask someone to say something again."
-  ]
- },
- "fa": {
-  "title": "همین حالا کمی انگلیسی تمرین کنید",
-  "intro": "سه پرسش کوتاه؛ پاسخ را انتخاب کنید، دلیل درستی آن را بیاموزید و دوباره تمرین کنید. این یک نمونهٔ تمرین است، نه آزمون تعیین سطح.",
-  "question": "پرسش",
-  "choice": "یک پاسخ را انتخاب کنید",
-  "check": "بررسی پاسخ",
-  "reveal": "نمایش پاسخ و توضیح",
-  "correct": "آفرین! درست است.",
-  "incorrect": "هنوز درست نیست؛ تمرین را ادامه دهید.",
-  "progress": "پاسخ‌داده‌شده",
-  "score": "پاسخ‌های درست",
-  "reset": "تمرین دوباره",
-  "explanations": [
-   "برای بیان محل اصلی زندگی یا کشور خود، از عبارت «I'm from» استفاده می‌کنیم.",
-   "در زمان حال ساده، برای he، she و it معمولاً به فعل s اضافه می‌شود؛ study به studies تبدیل می‌شود.",
-   "عبارت «Could you repeat that, please?» راه مؤدبانه‌ای برای درخواست تکرار سخن است."
-  ]
- },
- "ps": {
-  "title": "همدا اوس لږ انګلیسي تمرین کړئ",
-  "intro": "درې لنډې پوښتنې؛ ځواب وټاکئ، دلیل یې زده کړئ او بیا تمرین وکړئ. دا نمونه‌یي تمرین دی، د سویې ارزونه نه ده.",
-  "question": "پوښتنه",
-  "choice": "یو ځواب وټاکئ",
-  "check": "ځواب وګورئ",
-  "reveal": "ځواب او تشریح وګورئ",
-  "correct": "سم ځواب!",
-  "incorrect": "لا سم نه دی؛ تمرین ته دوام ورکړئ.",
-  "progress": "ځواب شوې",
-  "score": "سم ځوابونه",
-  "reset": "بیا تمرین وکړئ",
-  "explanations": [
-   "د خپل هېواد یا اصلي ځای د ښودلو لپاره «I'm from» وکاروئ.",
-   "په ساده اوسني زمان کې له he، she او it سره فعل عموماً s اخلي؛ study په studies بدلېږي.",
-   "«Could you repeat that, please?» له چا څخه د خبرې د بیا ویلو مؤدبانه غوښتنه ده."
-  ]
- }
-};
+// V2_GE_PRACTICE_UI is compiled from content/ui.json.
 const V2_GE_PRACTICE_QUESTIONS=[{"prompt":"Where are you from?","choices":["I'm twenty years old.","I'm from Kabul.","I'm fine, thanks."],"correct":1},{"prompt":"She ___ English every day.","choices":["study","studying","studies"],"correct":2},{"prompt":"You didn't hear someone clearly. What can you say?","choices":["Could you repeat that, please?","I don't have a pen.","See you tomorrow."],"correct":0}];
 function v2GePractice(locale){
  const c=V2_GE_PRACTICE_UI[locale]||V2_GE_PRACTICE_UI.en,e=v2T;
