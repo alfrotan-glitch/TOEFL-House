@@ -99,6 +99,12 @@ const axe=require('axe-core');
    await page.setViewportSize({width:390,height:900});
    for(const slug of bookSlugs){
     await page.goto(origin+prefix+'guides/'+slug+'/',{waitUntil:'load'});
+    const feedback=page.locator('.book-feedback');
+    assert.equal(await feedback.evaluate(e=>e.open),false,`${lang} ${slug} feedback starts closed`);
+    await feedback.locator('summary').focus();await page.keyboard.press('Enter');
+    assert.equal(await feedback.evaluate(e=>e.open),true,`${lang} ${slug} feedback opens by keyboard`);
+    assert.equal(await feedback.locator('p').first().isVisible(),true,`${lang} ${slug} feedback visible`);
+    await feedback.screenshot({path:join(out,`feedback-${slug}-${lang}-390.png`),animations:'disabled'});
     await page.addScriptTag({content:axe.source});
     const violations=await page.locator('main').evaluate(async e=>(await window.axe.run(e,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa']}})).violations.map(v=>({id:v.id,impact:v.impact})));
     assert.deepEqual(violations,[],`${lang} ${slug} accessibility`);
@@ -167,6 +173,11 @@ const axe=require('axe-core');
     const answer=panel.locator('[data-ge-answer]').first();
     await answer.locator('summary').click();
     assert.equal(await answer.evaluate(e=>e.open),true);
+    await fallback.goto(origin+prefix+'guides/active-skills-for-reading/',{waitUntil:'load'});
+    const feedback=fallback.locator('.book-feedback');
+    await feedback.locator('summary').click();
+    assert.equal(await feedback.evaluate(e=>e.open),true,'book feedback without JavaScript');
+    assert.equal(await feedback.locator('p').first().isVisible(),true);
    }
   }finally{await noScript.close();}
   assert.deepEqual(errors,[]);

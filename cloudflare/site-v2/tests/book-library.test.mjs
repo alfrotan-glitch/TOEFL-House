@@ -36,6 +36,8 @@ test('all 12 book guides preserve localized routes, canonical links and preview 
    for(const alternate of ['/','/fa/','/ps/'])assert.ok(html.includes(host+alternate+'guides/'+slug+'/'),path+' alternate');
    assert.ok(html.includes('href="'+prefix+'courses/'+program+'/"'),path+' course');
    assert.ok(html.includes('href="'+prefix+'admissions/?program='+program+'"'),path+' admissions');
+   assert.match(html,/<details class="book-feedback"><summary>[^<]+<\/summary><p>[^<]+<\/p>/,path+' native feedback disclosure');
+   if(slug==='longman-academic-writing')assert.match(html,/<p lang="en" dir="ltr">Daily English practice helps me communicate\./,path+' original writing example isolated LTR');
    const course=await (await worker.fetch(new Request(host+prefix+'courses/'+program+'/'),env)).text();
    assert.match(course,new RegExp('href="'+path+'" aria-label="[^"]+"'),path+' named inbound link');
    const candidate=await worker.fetch(new Request(preview+path),env);

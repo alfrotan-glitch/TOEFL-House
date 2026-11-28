@@ -2,7 +2,7 @@
 
 ## Baseline and changes
 
-Compared with commit `4e0add20994557d9d2ea334cd94eff17f78c40b3`. This is a local candidate, not a production release. The earlier build SHA-256 was `dc62088914cf0bdc8498e07b7ed00bf358ba5fe51b0ddb31ed53ceaab0951078`; the current build SHA-256 is `4e2f492b0acd11549d099df38e4361136a3679b045fa80451713c6ad9aecc2fa`. Build is deterministic and CSS/JS URLs continue to use a content revision.
+These measurements describe commit `da86a0e` compared with `4e0add20994557d9d2ea334cd94eff17f78c40b3`; subsequent changes require a fresh build and measurements. This is a local candidate, not a production release. The earlier build SHA-256 was `dc62088914cf0bdc8498e07b7ed00bf358ba5fe51b0ddb31ed53ceaab0951078`; the current build SHA-256 is `4e2f492b0acd11549d099df38e4361136a3679b045fa80451713c6ad9aecc2fa`. Build is deterministic and CSS/JS URLs continue to use a content revision.
 
 | Measure, bytes | Before | Candidate | Change |
 |---|---:|---:|---:|
