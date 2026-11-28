@@ -49,6 +49,7 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
   const prefix=locale+'.';
   const expectedLanguage={en:['en','ltr'],fa:['fa-AF','rtl'],ps:['ps-AF','rtl']}[locale];
   if(home.copy[locale].lang!==expectedLanguage[0]||home.copy[locale].dir!==expectedLanguage[1])throw Error('Invalid language or direction: '+locale);
+  requireText(home.copy[locale].seoTitle,prefix+'home SEO title');
   sameKeys(home.courseCards[locale],contract.courses,prefix+'course cards');
   for(const [id,card] of Object.entries(home.courseCards[locale])){
    sameKeys(card,['name','fallbackDuration','shortDuration'],prefix+'course card '+id);
@@ -87,6 +88,7 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
    [home.goals[locale].items,2,'goals'],[home.habits[locale].habits,3,'habits'],[home.habits[locale].links,3,'habit links'],[ui.detail[locale].faqs,2,'admissions FAQs']
   ])tuples(value,size,prefix+path);
   for(const [id,page] of Object.entries(special.courses[locale])){
+   requireText(page.durationDisplay,prefix+id+'.durationDisplay');
    for(const [field,size] of [['facts',2],['outcomes',2],['method',3],['faq',2]])tuples(page[field],size,prefix+id+'.'+field);
   }
   sameKeys(guides.data[locale],contract.articles,prefix+'articles');

@@ -97,6 +97,10 @@ test('indexed content and routes fail closed even when all locales drift togethe
  assert.throws(()=>compile(general,academic,emptyTopic),/Missing required text.*title/);
  const whitespaceProgram=structuredClone(guides);for(const l of locales)whitespaceProgram.data[l]['english-courses-kabul'].program='  ';
  assert.throws(()=>compile(general,academic,special,whitespaceProgram),/Missing required text.*program/);
+ const noHomeTitle=structuredClone(home);for(const l of locales)delete noHomeTitle.copy[l].seoTitle;
+ assert.throws(()=>compile(general,academic,special,guides,noHomeTitle),/Missing required text.*home SEO title/);
+ const noDuration=structuredClone(special);for(const l of locales)delete noDuration.courses[l].toefl.durationDisplay;
+ assert.throws(()=>compile(general,academic,noDuration),/Missing required text.*durationDisplay/);
  // A general-interest article intentionally has no single course association.
  assert.equal(guides.data.en['english-courses-kabul'].program,'');assert.doesNotThrow(()=>compile());
 });

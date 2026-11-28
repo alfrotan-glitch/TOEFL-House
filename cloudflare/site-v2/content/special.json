@@ -225,7 +225,8 @@
         "ctaTitle": "Your next confident conversation begins with practice.",
         "ctaText": "Request a free placement assessment and confirm the next Special Speaking class, timetable and book arrangements with the admissions team.",
         "meta": "Special Speaking in Kabul | 2 Months, Master Speaking, AFN 2,000 | The TOEFL House",
-        "description": "Two-month Special Speaking semester at The TOEFL House, Kabul. Master Speaking and grammar-in-conversation materials. Full semester fee AFN 2,000; placement assessment free."
+        "description": "Two-month Special Speaking semester at The TOEFL House, Kabul. Master Speaking and grammar-in-conversation materials. Full semester fee AFN 2,000; placement assessment free.",
+        "durationDisplay": "2 months"
       },
       "toefl": {
         "title": "TOEFL iBT Preparation",
@@ -380,7 +381,8 @@
         "ctaTitle": "Prepare for the updated TOEFL iBT with a clear plan.",
         "ctaText": "Ask about the four-month TOEFL Preparation program, free placement assessment, currently assigned study materials and available class times.",
         "meta": "TOEFL iBT Preparation in Kabul | 2026 Format, 4 Months | The TOEFL House",
-        "description": "Four-month TOEFL iBT preparation at The TOEFL House for updated 2026 Reading, Listening, Writing and Speaking tasks and 1–6 scoring. Free placement assessment."
+        "description": "Four-month TOEFL iBT preparation at The TOEFL House for updated 2026 Reading, Listening, Writing and Speaking tasks and 1–6 scoring. Free placement assessment.",
+        "durationDisplay": "4 months"
       }
     },
     "fa": {
@@ -546,7 +548,8 @@
         "ctaTitle": "برای مکالمهٔ بهتر، از تمرین هدفمند آغاز کنید.",
         "ctaText": "تعیین سطح رایگان انجام دهید و دربارهٔ شروع صنف جدید، تقسیم اوقات و کتاب‌ها با پذیرش تافل هوس تماس بگیرید.",
         "meta": "اسپیشل اسپیکینگ در کابل | ۲ ماه، کتاب Master Speaking، فیس ۲٬۰۰۰ افغانی | تافل هوس",
-        "description": "برنامهٔ دوماههٔ Special Speaking تافل هوس با کتاب اختصاصی Master Speaking و گرامر در مکالمه؛ فیس تمام سمستر ۲٬۰۰۰ افغانی و تعیین سطح رایگان."
+        "description": "برنامهٔ دوماههٔ Special Speaking تافل هوس با کتاب اختصاصی Master Speaking و گرامر در مکالمه؛ فیس تمام سمستر ۲٬۰۰۰ افغانی و تعیین سطح رایگان.",
+        "durationDisplay": "۲ ماه"
       },
       "toefl": {
         "title": "آمادگی امتحان TOEFL iBT",
@@ -700,7 +703,8 @@
         "ctaTitle": "با برنامهٔ روشن برای TOEFL iBT جدید آماده شوید.",
         "ctaText": "دربارهٔ برنامهٔ چهارماهه، تعیین سطح رایگان، منابع درسی و تقسیم اوقات صنف‌های تافل با پذیرش تماس بگیرید.",
         "meta": "آمادگی TOEFL iBT در کابل | برنامهٔ چهارماهه و ساختار جدید ۲۰۲۶ | تافل هوس",
-        "description": "برنامهٔ چهارماههٔ آمادگی TOEFL iBT در تافل هوس با تمرکز بر سوالات جدید ۲۰۲۶، چهار مهارت و مقیاس نمره‌دهی ۱ تا ۶. تعیین سطح رایگان."
+        "description": "برنامهٔ چهارماههٔ آمادگی TOEFL iBT در تافل هوس با تمرکز بر سوالات جدید ۲۰۲۶، چهار مهارت و مقیاس نمره‌دهی ۱ تا ۶. تعیین سطح رایگان.",
+        "durationDisplay": "۴ ماه"
       }
     },
     "ps": {
@@ -866,7 +870,8 @@
         "ctaTitle": "د غوره خبرو لپاره له هدفمند تمرین څخه پیل وکړئ.",
         "ctaText": "د سویې وړیا ارزونه وکړئ او د نوي ټولګي، مهالوېش او کتابونو په اړه له نوم‌لیکنې څانګې معلومات واخلئ.",
         "meta": "Special Speaking په کابل کې | دوه میاشتې، Master Speaking، ۲٬۰۰۰ افغانۍ | تافل هوس",
-        "description": "د تافل هوس دوه میاشتنی Special Speaking پروګرام، Master Speaking او د خبرو ګرامر کتابونه، د بشپړ سمستر فیس ۲٬۰۰۰ افغانۍ او وړیا سویه ارزونه."
+        "description": "د تافل هوس دوه میاشتنی Special Speaking پروګرام، Master Speaking او د خبرو ګرامر کتابونه، د بشپړ سمستر فیس ۲٬۰۰۰ افغانۍ او وړیا سویه ارزونه.",
+        "durationDisplay": "۲ میاشتې"
       },
       "toefl": {
         "title": "د TOEFL iBT ازموینې ته چمتووالی",
@@ -1020,7 +1025,8 @@
         "ctaTitle": "د نوې TOEFL iBT ازموینې لپاره منظم چمتووالی.",
         "ctaText": "د څلور میاشتني پروګرام، وړیا ارزونې، درسي سرچینو او د ټولګي د وخت په اړه معلومات واخلئ.",
         "meta": "TOEFL iBT په کابل کې | څلور میاشتنی پروګرام او د ۲۰۲۶ بڼه | تافل هوس",
-        "description": "د تافل هوس څلور میاشتنی TOEFL iBT چمتووالی د ۲۰۲۶ نوې پوښتنې، څلور مهارتونه، د ۱ تر ۶ نومرو سیستم او د سویې وړیا ارزونه."
+        "description": "د تافل هوس څلور میاشتنی TOEFL iBT چمتووالی د ۲۰۲۶ نوې پوښتنې، څلور مهارتونه، د ۱ تر ۶ نومرو سیستم او د سویې وړیا ارزونه.",
+        "durationDisplay": "۴ میاشتې"
       }
     }
   }

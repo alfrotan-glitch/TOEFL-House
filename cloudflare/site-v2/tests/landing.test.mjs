@@ -1284,3 +1284,20 @@ test('General English stage fees and durations remain attached to the correct st
   }
  }
 });
+
+test('home SEO title and specialized course durations retain their existing locale associations',async()=>{
+ const cases=[
+  ['/','The TOEFL House | English Classes &amp; TOEFL Preparation in Kabul','2 months','4 months'],
+  ['/fa/','تافل هوس | کورس زبان انگلیسی و آمادگی تافل در کابل','۲ ماه','۴ ماه'],
+  ['/ps/','The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه','۲ میاشتې','۴ میاشتې']
+ ];
+ for(const [prefix,title,speaking,toefl] of cases){
+  const get=async path=>{const response=await worker.fetch(new Request('https://toeflhouse.pages.dev'+path),{});assert.equal(response.status,200,path);return response.text();};
+  const home=await get(prefix);assert.ok(home.includes('<title>'+title+'</title>'),prefix+' SEO title');
+  for(const [id,duration] of [['special-speaking',speaking],['toefl-preparation',toefl]]){
+   const html=await get(prefix+'courses/'+id+'/');
+   const card=html.match(/<div class="eap-fee-card eap-fee-featured">([\s\S]*?)<\/div>/)?.[1];
+   assert.ok(card?.includes('<strong>'+duration+'</strong>'),prefix+id+' duration');
+  }
+ }
+});

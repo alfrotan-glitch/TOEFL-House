@@ -228,7 +228,7 @@ function v2LearningHabits(locale){
 }
 function v2FontPreload(locale){return locale==="en"?"":'<link rel="preload" href="'+DARI_FONT_PATH+'" as="font" type="font/woff2" crossorigin>';}
 function v2Page(locale,content){
- const c=V2_COPY[locale],prefix=v2Prefix(locale),title=locale==="en"?"The TOEFL House | English Classes & TOEFL Preparation in Kabul":locale==="fa"?"تافل هوس | کورس زبان انگلیسی و آمادگی تافل در کابل":"The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه";
+ const c=V2_COPY[locale],prefix=v2Prefix(locale),title=c.seoTitle;
  const desc=c.subtitle,canonical=V2_ORIGIN+prefix;
  const language="<link rel=\"alternate\" hreflang=\"en\" href=\""+V2_ORIGIN+"/\"><link rel=\"alternate\" hreflang=\"fa-AF\" href=\""+V2_ORIGIN+"/fa/\"><link rel=\"alternate\" hreflang=\"ps-AF\" href=\""+V2_ORIGIN+"/ps/\"><link rel=\"alternate\" hreflang=\"x-default\" href=\""+V2_ORIGIN+"/\">";
  const ld=JSON.stringify([{"@context":"https://schema.org","@type":"EducationalOrganization","name":"The TOEFL House","alternateName":"تافل هوس","url":V2_ORIGIN+"/","description":c.subtitle,"address":{"@type":"PostalAddress","streetAddress":"Opposite Jalili Center, Maghaza Station, Dasht-e-Barchi","addressLocality":"Kabul","addressCountry":"AF"},"telephone":"+93745651844","availableLanguage":["en","fa-AF","ps-AF"]},v2CourseListSchema(locale,content)]).replace(/</g,"\\u003c");

@@ -25,7 +25,7 @@ function v2CoursePage(locale,cms,id){
  if(!program)return null;
  const ge=id==="general-english"?V2_GENERAL_ENGLISH[locale]:null;
  const title=v2String(ge?ge.heroTitle:locale==="en"?(program.title||id):(V2_COURSE_IDS.includes(id)?V2_HOME_COURSE_CARDS[locale][id].name:(program.title||id)))||id;
- const duration=ge?ge.heroDuration:id==="toefl-preparation"?(locale==="en"?"4 months":locale==="fa"?"۴ ماه":"څلور میاشتې"):(program.duration||"");
+ const duration=ge?ge.heroDuration:(program.duration||"");
  const highlights=ge?ge.heroSkills:Array.isArray(program.highlights)?program.highlights.slice(0,6):[];
  const route=prefix+"courses/"+id+"/";
  const summary=ge?ge.heroIntro:(program.summary||"");
