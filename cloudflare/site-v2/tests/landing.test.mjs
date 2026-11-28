@@ -1048,8 +1048,8 @@ test("Signature editorial hero preserves accessible actions, true photography an
  const css=await cssResponse.text();
  assert.match(css,/\.hero\{position:relative;overflow:hidden;background:#fff;color:var\(--ink\)\}/);
  assert.match(css,/\.button-primary\{background:var\(--red\);color:#fff\}/);
- assert.match(css,/\.hero a:focus-visible\{outline-color:var\(--red\)\}/);
- assert.match(css,/\.photo-frame\{[^}]*border-radius:16px/);
+ assert.match(css,/\.hero a:focus-visible\{outline-color:#fff\}/);
+ assert.match(css,/\.hero-grid\{[^}]*background:var\(--red-dark\);border-radius:18px/);
  assert.match(css,/\.course-card\{border:1px solid var\(--line\);border-radius:14px/);
  assert.match(css,/\.button-primary:active\{transform:translateY\(2px\)/);
  assert.doesNotMatch(css,/animation:hero-caption/);
@@ -1074,7 +1074,7 @@ test("Mobile language style must not terminate the responsive media query premat
 
 test("Signature hero keeps compact mobile spacing and fluid trilingual typography",async()=>{
  const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
- assert.match(css,/\.hero-grid\{padding-block:28px 30px;gap:20px\}/);
+ assert.match(css,/\.hero-grid\{display:flex;flex-direction:column;gap:0;margin-block:16px 20px\}/);
  assert.match(css,/html\[dir=rtl\] \.hero h1\{font-size:clamp\(30px,8\.7vw,35px\)\}/);
  assert.match(css,/\.hero-actions \.button\{font-size:12px;min-height:52px/);
 });
@@ -1156,5 +1156,19 @@ test("Editorial homepage exposes three localized course paths immediately after 
   assert.equal((paths.match(/<a href=/g)||[]).length,3);
   for(const id of ["general-english","academic-english","toefl-preparation"])assert.ok(paths.includes('href="'+prefix+'courses/'+id+'/"'),prefix+id);
   assert.ok(html.indexOf('class="shell home-paths"')>html.indexOf('class="hero"'));
+ }
+});
+
+
+test("Homepage prioritizes course discovery over campaign and shares guide card styling",async()=>{
+ const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
+ assert.match(css,/\.growth-card-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+ assert.match(css,/\.growth-card\{display:flex;flex-direction:column/);
+ assert.match(css,/\.hero-actions \.button-primary\{background:#fff;color:var\(--red-dark\)/);
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env())).text();
+  const program=html.indexOf('id="programs"'),campaign=html.indexOf('id="semester-qaws-1405"');
+  assert.ok(program>0&&campaign>program,prefix+" course discovery should precede campaign");
+  assert.ok(html.includes('class="growth-card-grid"'),prefix);
  }
 });
