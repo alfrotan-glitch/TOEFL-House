@@ -1186,3 +1186,28 @@ test("Signature course entry cards identify three academic pathways without modi
   assert.equal((nav.match(/class="home-path-label"/g)||[]).length,3);
  }
 });
+
+
+test("Mini-practice is original, localized, accessible without JavaScript and scoped to General English",async()=>{
+ for(const [prefix,title] of [["/","Try a little English right now"],["/fa/","همین حالا کمی انگلیسی تمرین کنید"],["/ps/","همدا اوس لږ انګلیسي تمرین کړئ"]]){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix+"courses/general-english/"),env());
+  assert.equal(res.status,200);
+  const html=await res.text();
+  assert.equal((html.match(/id="ge-mini-practice"/g)||[]).length,1);
+  assert.ok(html.includes(title),prefix);
+  assert.equal((html.match(/data-ge-question data-correct=/g)||[]).length,3);
+  assert.equal((html.match(/<details data-ge-answer>/g)||[]).length,3);
+  assert.equal((html.match(/type="radio" name="ge-practice-/g)||[]).length,9);
+  assert.equal((html.match(/data-ge-check disabled/g)||[]).length,3);
+  assert.match(html,/data-ge-result hidden/);
+  assert.match(html,/Could you repeat that, please/);
+  const home=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());
+  assert.doesNotMatch(await home.text(),/id="ge-mini-practice"/);
+ }
+ const client=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.js"),env());
+ const source=await client.text();
+ const code=source.slice(source.indexOf("/* Mini-practice:"),source.indexOf("/* Accessible, click-to-play"));
+ assert.match(code,/new Map\(\)/);
+ assert.match(code,/outcomes\.clear\(\)/);
+ assert.doesNotMatch(code,/fetch\(|localStorage|sessionStorage|sendBeacon|XMLHttpRequest/);
+});

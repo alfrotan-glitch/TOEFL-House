@@ -67,14 +67,44 @@ jobs:
           test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 400000
           # Readable source includes goal-based navigation and is compacted before delivery.
           # CI checkout measures 74,206 bytes; the deployed minified CSS is 73,147 bytes.
-          # Keep a 75 KB source ceiling and preserve the 400 KB Worker / 10 KB JS ceilings.
-          test $(wc -c < cloudflare/site-v2/site.css) -lt 75000
+          # Allow 76 KB CSS source for accessible practice controls; retain 400 KB Worker / 10 KB JS ceilings.
+          test $(wc -c < cloudflare/site-v2/site.css) -lt 76000
           test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
       - uses: actions/upload-artifact@v4
         with:
           name: toefl-v2-release-worker
           path: cloudflare/site-v2/dist/_worker.js
           retention-days: 14
+
+  candidate-browser:
+    name: Browser-check compiled candidate (isolated fixtures)
+    needs: build-and-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: toefl-v2-release-worker
+          path: cloudflare/site-v2/dist
+      - name: Install browser test dependencies
+        run: npm install --prefix /tmp/toefl-candidate --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: Test downloaded Worker with synthetic CMS and blocked external network
+        env:
+          NODE_PATH: /tmp/toefl-candidate/node_modules
+          CHROME_PATH: /usr/bin/google-chrome
+          TOEFL_SCREENSHOTS: ${{ runner.temp }}/toefl-candidate-screenshots
+        run: node cloudflare/site-v2/candidate-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-browser-screenshots
+          path: ${{ runner.temp }}/toefl-candidate-screenshots/*.png
+          retention-days: 7
+          if-no-files-found: ignore
 
   production-site:
     name: Verify live content and security

@@ -32,8 +32,8 @@ jobs:
           echo "Worker bytes: $(wc -c < cloudflare/site-v2/dist/_worker.js); CSS source bytes: $(wc -c < cloudflare/site-v2/site.css); JS source bytes: $(wc -c < cloudflare/site-v2/site.js)"
           test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 400000
           # CI checkout measures 74,206 bytes; the deployed minified CSS is 73,147 bytes.
-          # Keep a 75 KB source ceiling and preserve the 400 KB Worker / 10 KB JS ceilings.
-          test $(wc -c < cloudflare/site-v2/site.css) -lt 75000
+          # Allow 76 KB CSS source for accessible practice controls; retain 400 KB Worker / 10 KB JS ceilings.
+          test $(wc -c < cloudflare/site-v2/site.css) -lt 76000
           test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
       - uses: actions/upload-artifact@v4
         with:
