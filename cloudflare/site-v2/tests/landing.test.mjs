@@ -629,7 +629,8 @@ test("Program tiles expose a full tap target, and EAP level order is stable in R
  const cssResponse=await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env());
  assert.equal(cssResponse.status,200);
  const css=await cssResponse.text();
- assert.ok(css.includes('.course-card{position:relative}.course-bottom a::after{content:"";position:absolute;inset:0}'));
+ assert.match(css,/\.course-card\{[^}]*position:relative(?:;|\})/);
+ assert.ok(css.includes('.course-bottom a::after{content:"";position:absolute;inset:0}'));
  for(const root of ["/","/fa/","/ps/"]){
   const response=await worker.fetch(new Request("https://toeflhouse.pages.dev"+root+"courses/academic-english/"),env());
   assert.equal(response.status,200);
@@ -1180,5 +1181,14 @@ test("Signature course entry cards identify three academic pathways without modi
   const nav=html.match(/<div class="shell home-paths">([\s\S]*?)<\/nav><\/div>/)?.[1];assert.ok(nav,prefix);
   for(const code of ["GENERAL ENGLISH","EAP","TOEFL iBT"])assert.ok(nav.includes('lang="en" dir="ltr">'+code+'</small>'),prefix+code);
   assert.equal((nav.match(/class="home-path-label"/g)||[]).length,3);
+ }
+});
+
+
+test("Campus design showcase uses full responsive owner-supplied images only when both assets exist",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const missing=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());assert.doesNotMatch(await missing.text(),/id="campus-design-title"/);
+  const withAssets=env();const requested=[];withAssets.ASSETS={async fetch(req){requested.push(new URL(req.url).pathname);assert.equal(req.method,"HEAD");return new Response(null,{status:200,headers:{"Content-Type":"image/webp"}});}};
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),withAssets);const html=await res.text();assert.match(html,/id="campus-design-title"/);assert.match(html,/srcset="\/assets\/campus\/toefl-campus-640.webp 640w, \/assets\/campus\/toefl-campus-1536.webp 1536w"/);assert.match(html,/width="1536" height="864" loading="lazy"/);assert.equal(requested.length,2);
  }
 });
