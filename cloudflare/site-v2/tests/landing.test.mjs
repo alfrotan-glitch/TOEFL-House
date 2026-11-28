@@ -1182,3 +1182,12 @@ test("Signature course entry cards identify three academic pathways without modi
   assert.equal((nav.match(/class="home-path-label"/g)||[]).length,3);
  }
 });
+
+
+test("Campus design showcase uses full responsive owner-supplied images only when both assets exist",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const missing=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());assert.doesNotMatch(await missing.text(),/id="campus-design-title"/);
+  const withAssets=env();const requested=[];withAssets.ASSETS={async fetch(req){requested.push(new URL(req.url).pathname);assert.equal(req.method,"HEAD");return new Response(null,{status:200,headers:{"Content-Type":"image/webp"}});}};
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),withAssets);const html=await res.text();assert.match(html,/id="campus-design-title"/);assert.match(html,/srcset="\/assets\/campus\/toefl-campus-640.webp 640w, \/assets\/campus\/toefl-campus-1536.webp 1536w"/);assert.match(html,/width="1536" height="864" loading="lazy"/);assert.equal(requested.length,2);
+ }
+});

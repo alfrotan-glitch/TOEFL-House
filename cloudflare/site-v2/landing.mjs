@@ -493,7 +493,23 @@ function v2LearningHabits(locale){
  const c=V2_LEARNING_HABITS[locale]||V2_LEARNING_HABITS.en,p=v2Prefix(locale);
  return '<section class="journey-section section" id="learning-habits" aria-labelledby="learning-habits-title"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.label)+'</p><h2 id="learning-habits-title">'+v2T(c.title)+'</h2></div><p class="section-intro">'+v2T(c.intro)+'</p></div><div class="journey-grid">'+c.habits.map(([n,h,t])=>'<article class="journey-step"><span class="step-no" aria-hidden="true">'+v2T(n)+'</span><div class="step-line"></div><h3>'+v2T(h)+'</h3><p>'+v2T(t)+'</p></article>').join("")+'</div><div class="section-head"><div><h3>'+v2T(c.resourceTitle)+'</h3></div><p class="section-intro">'+v2T(c.resourceIntro)+'</p></div><div class="growth-card-grid">'+c.links.map(([slug,h,t])=>'<a class="growth-card" href="'+p+'guides/'+slug+'/"><h4>'+v2T(h)+'</h4><p>'+v2T(t)+'</p><span class="growth-arrow">'+v2T(c.open)+' <span aria-hidden="true">↗</span></span></a>').join("")+'</div><a class="text-link" href="'+p+'guides/">'+v2T(c.all)+' <span aria-hidden="true">↗</span></a></div></section>';
 }
-function v2Page(locale,content){
+const V2_CAMPUS_DESIGN={
+ en:["Our learning environment","Campus design showcase","An architectural visualization of the proposed campus appearance; not a photograph of the current building.","Proposed red-and-white campus facade and landscaped courtyard"],
+ fa:["محیط آموزشی ما","نمای پیشنهادی ساختمان تافل هوس","تصویر طرح پیشنهادی نمای ساختمان و محوطه؛ عکس وضعیت فعلی ساختمان نیست.","نمای پیشنهادی سرخ و سفید ساختمان تافل هوس و محوطهٔ سبز"],
+ ps:["زموږ د زده‌کړې چاپېریال","د تافل هوس د ودانۍ وړاندیز شوې بڼه","د ودانۍ او انګړ وړاندیز شوې طرحه؛ د اوسني حالت عکس نه دی.","د تافل هوس د ودانۍ وړاندیز شوې سره او سپینه بڼه او شین انګړ"]
+};
+async function v2CampusDesignAvailable(request,env){
+ if(!env?.ASSETS)return false;
+ try{
+  const files=await Promise.all([640,1536].map(width=>env.ASSETS.fetch(new Request(new URL("/assets/campus/toefl-campus-"+width+".webp",request.url),{method:"HEAD"}))));
+  return files.every(r=>r.ok&&/^image\/webp(?:;|$)/i.test(r.headers.get("content-type")||""));
+ }catch{return false;}
+}
+function v2CampusDesign(locale){
+ const [label,title,caption,alt]=V2_CAMPUS_DESIGN[locale];
+ return '<section class="section campus-showcase" aria-labelledby="campus-design-title"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(label)+'</p><h2 id="campus-design-title">'+v2T(title)+'</h2></div></div><figure><img src="/assets/campus/toefl-campus-1536.webp" srcset="/assets/campus/toefl-campus-640.webp 640w, /assets/campus/toefl-campus-1536.webp 1536w" sizes="(max-width:760px) calc(100vw - 36px), 1180px" width="1536" height="864" loading="lazy" decoding="async" alt="'+v2T(alt)+'"><figcaption>'+v2T(caption)+'</figcaption></figure></div></section>';
+}
+function v2Page(locale,content,campusDesign=false){
  const c=V2_COPY[locale],prefix=v2Prefix(locale),title=locale==="en"?"The TOEFL House | English Classes & TOEFL Preparation in Kabul":locale==="fa"?"تافل هوس | کورس زبان انگلیسی و آمادگی تافل در کابل":"The TOEFL House | په کابل کې انګلیسي او TOEFL زده‌کړه";
  const desc=c.subtitle,canonical=V2_ORIGIN+prefix;
  const language="<link rel=\"alternate\" hreflang=\"en\" href=\""+V2_ORIGIN+"/\"><link rel=\"alternate\" hreflang=\"fa-AF\" href=\""+V2_ORIGIN+"/fa/\"><link rel=\"alternate\" hreflang=\"ps-AF\" href=\""+V2_ORIGIN+"/ps/\"><link rel=\"alternate\" hreflang=\"x-default\" href=\""+V2_ORIGIN+"/\">";
@@ -504,6 +520,7 @@ function v2Page(locale,content){
  +v2HomeQuickPaths(locale)
  +v2Programs(c,content,locale)
  +v2Stats(c,content,locale)
+ +(campusDesign?v2CampusDesign(locale):'')
  +v2SemesterCampaign(locale)
  +v2LearningHabits(locale)
  +v2Schedule(c,content,locale)
@@ -517,7 +534,8 @@ async function v2Home(request,env,locale){
  if(!["GET","HEAD"].includes(request.method))return new Response("Method not allowed",{status:405,headers:{"Allow":"GET, HEAD"}});
  try{
   const data=await v2Cms(env);
-  const html=v2DariEditorial(v2Page(locale,data),locale),preview=new URL(request.url).hostname!=="toeflhouse.pages.dev";
+  const campusDesign=await v2CampusDesignAvailable(request,env);
+  const html=v2DariEditorial(v2Page(locale,data,campusDesign),locale),preview=new URL(request.url).hostname!=="toeflhouse.pages.dev";
   const headers=new Headers({"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-cache, no-store, must-revalidate","X-Content-Type-Options":"nosniff","Referrer-Policy":"strict-origin-when-cross-origin","X-Frame-Options":"DENY","Permissions-Policy":"camera=(), microphone=(), geolocation=()","Content-Language":V2_COPY[locale].lang,"Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self' https://d2ol7oe51mr4n9.cloudfront.net; connect-src 'self' https://toefl-house-conversions.alfrotan2.workers.dev https://static.cloudflareinsights.com https://cloudflareinsights.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"});
   if(preview)headers.set("X-Robots-Tag","noindex, nofollow, noarchive");
   return new Response(request.method==="HEAD"?null:html,{status:200,headers});
