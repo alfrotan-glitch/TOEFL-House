@@ -3,11 +3,14 @@
  * Reconstruct only the documented published public payload from the EXISTING
  * Pages D1 binding. This route never reads drafts, sessions, staff or secrets.
  * All authenticated editor endpoints remain routed to their original service.
+ * The historical compatibility payload preserves unrecognized nested keys: the
+ * denylist below is not a confidentiality boundary. Release requires verified
+ * public-only source records and an owner-reviewed API schema/projection.
  */
 async function v2PublicContent(request,env){
  if(!["GET","HEAD"].includes(request.method))return null;
  const headers=new Headers({"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Robots-Tag":"noindex, nofollow, noarchive"});
- if(!env?.CMS_DB)return new Response(JSON.stringify({error:"Public content temporarily unavailable"}),{status:503,headers});
+ if(!env?.CMS_DB)return new Response(request.method==="HEAD"?null:JSON.stringify({error:"Public content temporarily unavailable"}),{status:503,headers});
  try{
   const [main,ps]=await Promise.all([
    env.CMS_DB.prepare("SELECT body,revision,updated_at FROM content WHERE id='main'").first(),
@@ -15,10 +18,10 @@ async function v2PublicContent(request,env){
   ]);
   if(!main?.body||!ps?.body||!Number.isInteger(main.revision)||!Number.isInteger(ps.revision))throw Error("Missing published CMS revision");
   const published=JSON.parse(main.body),pashto=JSON.parse(ps.body);
-  if(!Array.isArray(published?.locales?.en?.programs)||!Array.isArray(published?.locales?.fa?.programs)||!Array.isArray(pashto?.programs))throw Error("Invalid published content structure");
+  if(!v2PublishedProgramsValid(published,pashto))throw Error("Invalid published content structure");
   for(const locale of [published.locales.en,published.locales.fa,pashto])v2OnlineProgramCopy(locale);
   const forbidden=new Set(["password","password_hash","password_salt","totp_secret","token_hash",
-   "session_token","session_cookie","private_key","api_key","onboarding_invites",
+   "session_token","session_cookie","private_key","secret_key","admin_secret","api_key","onboarding_invites",
    "staff_users","login_attempts","drafts","cms_draft_recovery_archive","authorization","editor"]);
   function publicOnly(value){
    if(Array.isArray(value))return value.map(publicOnly);

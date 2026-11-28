@@ -1,0 +1,104 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import worker from '../dist/_worker.js';
+
+const ids=['general-english','academic-english','toefl-preparation','special-speaking','professional-writing','teacher-training','online-individual-zoom'];
+const programs=()=>ids.map(id=>({id,title:'Published '+id,summary:'Published summary',duration:'2 months'}));
+const fixtures=()=>({main:{locales:{en:{programs:programs()},fa:{programs:programs()}}},ps:{programs:programs()}});
+const root='https://toeflhouse.pages.dev';
+function binding(main,ps){
+ const queries=[];
+ return {queries,env:{CMS_DB:{prepare(sql){
+  assert.match(sql,/^SELECT body,revision(?:,updated_at)? FROM (?:content|pashto_content) WHERE id='main'$/);
+  queries.push(sql);
+  return {async first(){return {body:JSON.stringify(sql.includes('pashto_content')?ps:main),revision:1};}};
+ }}}};
+}
+async function request(path,env,method='GET'){return worker.fetch(new Request(root+path,{method}),env);}
+async function withoutExpectedErrors(fn){const original=console.error;console.error=()=>{};try{return await fn();}finally{console.error=original;}}
+
+test('invalid published program collections fall back on pages and fail closed on the public API',async()=>withoutExpectedErrors(async()=>{
+ const sitemap=await (await request('/sitemap.xml',{})).text();
+ const paths=[...sitemap.matchAll(/<loc>https:\/\/toeflhouse\.pages\.dev([^<]+)<\/loc>/g)].map(x=>x[1]);
+ assert.equal(paths.length,51);
+ const cases=[
+  ({main})=>{main.locales.en.programs={};},
+  ({main})=>{main.locales.fa.programs[0]=null;},
+  ({ps})=>{ps.programs[0]={title:'No id'};},
+  ({ps})=>{ps.programs[1].id=ps.programs[0].id;}
+ ];
+ for(const damage of cases){
+  const data=fixtures();damage(data);const before=JSON.stringify(data),{env,queries}=binding(data.main,data.ps);
+  for(const path of paths){const r=await request(path,env);assert.equal(r.status,200,path);}
+  const api=await request('/api/content',env);assert.equal(api.status,503);assert.deepEqual(await api.json(),{error:'Public content temporarily unavailable'});
+  const head=await request('/api/content',env,'HEAD');assert.equal(head.status,503);assert.equal(await head.text(),'');
+  assert.ok(queries.length>0);assert.equal(JSON.stringify(data),before,'published input was not modified');
+ }
+}));
+
+test('valid editorial omission is preserved and does not trigger fallback',async()=>withoutExpectedErrors(async()=>{
+ const {main,ps}=fixtures();for(const locale of [main.locales.en,main.locales.fa,ps])locale.programs=locale.programs.filter(p=>p.id!=='online-individual-zoom');
+ const {env}=binding(main,ps);
+ for(const prefix of ['/','/fa/','/ps/']){
+  const home=await request(prefix,env);assert.equal(home.status,200);assert.match(await home.text(),/Published summary/);
+  const html=await (await request(prefix+'admissions/',env)).text();assert.doesNotMatch(html,/<option value="online-individual-zoom"/);
+  assert.equal((await request(prefix+'courses/online-individual-zoom/',env)).status,404);
+ }
+ // The API's existing seven-program gate remains deliberately stricter.
+ assert.equal((await request('/api/content',env)).status,503);
+}));
+
+test('malformed optional FAQ, stats and schedule entries cannot hide healthy published data',async()=>{
+ const {main,ps}=fixtures();
+ main.locales.en.faq={items:[null,{q:'Valid published question?',a:'Valid published answer'}, {q:{toString:null},a:'bad'}]};
+ main.locales.fa.faq={items:'not an array'};
+ ps.faq=[null,{question:'Valid Pashto question?',answer:'Valid Pashto answer'}];
+ ps.statistics=[null,{value:'PUBLISHED-STAT',label:'Published label'}];
+ main.timetable=[null,{timeEn:{toString:null}},{timeEn:'Men 8:00 AM – 9:00 AM · Women 9:00 AM – 10:00 AM',timeFa:'Published shift',open:true}];
+ main.locales.en.programs.find(p=>p.id==='professional-writing').title={toString:null};
+ const {env}=binding(main,ps),before=JSON.stringify({main,ps});
+ const en=await request('/',env);assert.equal(en.status,200);const enHtml=await en.text();
+ assert.match(enHtml,/Valid published question\?/);assert.match(enHtml,/Valid published answer/);assert.match(enHtml,/8:00 AM – 9:00 AM/);
+ const fa=await request('/fa/',env);assert.equal(fa.status,200);assert.match(await fa.text(),/Published summary/);
+ const pashto=await request('/ps/',env);assert.equal(pashto.status,200);const psHtml=await pashto.text();assert.match(psHtml,/PUBLISHED-STAT/);assert.match(psHtml,/Valid Pashto question/);
+ assert.equal((await request('/courses/professional-writing/',env)).status,200);
+ assert.equal((await request('/api/content',env)).status,200);
+ assert.equal(JSON.stringify({main,ps}),before,'published input was not modified');
+});
+
+test('API HEAD for a missing binding has no response body',async()=>{
+ const head=await request('/api/content',{},'HEAD');assert.equal(head.status,503);assert.equal(await head.text(),'');
+ const get=await request('/api/content',{});assert.equal(get.status,503);assert.deepEqual(await get.json(),{error:'Public content temporarily unavailable'});
+});
+
+test('known protected keys are removed recursively, but this is not a public schema allowlist',async()=>{
+ const {main,ps}=fixtures();main.locales.en.contact={safe:'Public address',SeCrEt_KeY:'do-not-publish-one',nested:{admin_secret:'do-not-publish-two'}};
+ const {env}=binding(main,ps),response=await request('/api/content',env);assert.equal(response.status,200);
+ const text=await response.text();assert.match(text,/Public address/);assert.doesNotMatch(text,/do-not-publish-one|do-not-publish-two|secret_key|admin_secret/i);
+});
+
+test('untrusted CMS strings remain text in HTML, attributes and JSON-LD',async()=>{
+ const {main,ps}=fixtures(),attack='</script><img src=x onerror=alert(1)>';
+ main.locales.en.programs.find(p=>p.id==='professional-writing').title=attack;
+ main.locales.en.faq=[{q:attack,a:attack}];
+ main.timetable=[{timeEn:attack}];
+ const {env}=binding(main,ps);
+ for(const path of ['/','/courses/professional-writing/','/admissions/']){
+  const r=await request(path,env);assert.equal(r.status,200,path);const html=await r.text();
+  assert.ok(!html.includes(attack),path+' must not contain the raw injection');
+  if(path!=='/admissions/')assert.ok(html.includes('&lt;/script&gt;&lt;img'),path+' renders escaped text');
+  const blocks=[...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
+  assert.ok(blocks.length);for(const block of blocks)assert.doesNotThrow(()=>JSON.parse(block[1]));
+ }
+});
+
+test('unavailable or unreadable published records preserve page fallback and API 503',async()=>withoutExpectedErrors(async()=>{
+ for(const first of [async()=>null,async()=>({body:'{bad json',revision:1}),async()=>{throw Error('fixture database failure');}]){
+  const env={CMS_DB:{prepare(sql){assert.match(sql,/^SELECT /);return {first};}}};
+  for(const prefix of ['/','/fa/','/ps/']){
+   assert.equal((await request(prefix,env)).status,200);
+   assert.equal((await request(prefix+'admissions/',env)).status,200);
+  }
+  for(const method of ['GET','HEAD']){const api=await request('/api/content',env,method);assert.equal(api.status,503);if(method==='HEAD')assert.equal(await api.text(),'');}
+ }
+}));

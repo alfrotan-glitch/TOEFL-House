@@ -10,6 +10,7 @@ import {composeEdge} from "./compose-edge.mjs";
 const here=dirname(fileURLToPath(import.meta.url));
 let main=await readFile(join(here,"../pages-edge/worker.mjs"),"utf8");
 const landing=await readFile(join(here,"landing.mjs"),"utf8");
+const cmsContract=await readFile(join(here,"cms-contract.mjs"),"utf8");
 const detail=await readFile(join(here,"detail.mjs"),"utf8");
 const components=await readFile(join(here,"course-components.mjs"),"utf8");
 const router=await readFile(join(here,"router.mjs"),"utf8");
@@ -24,7 +25,7 @@ const specialPrograms=await readFile(join(here,"special-programs.mjs"),"utf8");
 const {css}=await buildStyles();
 const js=await readFile(join(here,"site.js"),"utf8");
 const assetRevision=createHash("sha256").update(css).update(js).digest("hex").slice(0,12);
-const modules=[await loadBrand(),landing,generalEnglish,programContent,components,academicEnglish,specialPrograms,detail,guides,publicContent,router,
+const modules=[await loadBrand(),cmsContract,landing,generalEnglish,programContent,components,academicEnglish,specialPrograms,detail,guides,publicContent,router,
  "const V2_REV="+JSON.stringify(assetRevision)+";",
  "const V2_CSS="+JSON.stringify(css)+";",
  "const V2_JS="+JSON.stringify(js)+";"].join("\n");

@@ -29,10 +29,11 @@ function v2OnlineProgramCopy(locale){
  const program=locale?.programs?.find(p=>p.id==="online-individual-zoom");
  if(program)for(const key of ["title","summary","details","duration","highlights","levels","schedule","recommendedFor","recommended"])if(Object.hasOwn(program,key))program[key]=editorial(program[key]);
  const faq=Array.isArray(locale?.faq)?locale.faq:locale?.faq?.items;
- if(Array.isArray(faq))for(const item of faq)if(/آنلاین|online|آنلاين|Zoom|زوم/i.test(item.q||item.question||""))for(const key of ["q","question","a","answer"])if(Object.hasOwn(item,key))item[key]=editorial(item[key]);
+ if(Array.isArray(faq))for(const item of faq)if(item&&typeof item==="object"&&!Array.isArray(item)&&/آنلاین|online|آنلاين|Zoom|زوم/i.test((typeof item.q==="string"&&item.q)||(typeof item.question==="string"&&item.question)||""))for(const key of ["q","question","a","answer"])if(Object.hasOwn(item,key))item[key]=editorial(item[key]);
 }
-function v2Esc(s){return String(s??"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
-function v2T(s,max=1000){const publicCopy=String(s??"").replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
+function v2String(s){try{return String(s??"");}catch{return "";}}
+function v2Esc(s){return v2String(s).replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));}
+function v2T(s,max=1000){const publicCopy=v2String(s).replace(/خانه موفقیت/g,"تافل هوس");return v2Esc(publicCopy.slice(0,max));}
 // Present the Owner's selected university terminology only on Dari pages.
 // This also normalizes legacy, editable CMS copy at render time without
 // rewriting the database or altering Pashto's correct "پوهنتون".
@@ -40,7 +41,7 @@ function v2DariEditorial(html,locale){
  return locale!=="fa"?html:html.replace(/پوهنتونی/g,"دانشگاهی").replace(/پوهنتون/g,"دانشگاه").replace(/روبروی/g,"روبه‌روی");
 }
 
-function v2Short(s,max=140){const text=String(s??"").replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
+function v2Short(s,max=140){const text=v2String(s).replace(/\s+/g," ").trim();return v2T(text.length>max?text.slice(0,max-1).replace(/\s+\S*$/,"")+"…":text,max+3);}
 // The legacy online URL is advertised in the sitemap even when CMS data is unavailable.
 function v2OnlineFallback(locale){const c=V2_COPY[locale];return {id:"online-individual-zoom",title:c.onlineLabel,summary:c.onlineText};}
 async function v2FallbackCms(){
@@ -58,7 +59,7 @@ async function v2Cms(env){
   ]);
   if(!main?.body||!ps?.body)throw Error("Published CMS not available");
   const parsed=JSON.parse(main.body),pashto=JSON.parse(ps.body);
-  if(!parsed?.locales?.en?.programs||!parsed?.locales?.fa?.programs||!pashto?.programs)throw Error("Unexpected CMS schema");
+  if(!v2PublishedProgramsValid(parsed,pashto))throw Error("Unexpected CMS programs schema");
   for(const locale of [parsed.locales.en,parsed.locales.fa,pashto])v2OnlineProgramCopy(locale);
   return {main:parsed,pashto,revision:main.revision,psRevision:ps.revision};
  }catch(error){
@@ -91,14 +92,15 @@ function v2Header(c,locale,suffix=""){
 function v2Stats(c,content,locale){
  const stats=locale==="ps"?content.pashto.statistics:content.main.locales[locale].stats;
  const fallback=c.statsFallback;
- const values=locale==="ps" && Array.isArray(stats)?stats.slice(0,3).map(x=>[x.value,x.label]):
+ const values=locale==="ps" && Array.isArray(stats)?stats.slice(0,3).map(x=>[x?.value,x?.label]):
  (stats&&typeof stats==="object")?[
  [stats.graduates,stats.graduatesLabel],
  [stats.toeflTakers,stats.toeflLabel],
  [stats.universityAdmissions,stats.universityLabel]]:fallback;
+ const display=(value,backup)=>((typeof value==="string"||typeof value==="number")&&value)?value:backup;
  return '<section class="stats-wrap" aria-label="'+v2T(c.trustTitle)+'"><div class="shell">'
  +'<div class="stat-head"><h2>'+v2T(c.trustTitle)+'</h2><p>'+v2T(c.trustSub)+'</p></div>'
- +'<div class="stat-grid">'+values.map(([n,t],i)=>'<div class="stat-item"><strong dir="ltr">'+v2T(n||fallback[i][0])+'</strong><span>'+v2T(t||fallback[i][1])+'</span></div>').join("")+'</div></div></section>';
+ +'<div class="stat-grid">'+values.map(([n,t],i)=>'<div class="stat-item"><strong dir="ltr">'+v2T(display(n,fallback[i][0]))+'</strong><span>'+v2T(display(t,fallback[i][1]))+'</span></div>').join("")+'</div></div></section>';
 }
 // V2_GOALS is compiled from content/home.json.
 // Original, decorative program illustrations. Shared stroke geometry, no third-party assets.
@@ -129,12 +131,16 @@ function v2Programs(c,content,locale){
   // Owner-confirmed program facts take precedence over older CMS summaries.
   const reviewed=V2_HOME_REVIEWED_CARDS;
   if(reviewed[locale]?.[id])desc=reviewed[locale][id];
-  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(i)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(c.courseNames[i]||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(program.title||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
+  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(i)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(c.courseNames[i]||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(v2String(program.title)||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
  }).join("");
  return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div>'+goalNav+'<div class="courses-grid">'+cards+'</div></div></section>';
 }
+function v2ShiftRaw(shift,locale){
+ const fa=typeof shift.timeFa==="string"?shift.timeFa:"",en=typeof shift.timeEn==="string"?shift.timeEn:"";
+ return locale==="fa"?(fa||en):en;
+}
 function v2ShiftParts(shift,locale){
- const raw=locale==="fa"?(shift.timeFa||shift.timeEn||""):(shift.timeEn||"");
+ const raw=v2ShiftRaw(shift,locale);
  const parts=String(raw).split("·").map(x=>x.trim());
  if(parts.length<2)return null;
  const men=parts[0].replace(/^(Men|برادران:)\s*/,"");
@@ -153,18 +159,20 @@ function v2Schedule(c,content,locale){
  const shifts=content?.main?.timetable;
  if(!Array.isArray(shifts)||!shifts.length)return "";
  const rows=shifts.map((shift,i)=>{
+  if(!shift||typeof shift!=="object"||Array.isArray(shift)||!v2ShiftRaw(shift,locale))return "";
   const num=locale==="en"?String(i+1):v2PsDigits(i+1);
   const badge=shift.open===false?'<span class="schedule-full">'+v2T(c.scheduleFull)+'</span>':shift.popular?'<span class="schedule-popular">'+v2T(c.schedulePopular)+'</span>':"";
   const parts=v2ShiftParts(shift,locale);
   const closed=shift.open===false?' is-closed':"";
   if(!parts){
-   const raw=locale==="fa"?(shift.timeFa||shift.timeEn||""):(shift.timeEn||"");
+   const raw=v2ShiftRaw(shift,locale);
    return '<tr class="schedule-row'+closed+'"><th scope="row">'+v2T(c.scheduleShift+" "+num)+badge+'</th><td colspan="2"><strong>'+v2T(raw)+'</strong></td></tr>';
   }
   const men=locale==="ps"?v2PsTime(parts.men):parts.men;
   const women=locale==="ps"?v2PsTime(parts.women):parts.women;
   return '<tr class="schedule-row'+closed+'"><th scope="row">'+v2T(c.scheduleShift+" "+num)+badge+'</th><td><strong>'+v2T(men)+'</strong></td><td><strong>'+v2T(women)+'</strong></td></tr>';
  }).join("");
+ if(!rows)return "";
  return '<section class="schedule-section section" id="schedule"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.scheduleEyebrow)+'</p><h2 id="schedule-title">'+v2T(c.scheduleTitle)+'</h2></div><p class="section-intro">'+v2T(c.scheduleLead)+'</p></div><div class="schedule-table-wrap" tabindex="0" role="region" aria-labelledby="schedule-title"><table class="schedule-table"><thead><tr><th scope="col">'+v2T(c.scheduleShift)+'</th><th scope="col">'+v2T(c.scheduleMen)+'</th><th scope="col">'+v2T(c.scheduleWomen)+'</th></tr></thead><tbody>'+rows+'</tbody></table></div><p class="schedule-note">'+v2T(c.scheduleNote)+'</p></div></section>';
 }
 function v2CleanFaqAnswer(value){
@@ -172,7 +180,12 @@ function v2CleanFaqAnswer(value){
 }
 function v2Faq(c,content,locale){
  const raw=locale==="ps"?content.pashto.faq:content.main.locales[locale].faq;
- const items=(Array.isArray(raw)?raw:raw?.items)||[];
+ const candidate=Array.isArray(raw)?raw:raw?.items;
+ const items=Array.isArray(candidate)?candidate.filter(item=>{
+  if(!item||typeof item!=="object"||Array.isArray(item))return false;
+  const q=item.q||item.question||"",a=item.a||item.answer||"";
+  return typeof q==="string"&&!!q.trim()&&typeof a==="string";
+ }):[];
  const prioritized=[
   items.find(x=>/تعیین سطح|placement|سویې معلومولو|سویې ارزونه/i.test(x.q||x.question||"")),
   items.find(x=>/ایمیل|email|ایمېل/i.test(x.q||x.question||"")),
@@ -209,8 +222,8 @@ function v2CourseListSchema(locale,content){
  return {"@context":"https://schema.org","@type":"ItemList","itemListElement":V2_COURSE_IDS.map((id,i)=>{
   const course=programs.find(p=>p.id===id)||{};
   const url=V2_ORIGIN+root+"courses/"+id+"/";
-  const name=String(course.title||names[i]).trim().slice(0,180);
-  const summary=String(course.summary||course.details||"").replace(/\s+/g," ").trim();
+  const name=v2String(course.title||names[i]).trim().slice(0,180)||names[i];
+  const summary=v2String(course.summary||course.details||"").replace(/\s+/g," ").trim();
   const description=(summary.length>=10?summary:name+" course at The TOEFL House in Kabul.").slice(0,280);
   return {"@type":"ListItem","position":i+1,"url":url,"item":{"@type":"Course","name":name,"description":description,"url":url,"provider":provider}};
  })};

@@ -5,8 +5,9 @@ import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 
-const [oldPath,newPath]=process.argv.slice(2);
-if(!oldPath||!newPath)throw Error('Usage: node compare-worker-contract.mjs BASELINE-WORKER CANDIDATE-WORKER');
+const [oldPath,newPath,...options]=process.argv.slice(2);
+if(!oldPath||!newPath||options.some(x=>x!=='--allow-missing-cms-head-fix')||options.length>1)throw Error('Usage: node compare-worker-contract.mjs BASELINE-WORKER CANDIDATE-WORKER [--allow-missing-cms-head-fix]');
+const allowHeadFix=options.includes('--allow-missing-cms-head-fix');
 const [oldWorker,newWorker]=await Promise.all([oldPath,newPath].map(async path=>(await import(pathToFileURL(resolve(path)).href)).default));
 const ids=['general-english','academic-english','toefl-preparation','special-speaking','professional-writing','teacher-training','online-individual-zoom'];
 const locales=['','fa/','ps/'];
@@ -48,9 +49,14 @@ async function response(worker,host,path,method,mode){
  if(type.includes('text/html'))body=Buffer.from(body.toString().replace(/(\/__th\/v2\/site\.(?:css|js)\?v=)[a-f0-9]{12}/g,'$1REVISION'));
  return {status:r.status,headers:[...r.headers].sort(([a],[b])=>a.localeCompare(b)),body:sha(body),calls:calls.sort()};
 }
-let count=0;
+let count=0,allowedHeadFixes=0;
 for(const mode of ['full','empty','fallback'])for(const host of ['https://toeflhouse.pages.dev','https://candidate.toeflhouse.pages.dev'])for(const path of [...pages,...extra])for(const method of ['GET','HEAD','POST']){
  const actual=await response(newWorker,host,path,method,mode),expected=await response(oldWorker,host,path,method,mode);
+ if(allowHeadFix&&mode==='fallback'&&path==='/api/content'&&method==='HEAD'){
+  assert.equal(expected.status,503);assert.equal(expected.body,sha(Buffer.from('{"error":"Public content temporarily unavailable"}')));
+  assert.equal(actual.body,sha(Buffer.alloc(0)));
+  expected.body=sha(Buffer.alloc(0));allowedHeadFixes++;
+ }
  assert.deepEqual(actual,expected,`${mode} ${host} ${method} ${path}`);
  if(method==='GET'&&path.endsWith('/tools/')){
   assert.equal(actual.status,200,'mock tools route returns transformed fixture');
@@ -59,4 +65,5 @@ for(const mode of ['full','empty','fallback'])for(const host of ['https://toeflh
  }
  count++;
 }
-console.log(JSON.stringify({status:'passed',comparisons:count,pages:pages.length,fixtures:['full','empty','fallback'],hosts:2,methods:['GET','HEAD','POST'],limits:['Local synthetic bindings only','HTML asset revision normalized','CSS visual parity assessed separately','Simplified HTMLRewriter mock is not provider behavior','Empty CMS fixture deliberately yields public API 503']},null,2));
+if(allowHeadFix)assert.equal(allowedHeadFixes,2,'expected precisely two missing-CMS HEAD exceptions');
+console.log(JSON.stringify({status:'passed',comparisons:count,allowedMissingCmsHeadFixes:allowedHeadFixes,pages:pages.length,fixtures:['full','empty','fallback'],hosts:2,methods:['GET','HEAD','POST'],limits:['Local synthetic bindings only','HTML asset revision normalized','CSS visual parity assessed separately','Simplified HTMLRewriter mock is not provider behavior','Empty CMS fixture deliberately yields public API 503']},null,2));

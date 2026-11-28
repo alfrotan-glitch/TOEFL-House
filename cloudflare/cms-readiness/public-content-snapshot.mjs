@@ -3,8 +3,9 @@
  *
  * WARNING: This is NOT an authenticated D1 database backup. Never store drafts,
  * account records, sessions or secrets in GitHub artifacts. We snapshot ONLY
- * the exact already-public /api/content response after an explicit allowlist
- * and secret-key validation.
+ * the exact already-public /api/content response after a top-level allowlist
+ * and known secret-key validation. Nested unknown keys are not allowlisted;
+ * do not archive until the published schema and source classification are verified.
  */
 import {createHash} from "node:crypto";
 import {mkdir,readFile,writeFile} from "node:fs/promises";
@@ -36,7 +37,7 @@ for(const lang of langs){
 const allowed=["locales","media","timetable","revision","updatedAt","cmsStatus","psRevision"];
 assert.deepEqual(Object.keys(parsed).sort(),[...allowed].sort(),"Public response added unexpected top-level fields: review required");
 const suspiciousKeys=new Set(["password","password_hash","password_salt","totp_secret","token_hash",
-"session_token","session_cookie","private_key","api_key","onboarding_invites","staff_users",
+"session_token","session_cookie","private_key","secret_key","admin_secret","api_key","onboarding_invites","staff_users",
 "login_attempts","drafts","cms_draft_recovery_archive","authorization"]);
 function checkSensitive(data,path="root"){
  if(Array.isArray(data)){for(let i=0;i<data.length;i++)checkSensitive(data[i],path+"["+i+"]");return;}
