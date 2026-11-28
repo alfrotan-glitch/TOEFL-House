@@ -3,6 +3,7 @@
 import {readFile} from 'node:fs/promises';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {REQUIRED_CONTENT_KEYS} from './content-shape-contract.mjs';
 const here=dirname(fileURLToPath(import.meta.url));
 const locales=['en','fa','ps'];
 function sameShape(reference,value,path){
@@ -43,10 +44,24 @@ function sameKeys(value,keys,path){
 function requireText(value,path){
  if(typeof value!=='string'||!value.trim())throw Error('Missing required text: '+path);
 }
+function requiredFields(value,contractName,path){
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Missing required object: '+path);
+ for(const key of REQUIRED_CONTENT_KEYS[contractName])if(!Object.hasOwn(value,key))throw Error('Missing required field: '+path+'.'+key);
+}
+function textList(value,path){
+ if(!Array.isArray(value)||!value.length)throw Error('Missing required list: '+path);
+ for(const text of value)requireText(text,path);
+}
 function validateReferences(general,academic,special,guides,home,ui,contract){
  if(!contract)throw Error('Content contract required');
  for(const locale of locales){
   const prefix=locale+'.';
+  for(const [value,kind] of [
+   [home.copy[locale],'homeCopy'],[home.semester[locale],'homeSemester'],[home.goals[locale],'homeGoals'],[home.habits[locale],'homeHabits'],
+   [general.locales[locale],'general'],[academic[locale],'academic'],[special.ui[locale],'specialUi'],
+   [guides.ui[locale],'guideUi'],[guides.bookUi[locale],'bookUi'],[guides.feedback[locale],'feedback'],[guides.nav[locale],'guideNav'],
+   [ui.detail[locale],'detail'],[ui.practice[locale],'practice']
+  ])requiredFields(value,kind,prefix+kind);
   const expectedLanguage={en:['en','ltr'],fa:['fa-AF','rtl'],ps:['ps-AF','rtl']}[locale];
   if(home.copy[locale].lang!==expectedLanguage[0]||home.copy[locale].dir!==expectedLanguage[1])throw Error('Invalid language or direction: '+locale);
   requireText(home.copy[locale].seoTitle,prefix+'home SEO title');
@@ -73,12 +88,17 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
   lengthIs(ui.practice[locale].explanations,contract.practiceCount,prefix+'practice explanations');
   for(const value of ui.practice[locale].explanations)requireText(value,prefix+'indexed content');
   lengthIs(academic[locale].levels,4,prefix+'academic levels'); // The fourth-level note is renderer-indexed.
+  for(const level of academic[locale].levels){
+   requiredFields(level,'academicLevel',prefix+'academic level');
+   textList(level.skills,prefix+'academic level skills');textList(level.textbooks,prefix+'academic level textbooks');
+  }
   for(const key of ['seoTitle','seoDescription','feeMonthDisplay','feeLevelDisplay','levelDuration'])requireText(academic[locale][key],prefix+'academic.'+key);
   if(!Array.isArray(academic[locale].books)||!academic[locale].books.length)throw Error('Missing academic books: '+locale);
   const bookIds=academic[locale].books.map(book=>book.guide);
   if(new Set(bookIds).size!==bookIds.length||JSON.stringify(bookIds)!==JSON.stringify(academic.en.books.map(book=>book.guide)))throw Error('Invalid localized academic book order: '+locale);
   for(const book of academic[locale].books){
-   requireText(book.title,prefix+'academic book title');
+   requiredFields(book,'academicBook',prefix+'academic book');
+   requireText(book.title,prefix+'academic book title');textList(book.points,prefix+'academic book points');
    if(!contract.books.includes(book.guide)||guides.bookData[locale]?.[book.guide]?.program!=='academic-english')throw Error('Invalid academic book guide: '+prefix+book.guide);
   }
   for(const [value,size,path] of [
@@ -88,14 +108,20 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
    [home.goals[locale].items,2,'goals'],[home.habits[locale].habits,3,'habits'],[home.habits[locale].links,3,'habit links'],[ui.detail[locale].faqs,2,'admissions FAQs']
   ])tuples(value,size,prefix+path);
   for(const [id,page] of Object.entries(special.courses[locale])){
+   requiredFields(page,'specialCourse',prefix+id);
    requireText(page.durationDisplay,prefix+id+'.durationDisplay');
    for(const [field,size] of [['facts',2],['outcomes',2],['method',3],['faq',2]])tuples(page[field],size,prefix+id+'.'+field);
+   for(const [field,kind,list] of [['path','specialPath','items'],['resources','specialResource','points']]){
+    if(!Array.isArray(page[field])||!page[field].length)throw Error('Missing required list: '+prefix+id+'.'+field);
+    for(const item of page[field]){requiredFields(item,kind,prefix+id+'.'+field);textList(item[list],prefix+id+'.'+field+'.'+list);}
+   }
   }
   sameKeys(guides.data[locale],contract.articles,prefix+'articles');
   sameKeys(guides.bookData[locale],contract.books,prefix+'books');
   sameKeys(guides.feedback[locale].hints,contract.books,prefix+'book feedback');
   sameKeys(ui.facts[locale],contract.publicCourses,prefix+'admissions facts');
   for(const [kind,entries] of [['article',guides.data[locale]],['book',guides.bookData[locale]]])for(const [id,item] of Object.entries(entries)){
+   requiredFields(item,kind==='article'?'guideArticle':'guideBook',prefix+id);
    for(const key of ['title','description','intro'])requireText(item[key],prefix+id+'.'+key);
    if(typeof item.program!=='string'||(kind==='book'&&!item.program)||(item.program&&!contract.publicCourses.includes(item.program)))throw Error('Unknown guide program: '+prefix+id);
    if(item.program!==guides[kind==='article'?'data':'bookData'].en[id].program)throw Error('Different guide program across locales: '+prefix+id);

@@ -41,7 +41,7 @@ test('indexed content and routes fail closed even when all locales drift togethe
  const duration=structuredClone(general);duration.catalog[0].durationKey='semester';
  assert.throws(()=>compile(duration),/stage duration/);
  const missingDuration=structuredClone(general);for(const l of locales)delete missingDuration.locales[l].foundation;
- assert.throws(()=>compile(missingDuration),/Missing required text.*duration foundation/);
+ assert.throws(()=>compile(missingDuration),/Missing required field.*general\.foundation/);
  const pair=structuredClone(academic);for(const l of locales)pair[l].facts[0].pop();
  assert.throws(()=>compile(general,pair),/indexed length.*facts/);
  const levels=structuredClone(academic);for(const l of locales)levels[l].levels.pop();
@@ -53,7 +53,7 @@ test('indexed content and routes fail closed even when all locales drift togethe
  const reordered=structuredClone(academic);reordered.fa.books.reverse();
  assert.throws(()=>compile(general,reordered),/academic book order/);
  const missingSeo=structuredClone(academic);for(const l of locales)delete missingSeo[l].seoTitle;
- assert.throws(()=>compile(general,missingSeo),/Missing required text.*seoTitle/);
+ assert.throws(()=>compile(general,missingSeo),/Missing required field.*academic\.seoTitle/);
  const deleted=structuredClone(guides);for(const l of locales)delete deleted.bookData[l]['got-it-series'];
  assert.throws(()=>compile(general,academic,special,deleted),/catalog keys.*books/);
  const badRoute=structuredClone(guides);for(const l of locales)badRoute.bookData[l]['got-it-series'].program='evil" onclick="alert(1)';
@@ -61,7 +61,7 @@ test('indexed content and routes fail closed even when all locales drift togethe
  const unsafe=structuredClone(guides);for(const l of locales)unsafe.bookData[l]['got-it-series'].source='javascript:alert(1)';
  assert.throws(()=>compile(general,academic,special,unsafe),/Invalid book source/);
  const missingSections=structuredClone(guides);for(const l of locales)delete missingSections.data[l]['english-courses-kabul'].sections;
- assert.throws(()=>compile(general,academic,special,missingSections),/Missing guide sections/);
+ assert.throws(()=>compile(general,academic,special,missingSections),/Missing required field.*sections/);
  const brokenLink=structuredClone(home);for(const l of locales)brokenLink.habits[l].links[0][0]='not-a-guide';
  assert.throws(()=>compile(general,academic,special,guides,brokenLink),/route references/);
  const drift=structuredClone(home);drift.goals.ps.items[0][0]='academic-english';
@@ -98,9 +98,9 @@ test('indexed content and routes fail closed even when all locales drift togethe
  const whitespaceProgram=structuredClone(guides);for(const l of locales)whitespaceProgram.data[l]['english-courses-kabul'].program='  ';
  assert.throws(()=>compile(general,academic,special,whitespaceProgram),/Missing required text.*program/);
  const noHomeTitle=structuredClone(home);for(const l of locales)delete noHomeTitle.copy[l].seoTitle;
- assert.throws(()=>compile(general,academic,special,guides,noHomeTitle),/Missing required text.*home SEO title/);
+ assert.throws(()=>compile(general,academic,special,guides,noHomeTitle),/Missing required field.*homeCopy\.seoTitle/);
  const noDuration=structuredClone(special);for(const l of locales)delete noDuration.courses[l].toefl.durationDisplay;
- assert.throws(()=>compile(general,academic,noDuration),/Missing required text.*durationDisplay/);
+ assert.throws(()=>compile(general,academic,noDuration),/Missing required field.*durationDisplay/);
  // A general-interest article intentionally has no single course association.
  assert.equal(guides.data.en['english-courses-kabul'].program,'');assert.doesNotThrow(()=>compile());
 });
@@ -147,4 +147,35 @@ test('reordering non-foundation General English stages keeps localized focus, de
  }
  const invalid=structuredClone(updated);[invalid.catalog[0],invalid.catalog[1]]=[invalid.catalog[1],invalid.catalog[0]];
  assert.throws(()=>compileContent(invalid,academic,special,guides,home,ui,contract),/stage duration/);
+});
+
+test('required renderer fields and learning lists cannot disappear in every locale together',async()=>{
+ const original=await content(),contract=extractContentContract(...await sources());
+ const locales=['en','fa','ps'];
+ const cases=[
+  {kind:4,field:'navMenu',path:'homeCopy',remove:(o,l)=>delete o.copy[l].navMenu},
+  {kind:4,field:'videoCaption',path:'homeSemester',remove:(o,l)=>delete o.semester[l].videoCaption},
+  {kind:0,field:'heroTitle',path:'general',remove:(o,l)=>delete o.locales[l].heroTitle},
+  {kind:1,field:'title',path:'academic level',remove:(o,l)=>delete o[l].levels[0].title},
+  {kind:1,field:'publisher',path:'academic book',remove:(o,l)=>delete o[l].books[0].publisher},
+  {kind:2,field:'source',path:'specialUi',remove:(o,l)=>delete o.ui[l].source},
+  {kind:2,field:'title',path:'special\\.path',remove:(o,l)=>delete o.courses[l].special.path[0].title},
+  {kind:2,field:'by',path:'toefl\\.resources',remove:(o,l)=>delete o.courses[l].toefl.resources[0].by},
+  {kind:3,field:'contents',path:'guideNav',remove:(o,l)=>delete o.nav[l].contents},
+  {kind:5,field:'submit',path:'detail',remove:(o,l)=>delete o.detail[l].submit},
+  {kind:5,field:'question',path:'practice',remove:(o,l)=>delete o.practice[l].question}
+ ];
+ for(const {kind,field,path,remove} of cases){
+  const data=structuredClone(original);for(const locale of locales)remove(data[kind],locale);
+  assert.throws(()=>compileContent(...data,contract),new RegExp('Missing required field.*'+path+'.*'+field),path+'.'+field);
+ }
+ for(const [kind,remove] of [
+  [1,(o,l)=>{o[l].levels[0].skills=[];}],
+  [1,(o,l)=>{o[l].books[0].points=[];}],
+  [2,(o,l)=>{o.courses[l].special.path=[];}],
+  [2,(o,l)=>{o.courses[l].toefl.resources[0].points=[];}]
+ ]){
+  const data=structuredClone(original);for(const locale of locales)remove(data[kind],locale);
+  assert.throws(()=>compileContent(...data,contract),/Missing required list/);
+ }
 });
