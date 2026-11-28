@@ -933,8 +933,8 @@ test("Sitemap retains canonical URLs without invented modification dates",async(
   if(host!=="toeflhouse.pages.dev")assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
   const xml=await r.text();
   const locations=[...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match=>match[1]);
-  assert.equal(locations.length,39);
-  assert.equal(new Set(locations).size,39);
+  assert.equal(locations.length,51);
+  assert.equal(new Set(locations).size,51);
   assert.ok(locations.every(url=>url.startsWith("https://toeflhouse.pages.dev/")));
   assert.doesNotMatch(xml,/<lastmod>|<changefreq>/);
  }

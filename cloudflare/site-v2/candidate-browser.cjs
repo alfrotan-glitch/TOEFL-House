@@ -43,7 +43,7 @@ const axe=require('axe-core');
   assert.match(sitemap.headers.get('x-robots-tag'),/noindex/);
   const xml=await sitemap.text();
   const paths=[...xml.matchAll(/<loc>https:\/\/toeflhouse\.pages\.dev([^<]+)<\/loc>/g)].map(m=>m[1]);
-  assert.equal(paths.length,39); assert.equal(new Set(paths).size,39);
+  assert.equal(paths.length,51); assert.equal(new Set(paths).size,51);
   const unsafe=await worker.fetch(new Request(origin+'/api/admin/content',{method:'POST',body:'{}'}),{});
   assert.equal(unsafe.status,403);
   page=await context.newPage();
@@ -61,6 +61,23 @@ const axe=require('axe-core');
      const offenders=await page.evaluate(()=>[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:e.className,left:Math.round(e.getBoundingClientRect().left),right:Math.round(e.getBoundingClientRect().right)})).filter(e=>e.left < -2 || e.right > document.documentElement.clientWidth+2).slice(0,20));
      assert.fail(`${width} ${path} overflow ${JSON.stringify(overflow)} ${JSON.stringify(offenders)}`);
     }
+   }
+  }
+  const bookSlugs=['got-it-series','active-skills-for-reading','longman-academic-writing','contemporary-topics'];
+  for(const [prefix,lang] of [['/','en'],['/fa/','fa'],['/ps/','ps']]){
+   for(const width of [390,1440]){
+    await page.setViewportSize({width,height:900});
+    for(const [path,label] of [[prefix+'guides/','library'],[prefix+'guides/got-it-series/','book']]){
+     await page.goto(origin+path,{waitUntil:'load'});
+     await page.screenshot({path:join(out,`${label}-${lang}-${width}.png`)});
+    }
+   }
+   await page.setViewportSize({width:390,height:900});
+   for(const slug of bookSlugs){
+    await page.goto(origin+prefix+'guides/'+slug+'/',{waitUntil:'load'});
+    await page.addScriptTag({content:axe.source});
+    const violations=await page.locator('main').evaluate(async e=>(await window.axe.run(e,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa']}})).violations.map(v=>({id:v.id,impact:v.impact})));
+    assert.deepEqual(violations,[],`${lang} ${slug} accessibility`);
    }
   }
   for(const width of [768,1024,1200]){
@@ -116,6 +133,6 @@ const axe=require('axe-core');
    }
   }finally{await noScript.close();}
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({status:'passed',workerSha256:sha256,routeCount:paths.length,widths,routeViewportChecks:paths.length*widths.length,tabletMenuWidths:[768,1024,1200],practiceLocales:3,noScriptLocales:3,practiceAxeViolations:0,screenshots:out,limits:['Local interception, not Cloudflare Pages','Synthetic CMS, no production bindings or external images','Automated checks do not establish WCAG compliance']},null,2));
+  console.log(JSON.stringify({status:'passed',workerSha256:sha256,routeCount:paths.length,widths,routeViewportChecks:paths.length*widths.length,bookGuidesAxeChecked:12,bookGuideAxeViolations:0,tabletMenuWidths:[768,1024,1200],practiceLocales:3,noScriptLocales:3,practiceAxeViolations:0,screenshots:out,limits:['Local interception, not Cloudflare Pages','Synthetic CMS, no production bindings or external images','Automated checks do not establish WCAG compliance']},null,2));
  }finally{await context.close();await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

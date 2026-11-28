@@ -18,8 +18,12 @@ for(const item of cases){
  results.push({path:item.path,status:r.status,linksChecked:item.paths.length});
 }
 const sitemap=await fetch(base+"/sitemap.xml");const xml=await sitemap.text();
-const count=(xml.match(/<loc>/g)||[]).length;
-assert.equal(sitemap.status,200);assert.equal(count,39);
+const locations=[...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match=>match[1]);
+const count=locations.length;
+assert.equal(sitemap.status,200);
+assert.ok(count>=39,"Public sitemap must retain the original routes");
+assert.equal(new Set(locations).size,count,"Duplicate sitemap URLs");
+for(const item of cases)assert.ok(locations.includes('https://toeflhouse.pages.dev'+item.path),'Missing sitemap route '+item.path);
 const [cms,legacy,admin,adminPage]=await Promise.all([fetch(base+"/api/content"),fetch(base+"/fa/tools/"),fetch(base+"/api/admin/revisions"),fetch(base+"/admin/")]);
 assert.equal(cms.status,200);assert.ok((await cms.text()).includes('"cmsStatus":"connected"'));
 assert.equal(legacy.status,503);assert.match(legacy.headers.get("X-Robots-Tag")||"",/noindex/);assert.match(await legacy.text(),/temporarily unavailable/i);

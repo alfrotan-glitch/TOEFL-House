@@ -32,7 +32,9 @@ const STYLE=":where(a,button,input,select,textarea,[role=\"button\"]):focus-visi
 const GUIDE_A11Y_STYLE='a[href="#content"][style*="-9999px"]{left:0!important;top:0!important;width:1px!important;height:1px!important;overflow:hidden!important;clip-path:inset(50%)!important}a[href="#content"][style*="-9999px"]:focus{position:fixed!important;left:16px!important;top:16px!important;width:auto!important;height:auto!important;clip-path:none!important;overflow:visible!important;z-index:9999!important;padding:12px 18px!important;background:#fff!important;color:#112c35!important}';
 function noindex(host){return host!==CANONICAL;}
 const V2_PUBLIC_COURSES=["general-english","academic-english","toefl-preparation","special-speaking","professional-writing","teacher-training","online-individual-zoom"];
-const V2_PUBLIC_GUIDES=["english-courses-kabul","toefl-ibt-2026","speaking-practice"];
+// Shared by the sitemap and the composed guide renderer; keep route identity in one place.
+const V2_PUBLIC_BOOK_GUIDES=["got-it-series","active-skills-for-reading","longman-academic-writing","contemporary-topics"];
+const V2_PUBLIC_GUIDES=["english-courses-kabul","toefl-ibt-2026","speaking-practice",...V2_PUBLIC_BOOK_GUIDES];
 function v2PublicSitemap(request){
   const paths=["/","/fa/","/ps/","/admissions/","/fa/admissions/","/ps/admissions/"];
   for(const prefix of ["","fa/","ps/"]){

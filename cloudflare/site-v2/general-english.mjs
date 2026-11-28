@@ -500,7 +500,7 @@ function v2GeneralEnglish(locale){
     '<h3>'+esc(c.oxfordTitle)+'</h3><p>'+esc(c.oxfordIntro)+'</p>'+
     '<ul class="ge-benefits">'+c.oxfordFeatures.map(x=>'<li>'+esc(x)+'</li>').join("")+'</ul>'+
     '<div class="ge-book-levels"><strong>'+esc(c.oxfordLevelsLabel)+'</strong><span dir="ltr">'+esc(c.oxfordLevels)+'</span></div>'+
-    '<p class="ge-note">'+esc(c.oxfordNote)+'</p></article>'+
+    '<p class="ge-note">'+esc(c.oxfordNote)+'</p>'+v2BookGuideLink(locale,"got-it-series")+'</article>'+
     '<div class="ge-side"><article class="ge-panel ge-speaking"><span class="eyebrow">'+esc(c.speakingLabel)+'</span>'+
     '<h3>'+esc(c.speakingTitle)+'</h3><p>'+esc(c.speakingText)+'</p></article>'+
     '<article class="ge-panel ge-teachers"><h3>'+esc(c.twoTitle)+'</h3><p>'+esc(c.twoText)+'</p></article></div></div>'+
