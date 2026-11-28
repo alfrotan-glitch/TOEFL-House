@@ -48,6 +48,18 @@ const axe=require('axe-core');
   assert.equal(unsafe.status,403);
   page=await context.newPage();
   const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+  // Compare the browser's behavior for syntax that a whitespace-only
+  // compactor must not merge. This exercises the build, not a deployed page.
+  const {compactStyles}=await import(pathToFileURL(join(__dirname,'build-styles.mjs')));
+  const cssFixture='.parent\n.child { color: rgb(1, 2, 3); }\n@media screen\nand (min-width: 10px) {\n.child { margin-top: 7px; }\n}\n.child { --ink: rgb(4, 5, 6); border-color: var(--ink); }\n.\\31 \n.child { padding-left: 9px; }';
+  async function cssBehavior(css){
+   await page.setContent('<div class="parent 1"><span class="child">Sample</span></div>');
+   await page.addStyleTag({content:css});
+   return page.locator('.child').evaluate(el=>{const style=getComputedStyle(el);return [style.color,style.marginTop,style.borderTopColor,style.paddingLeft];});
+  }
+  const originalStyle=await cssBehavior(cssFixture);
+  assert.deepEqual(originalStyle,['rgb(1, 2, 3)','7px','rgb(4, 5, 6)','9px']);
+  assert.deepEqual(await cssBehavior(compactStyles(cssFixture)),originalStyle,'stylesheet compactor preserves significant whitespace');
   const widths=[320,390,768,1024,1440,1920];
   for(const width of widths){
    await page.setViewportSize({width,height:900});
