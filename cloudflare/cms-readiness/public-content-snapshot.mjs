@@ -10,6 +10,9 @@
 import {createHash} from "node:crypto";
 import {mkdir,readFile,writeFile} from "node:fs/promises";
 import assert from "node:assert/strict";
+// Fail before fetching or writing anything: an approved nested public schema
+// and compatible projection are prerequisites, not an environment-variable bypass.
+throw Error("Public CMS archive disabled: owner-reviewed nested public schema and projection are required");
 const origin="https://toeflhouse.pages.dev";
 const response=await fetch(origin+"/api/content",{
   headers:{Accept:"application/json"},
