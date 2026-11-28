@@ -18,6 +18,8 @@ test("identical source builds byte-identical Workers across UTC dates",async()=>
    if(name.endsWith(".mjs") || name.endsWith(".css") || name==="site.js")
     await copyFile(join(site,name),join(copy,name));
   }
+  await mkdir(join(copy,"content"));
+  for(const name of await readdir(join(site,"content")))await copyFile(join(site,"content",name),join(copy,"content",name));
   await copyFile(join(site,"../pages-edge/worker.mjs"),join(edge,"worker.mjs"));
   const clock=join(root,"clock.cjs");
   await writeFile(clock,`const RealDate=Date; global.Date=class extends RealDate { constructor(...args){ super(...(args.length?args:[process.env.TEST_BUILD_DATE])); } static now(){ return new RealDate(process.env.TEST_BUILD_DATE).getTime(); } };`);

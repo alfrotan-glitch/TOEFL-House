@@ -1,0 +1,7 @@
+# Public editorial content
+
+`home.json`, `general.json`, `academic.json`, `special.json` and `guides.json` hold the existing English (`en`), Dari (`fa`) and Pashto (`ps`) public copy. These files contain no CMS records, private student data or credentials. Renderers remain responsible for escaping all content, mixed-script direction and accessible markup. Other short renderer-specific labels still live beside their renderers and have not yet been migrated.
+
+Edit all affected languages together. `content-compiler.mjs` checks locale and structural parity and builds compact JavaScript constants into the existing Worker; unequal list lengths may be legitimate. Structural validation cannot establish correct translation, accuracy, accessibility or rights. Institutional and language review is still needed, especially for course descriptions, prices, test claims and publisher references. Do not change a course, source or translation simply to make a shape check pass.
+
+After editing: `node cloudflare/site-v2/build.mjs`, `node cloudflare/site-v2/budgets.mjs`, the site/edge/analytics tests, and the isolated browser suite. Use `compare-worker-contract.mjs` with a trusted prior Worker when a change is meant to preserve output. That tool uses synthetic fixtures and cannot prove real Cloudflare routing, legacy rewriting, database isolation or deployed behavior. See `docs/OPERATOR_HANDOFF_CANDIDATE.md` before any preview or release.
