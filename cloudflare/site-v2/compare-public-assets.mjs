@@ -33,5 +33,8 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
  const report=await comparePublicAssets(JSON.parse(await readFile(input,'utf8')));
  await writeFile(output,JSON.stringify(report,null,2)+'\n');
  console.log(JSON.stringify({origin:report.origin,allMatch:report.allMatch,matched:report.results.filter(x=>x.matches).length,total:report.results.length,differences:report.results.filter(x=>!x.matches).map(({path,status,error})=>({path,status,error}))}));
- if(!report.allMatch)process.exitCode=1;
+ if(!report.allMatch){
+  if(process.env.GITHUB_ACTIONS==='true')for(const item of report.results.filter(x=>!x.matches))console.log(`::error title=Public asset mismatch::${item.path} (HTTP ${item.status??'unavailable'})`);
+  process.exitCode=1;
+ }
 }
