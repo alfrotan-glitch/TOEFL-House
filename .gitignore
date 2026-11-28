@@ -17,6 +17,10 @@ composer.phar
 .idea/
 .vscode/
 
+# Generated website build and local performance reports (not source assets)
+/cloudflare/site-v2/dist/
+/lighthouse-results/
+
 # Test runner cache
 /.phpunit.cache
 
