@@ -8,8 +8,15 @@
 - `public-auth-readonly.mjs` — GET-only checks of protected CMS endpoints, public CMS JSON and admin `noindex`/CSP. Safe for daily monitoring.
 - `public-auth-guards.mjs` — one-time negative POST checks using deliberately invalid, unauthenticated payloads; **manual-only**, never schedule a write-related security probe.
 - `legacy-dependency.mjs` — verifies the immutable November 5 CMS/auth deployment and November 9 marketing overlay still respond; checks the official site's preserved Dari/Pashto student tools.
-- `public-content-snapshot.mjs` — captures the **already-public** API content only and validates the seven course records in English, Afghan Dari and Pashto. Artifacts contain checksummed JSON and a manifest. This is **not a full D1 backup**.
-- `toefl-v2-production-quality.yml` — runs the above GET-only checks with the existing trilingual SEO/site/accessibility gate; stores a public-content recovery artifact on each successful scheduled run.
+- `public-content-snapshot.mjs` — **disabled on this branch before fetch/write** pending an owner-reviewed nested public schema and projection. Its historical top-level checks and sensitive-key denylist cannot establish that unknown nested content is public. A public-content snapshot is not a full D1 backup.
+- `public-schema-preflight.mjs` — local, read-only shape diagnostic for the public API envelope, described below. It does not unlock the archive or change the API.
+- `toefl-v2-production-quality.yml` includes live checks and an archive job, subject to workflow dependencies and gates. The archive cannot succeed on this branch until its fail-closed prerequisite is resolved; skipped jobs are not passing checks.
+
+## Proposed public schema preflight (not approval)
+
+An authorized operator may feed an already-obtained `/api/content` JSON response through stdin on a trusted system: `node cloudflare/cms-readiness/public-schema-preflight.mjs < /path/to/authorized-response.json`. The tool does not fetch, write files, or print values or unrecognized key names. It emits fixed category counts of encountered unknown fields, some invalid shapes, and unreviewed nonempty media. It accepts at most 3,000,000 input bytes, and errors do not echo the input. Keep the source securely controlled and delete temporary copies according to owner policy; do not place the response in a public repository, artifact, CI log or issue. Counts can still reveal structural information, so share them only if the owner authorizes it.
+
+The recognized fields are a **renderer-derived, provisional subset**, not the historical CMS schema: unknown fields are counted at recognized object boundaries, their contents are not traversed; media is not examined; scalar values are not classified; required fields, program identity/count, URL safety, all shapes and backward compatibility are not fully validated. Zero counts do **not** mean data is public, complete, safe, approved or compatible. A nonzero count is a review prompt, not a decision to delete data. Owner review must classify each field/value and permitted use, document historical API consumers and media, approve a versioned nested projection and compatibility/migration plan, and test it against authorized fixtures before enabling any archive or deployment. Do not use this diagnostic on unapproved production data or as a substitute for those gates.
 
 ## Authorized CMS acceptance: essential remaining tests
 
@@ -59,4 +66,4 @@ Use the supplied `read-only-integrity.sql` in an authorized D1 console. It yield
 6. Rollback procedure is tested without destroying production.
 7. Only then remove the historical pinned Worker dependency.
 
-**Current signoff boundary:** Public website, read-only CMS authorization and public-content recovery tests have passed. An **independent full authenticated CMS role test and private full D1 recovery drill** have not yet been completed; do not label them accepted without evidence.
+**Current signoff boundary:** Historical checks and earlier observations do not establish acceptance of the current candidate. The nested public schema, archive, exact historical asset parity and isolated candidate preview remain blocked; an **independent full authenticated CMS role test and private full D1 recovery drill** have not been completed. Do not label them accepted without current evidence and authorization.
