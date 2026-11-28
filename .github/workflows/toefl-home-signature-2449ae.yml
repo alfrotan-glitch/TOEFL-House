@@ -1,0 +1,174 @@
+name: Signature homepage exact preview — 2449ae
+on:
+  push:
+    branches: [qa/home-signature-2449ae-20261128]
+permissions:
+  contents: read
+env:
+  TOEFL_QA_BASE: https://dfd46c12.toeflhouse.pages.dev
+jobs:
+  exact-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2449aeebba7fc28816d24033071e34b8c9c86cd5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact build identity and all public routes
+        run: |
+          test "$(git rev-parse HEAD)" = "2449aeebba7fc28816d24033071e34b8c9c86cd5"
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import {createHash} from "node:crypto";
+          const base=process.env.TOEFL_QA_BASE;
+          const get=async path=>{const r=await fetch(base+path,{redirect:"manual",signal:AbortSignal.timeout(30000)});assert.equal(r.status,200,path);return r};
+          const css=await (await get("/__th/v2/site.css")).text();
+          const js=await (await get("/__th/v2/site.js")).text();
+          assert.equal(createHash("sha256").update(css).update(js).digest("hex").slice(0,12),"2df81be3ad3d");
+          const xml=await (await get("/sitemap.xml")).text();
+          const routes=[...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(x=>new URL(x[1]).pathname);
+          assert.equal(new Set(routes).size,39);
+          for(const path of routes){
+            const r=await get(path),html=await r.text();
+            assert.match(r.headers.get("x-robots-tag")||"",/noindex/);
+            assert.ok(html.includes("2df81be3ad3d"),path+" asset revision");
+            const rest=path.replace(/^\/(fa|ps)\//,"/");
+            for(const locale of ["","fa/","ps/"]){assert.ok(html.includes("https://toeflhouse.pages.dev/"+locale+rest.slice(1)),path+" locale alternate "+locale);}
+          }
+          for(const path of ["/admissions/","/fa/admissions/","/ps/admissions/"]){assert.match(await (await get(path)).text(),/Google Meet/);}
+          const denial=await fetch(base+"/__qa_readonly_probe__",{method:"POST",redirect:"manual"});
+          assert.equal(denial.status,403);
+          assert.match(await denial.text(),/Preview is read-only/);
+          for(const path of ["/assets/aistudio/FB_IMG_1793645643808_dad823ce.jpg","/assets/aistudio/teacher-training-poster.webp","/assets/fonts/NotoSansArabic-400.woff2"]){
+            const preview=await get(path),live=await fetch("https://toeflhouse.pages.dev"+path);
+            assert.equal(live.status,200);
+            const hash=async r=>createHash("sha256").update(Buffer.from(await r.arrayBuffer())).digest("hex");
+            assert.equal(await hash(preview),await hash(live),path);
+          }
+          console.log("Exact revision, 39 locale routes, read-only probe and three representative binary assets passed.");
+          NODE
+          node cloudflare/site-v2/production-full-acceptance.mjs
+          node cloudflare/site-v2/final-production-navigation.mjs
+      - run: npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
+      - name: All routes and four widths — responsive geometry, locale, red brand and automated WCAG checks
+        run: |
+          node <<'NODE'
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          const axe=require("/tmp/toefl-accessibility/node_modules/axe-core");
+          const assert=require("node:assert/strict");
+          const fs=require("node:fs");
+          (async()=>{
+            const base=process.env.TOEFL_QA_BASE;
+            const xml=await (await fetch(base+"/sitemap.xml")).text();
+            const paths=[...new Set([...xml.matchAll(/<loc>(https:\/\/toeflhouse\.pages\.dev[^<]+)<\/loc>/g)].map(m=>new URL(m[1]).pathname))];
+            assert.equal(paths.length,39);
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            const issues=[],violations=[];let checked=0,axeChecked=0;
+            try{
+              for(const width of [320,390,768,1440]){
+                const page=await browser.newPage({viewport:{width,height:900},bypassCSP:true});
+                for(const path of paths){
+                  try{
+                    const response=await page.goto(base+path,{waitUntil:"domcontentloaded",timeout:30000});
+                    await page.evaluate(()=>document.fonts.ready);
+                    const v=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth-innerWidth,h1:document.querySelectorAll("h1").length,lang:document.documentElement.lang,dir:document.documentElement.dir,brand:getComputedStyle(document.documentElement).getPropertyValue("--red").trim()}));
+                    const lang=path.startsWith("/fa/")?"fa-AF":path.startsWith("/ps/")?"ps-AF":"en";
+                    if(response.status()!==200||v.overflow>1||v.h1!==1||v.lang!==lang||v.dir!==(lang==="en"?"ltr":"rtl")||v.brand!=="#c00818")issues.push({path,width,status:response.status(),...v});
+                    checked++;
+                    if(width===390){
+                      await page.addScriptTag({content:axe.source});
+                      const audit=await page.evaluate(async()=>await window.axe.run(document,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21a","wcag21aa"]}}));
+                      for(const v of audit.violations)violations.push({path,id:v.id,impact:v.impact,nodes:v.nodes.map(n=>n.target)});
+                      axeChecked++;
+                    }
+                  }catch(e){issues.push({path,width,error:String(e)});}
+                }
+                await page.close();
+              }
+            }finally{await browser.close();}
+            const result={checked,axeChecked,issues,violations};
+            fs.mkdirSync("qa-results",{recursive:true});fs.writeFileSync("qa-results/geometry-axe.json",JSON.stringify(result,null,2));
+            console.log(JSON.stringify(result,null,2));
+            assert.equal(checked,156);assert.equal(axeChecked,39);assert.deepEqual(issues,[]);assert.deepEqual(violations,[]);
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - name: Capture localized homepage screenshots and verify direct course navigation
+        run: |
+          node <<'NODE'
+          const {chromium}=require("/tmp/toefl-accessibility/node_modules/playwright-core");
+          const assert=require("node:assert/strict");
+          const fs=require("node:fs");
+          (async()=>{
+            fs.mkdirSync("qa-results/home-screenshots",{recursive:true});
+            const browser=await chromium.launch({headless:true,executablePath:"/usr/bin/google-chrome",args:["--no-sandbox","--disable-dev-shm-usage"]});
+            try{
+              for(const width of [320,390,768,1440]){
+                const page=await browser.newPage({viewport:{width,height:900},reducedMotion:"reduce"});
+                for(const [locale,path] of [["en","/"],["fa","/fa/"],["ps","/ps/"]]){
+                  const res=await page.goto(process.env.TOEFL_QA_BASE+path,{waitUntil:"networkidle"});
+                  assert.equal(res.status(),200);
+                  await page.evaluate(()=>document.fonts.ready);
+                  const nav=page.locator(".home-paths");
+                  assert.equal(await nav.count(),1);
+                  assert.equal(await nav.locator("a").count(),3);
+                  for(const id of ["general-english","academic-english","toefl-preparation"]){
+                    const link=nav.locator('a[href="'+path+'courses/'+id+'/"]');
+                    assert.equal(await link.count(),1);
+                    const box=await link.boundingBox();assert.ok(box&&box.height>=44&&box.x>=0&&box.x+box.width<=width+1);
+                  }
+                  assert.equal(await page.locator(".course-card").count(),6);
+                  assert.equal(await page.locator(".home-path-label").count(),3);
+                  assert.equal(await page.locator(".growth-card-grid .growth-card").count(),3);
+                  const layout=await page.evaluate(()=>({hero:getComputedStyle(document.querySelector(".hero-grid")).backgroundColor,cards:getComputedStyle(document.querySelector(".growth-card-grid")).display,order:document.querySelector("#programs").compareDocumentPosition(document.querySelector("#semester-qaws-1405"))}));
+                  assert.equal(layout.hero,"rgb(152, 6, 22)");assert.equal(layout.cards,"grid");assert.ok(layout.order&4);
+
+                  await page.screenshot({path:"qa-results/home-screenshots/"+locale+"-"+width+".png",fullPage:true,animations:"disabled"});
+                }
+                await page.close();
+              }
+            }finally{await browser.close();}
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-preview-responsive-wcag
+          path: qa-results/
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Lighthouse on three localized preview homepages
+        run: |
+          mkdir -p reports
+          export CHROME_PATH=/usr/bin/google-chrome
+          for locale in en fa ps; do
+            suffix=""
+            if [ "$locale" != en ]; then suffix="$locale/"; fi
+            npx --yes lighthouse@12.8.2 "$TOEFL_QA_BASE/$suffix" --chrome-flags="--headless --no-sandbox --disable-dev-shm-usage" --output=json --output-path="reports/$locale.json" --quiet
+          done
+          node <<'NODE'
+          const assert=require("node:assert/strict");
+          for(const locale of ["en","fa","ps"]){
+            const r=require("./reports/"+locale+".json"),scores=Object.fromEntries(Object.entries(r.categories).map(([k,v])=>[k,v.score]));
+            const LCP=r.audits["largest-contentful-paint"].numericValue,CLS=r.audits["cumulative-layout-shift"].numericValue,TBT=r.audits["total-blocking-time"].numericValue;
+            console.log(JSON.stringify({locale,scores,LCP,CLS,TBT}));
+            assert.ok(!r.runtimeError,locale);
+            assert.ok(scores.performance>=0.85,locale+" performance");
+            assert.ok(scores.accessibility>=0.95,locale+" accessibility");
+            assert.ok(scores["best-practices"]>=0.95,locale+" best practices");
+            assert.ok(CLS<=0.1,locale+" CLS");assert.ok(LCP<=4000,locale+" LCP");assert.ok(TBT<=300,locale+" TBT");
+            // Preview is intentionally noindex: SEO score is reported, not a gate.
+          }
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-preview-lighthouse
+          path: reports/
