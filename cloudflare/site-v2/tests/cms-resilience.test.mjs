@@ -171,3 +171,53 @@ test('unavailable or unreadable published records preserve page fallback and API
   for(const method of ['GET','HEAD']){const api=await request('/api/content',env,method);assert.equal(api.status,503);if(method==='HEAD')assert.equal(await api.text(),'');}
  }
 }));
+
+test('course details handle incomplete content without duplicate or invented sections',async()=>{
+ const {main,ps}=fixtures();
+ for(const locale of [main.locales.en,main.locales.fa,ps]){
+  const p=locale.programs.find(p=>p.id==='professional-writing');
+  Object.assign(p,{title:'professional-writing',summary:'ONLY-ONCE',details:'ONLY-ONCE',duration:' ',highlights:[null,{},'  '],levels:{},schedule:[],recommendedFor:{}});
+ }
+ const {env}=binding(main,ps);
+ for(const [prefix,title] of [['/','Professional Writing'],['/fa/','نگارش'],['/ps/','لیکن']]){
+  const response=await request(prefix+'courses/professional-writing/',env);assert.equal(response.status,200);
+  const html=await response.text(),mainHtml=html.match(/<main id="main"[\s\S]*?<\/main>/)?.[0];assert.ok(mainHtml);
+  const hero=mainHtml.match(/<h1>(.*?)<\/h1>/)?.[1];assert.ok(hero.includes(title),hero);assert.notEqual(hero,'professional-writing');
+  assert.equal((mainHtml.match(/ONLY-ONCE/g)||[]).length,1);
+  assert.doesNotMatch(mainHtml,/class="detail-summary"|class="detail-longcopy"|class="detail-info"|\[object Object\]/);
+  assert.match(mainHtml,/<aside class="detail-aside"><h2>/);
+  assert.match(mainHtml,/href="(?:\/|\/fa\/|\/ps\/)admissions\/\?program=professional-writing"/);
+ }
+});
+
+test('course details preserve meaningful CMS text and localize accessible catalogue link names',async()=>{
+ const {main,ps}=fixtures();
+ for(const locale of [main.locales.en,main.locales.fa,ps]){
+  const p=locale.programs.find(p=>p.id==='professional-writing');
+  Object.assign(p,{title:'Edited English title',summary:'Intro text',details:'Distinct detail',duration:'Eight weeks',highlights:['First skill',null,' ', 'Second skill'],levels:'Intermediate',schedule:'Evenings',recommendedFor:'Working adults'});
+ }
+ const {env}=binding(main,ps);
+ for(const prefix of ['/','/fa/','/ps/']){
+  const html=await (await request(prefix+'courses/professional-writing/',env)).text();
+  for(const text of ['Intro text','Distinct detail','Eight weeks','First skill','Second skill','Intermediate','Evenings','Working adults'])assert.ok(html.includes(text),prefix+' '+text);
+  assert.equal((html.match(/<li>First skill<\/li>/g)||[]).length,1);
+  if(prefix==='/')assert.match(html,/<h1>Edited English title<\/h1>/);
+  else assert.doesNotMatch(html,/<h1>Edited English title<\/h1>/);
+  const home=await (await request(prefix,env)).text();
+  const card=home.match(/<article id="course-professional-writing"[\s\S]*?<\/article>/)?.[0];assert.ok(card);
+  const heading=card.match(/<h3>(.*?)<\/h3>/)?.[1],label=card.match(/aria-label="([^"]+)"/)?.[1];
+  assert.ok(heading&&label?.includes(heading),prefix+' link accessible name matches visible course');
+ }
+});
+
+test('online course retains localized published titles and uses a localized fallback for an ID-only title',async()=>{
+ const {main,ps}=fixtures();
+ for(const [locale,title] of [[main.locales.en,'Private classes'],[main.locales.fa,'صنف خصوصی'],[ps,'ځانګړی ټولګی']])locale.programs.find(p=>p.id==='online-individual-zoom').title=title;
+ for(const [prefix,title] of [['/','Private classes'],['/fa/','صنف خصوصی'],['/ps/','ځانګړی ټولګی']]){
+  const html=await (await request(prefix+'courses/online-individual-zoom/',binding(main,ps).env)).text();assert.ok(html.includes('<h1>'+title+'</h1>'));
+ }
+ for(const locale of [main.locales.en,main.locales.fa,ps])locale.programs.find(p=>p.id==='online-individual-zoom').title='online-individual-zoom';
+ for(const prefix of ['/','/fa/','/ps/']){
+  const html=await (await request(prefix+'courses/online-individual-zoom/',binding(main,ps).env)).text();assert.doesNotMatch(html,/<h1>online-individual-zoom<\/h1>/);
+ }
+});
