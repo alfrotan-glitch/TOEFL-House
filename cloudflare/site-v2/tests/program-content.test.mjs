@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {runInNewContext} from 'node:vm';
 import {compileContent} from '../content-compiler.mjs';
 import {extractContentContract} from '../content-contract.mjs';
 const load=async name=>JSON.parse(await readFile(new URL('../content/'+name,import.meta.url),'utf8'));
@@ -82,4 +83,39 @@ test('authoritative source catalog parsing rejects changed, invalid or ambiguous
  assert.throws(()=>extractContentContract(edge.replace('const V2_PUBLIC_COURSES=', 'const REMOVED='),renderer),/Missing/);
  assert.throws(()=>extractContentContract(edge.replace('"general-english","academic-english"','"bad/route","academic-english"'),renderer),/catalog IDs/);
  assert.throws(()=>extractContentContract(edge,renderer.replace('"correct":1','"correct":9')),/practice question/);
+});
+
+test('reordering non-foundation General English stages keeps localized focus, description, duration and fee attached to their identities',async()=>{
+ const [general,academic,special,guides,home,ui]=await content();
+ const [edge,renderer]=await sources(),contract=extractContentContract(edge,renderer);
+ const updated=structuredClone(general);
+ [updated.catalog[1],updated.catalog[4]]=[updated.catalog[4],updated.catalog[1]];
+ // Distinct synthetic labels catch an accidental reliance on position, even if
+ // the actual published prices currently happen to be identical.
+ for(const locale of ['en','fa','ps'])for(const stage of updated.catalog){
+  const record=updated.locales[locale].stageData[stage.id];
+  record.focus=`FOCUS:${locale}:${stage.id}`;
+  record.description=`DESCRIPTION:${locale}:${stage.id}`;
+  record.fee=`FEE:${locale}:${stage.id}`;
+ }
+ const compiled=compileContent(updated,academic,special,guides,home,ui,contract);
+ for(const locale of ['en','fa','ps']){
+  const html=runInNewContext(compiled+'\n'+renderer+'\nv2GeneralEnglish(locale)',{
+   locale,v2T:value=>String(value),v2Prefix:()=> '/',v2BookGuideLink:()=>''
+  });
+  const stages=[...html.matchAll(/<li class="ge-stage">([\s\S]*?)<\/li>/g)].map(m=>m[1]);
+  const table=html.match(/<table class="ge-fee-table">[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/)[1];
+  const rows=[...table.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(m=>m[1]);
+  assert.equal(stages.length,5);assert.equal(rows.length,5);
+  for(const [i,stage] of updated.catalog.entries()){
+   const data=updated.locales[locale].stageData[stage.id];
+   assert.ok(stages[i].includes('<h4 dir="ltr">'+stage.id+'</h4>'));
+   assert.ok(stages[i].includes(data.focus));assert.ok(stages[i].includes(data.description));
+   assert.ok(stages[i].includes(updated.locales[locale][stage.durationKey]));
+   assert.ok(rows[i].includes('>'+stage.id+'</th>'));assert.ok(rows[i].includes(data.fee));
+   assert.ok(rows[i].includes(updated.locales[locale][stage.durationKey]));
+  }
+ }
+ const invalid=structuredClone(updated);[invalid.catalog[0],invalid.catalog[1]]=[invalid.catalog[1],invalid.catalog[0]];
+ assert.throws(()=>compileContent(invalid,academic,special,guides,home,ui,contract),/stage duration/);
 });
