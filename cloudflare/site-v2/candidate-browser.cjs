@@ -105,6 +105,16 @@ const axe=require('axe-core');
     await page.setViewportSize({width,height:900});
     for(const [path,label] of [[prefix+'guides/','library'],[prefix+'guides/got-it-series/','book']]){
      await page.goto(origin+path,{waitUntil:'load'});
+     if(label==='library'){
+      const cards=page.locator('.book-library .growth-card');
+      assert.equal(await cards.count(),4,`${lang} ${width} textbook links`);
+      const card=cards.first(),spine=card.locator('small');
+      assert.equal(await card.getAttribute('href'),prefix+'guides/got-it-series/');
+      await card.focus();assert.equal(await card.evaluate(e=>e===document.activeElement),true,`${lang} ${width} keyboard focus`);
+      const boxes=await Promise.all([card.boundingBox(),spine.boundingBox()]);
+      assert.ok(boxes[0]&&boxes[1]);
+      assert.ok(lang==='en'?boxes[1].x<boxes[0].x+3:boxes[1].x+boxes[1].width>boxes[0].x+boxes[0].width-3,`${lang} ${width} logical spine`);
+     }
      await page.screenshot({path:join(out,`${label}-${lang}-${width}.png`)});
     }
    }

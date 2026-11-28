@@ -188,3 +188,35 @@ html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissio
 }
 /* Keep the short test name together in RTL headings without constraining long book titles. */
 .guide-hero h1 .guide-mark { white-space: nowrap; }
+
+/* A library shelf rather than another set of marketing cards. The numbered
+   spine is decorative; the native link still contains the complete guide. */
+.book-library .growth-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0,1fr);
+  grid-template-rows: auto 1fr auto;
+  gap: 12px 24px;
+  padding: 0;
+  padding-inline-end: 26px;
+  border: 1px solid var(--signature-line);
+  border-start-start-radius: 4px;
+  border-end-start-radius: 4px;
+  border-start-end-radius: 14px;
+  border-end-end-radius: 14px;
+  background: #fff;
+}
+.book-library .growth-card small {
+  grid-row: 1 / 4;
+  padding: 26px 9px;
+  background: var(--signature-red);
+  color: #fff;
+  text-align: center;
+}
+.book-library .growth-card h2 { padding-block-start: 26px; }
+.book-library .growth-card p { margin: 0; }
+.book-library .growth-arrow { margin: 0 0 24px; }
+@media(max-width:460px) {
+  .book-library .growth-card { grid-template-columns: 54px minmax(0,1fr); gap: 10px 16px; padding-inline-end: 18px; }
+  .book-library .growth-card small { padding: 24px 4px; font-size: 10px; }
+  .book-library .growth-card h2 { padding-block-start: 24px; }
+}
