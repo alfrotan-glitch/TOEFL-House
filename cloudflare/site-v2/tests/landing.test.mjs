@@ -1048,11 +1048,11 @@ test("Signature editorial hero preserves accessible actions, true photography an
  const css=await cssResponse.text();
  assert.match(css,/\.hero\{position:relative;overflow:hidden;background:#fff;color:var\(--ink\)\}/);
  assert.match(css,/\.button-primary\{background:var\(--red\);color:#fff\}/);
- assert.match(css,/\.hero a:focus-visible\{outline-color:var\(--red\)\}/);
- assert.match(css,/\.photo-frame\{[^}]*border-radius:28px/);
- assert.match(css,/\.course-card\{border:2px solid var\(--line\);border-radius:22px/);
+ assert.match(css,/\.hero a:focus-visible\{outline-color:#fff\}/);
+ assert.match(css,/\.hero-grid\{[^}]*background:var\(--red-dark\);border-radius:18px/);
+ assert.match(css,/\.course-card\{border:1px solid var\(--line\);border-radius:14px/);
  assert.match(css,/\.button-primary:active\{transform:translateY\(2px\)/);
- assert.match(css,/@media\(prefers-reduced-motion:no-preference\)\{\.photo-label\{animation:hero-caption/);
+ assert.doesNotMatch(css,/animation:hero-caption/);
  for(const root of ["/","/fa/","/ps/"]){
   const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+root),env())).text();
   assert.match(html,/<div class="photo-frame"><img[^>]*alt="[^"]+"/);
@@ -1074,7 +1074,7 @@ test("Mobile language style must not terminate the responsive media query premat
 
 test("Signature hero keeps compact mobile spacing and fluid trilingual typography",async()=>{
  const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
- assert.match(css,/\.hero-grid\{padding-block:28px 40px;gap:22px\}/);
+ assert.match(css,/\.hero-grid\{display:flex;flex-direction:column;gap:0;margin-block:16px 20px\}/);
  assert.match(css,/html\[dir=rtl\] \.hero h1\{font-size:clamp\(30px,8\.7vw,35px\)\}/);
  assert.match(css,/\.hero-actions \.button\{font-size:12px;min-height:52px/);
 });
@@ -1144,5 +1144,41 @@ test("homepage learner habits and original localized learning guides are discove
   }
   assert.ok(section[1].includes('href="'+prefix+'guides/"'));
   assert.doesNotMatch(section[1],/zabanshenas\.com|<script|<iframe/);
+ }
+});
+
+
+test("Editorial homepage exposes three localized course paths immediately after the hero",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const res=await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env());assert.equal(res.status,200);
+  const html=await res.text();assert.match(html,/<body class="home-editorial">/);
+  const paths=html.match(/<div class="shell home-paths">([\s\S]*?)<\/nav><\/div>/)?.[1];assert.ok(paths,prefix);
+  assert.equal((paths.match(/<a href=/g)||[]).length,3);
+  for(const id of ["general-english","academic-english","toefl-preparation"])assert.ok(paths.includes('href="'+prefix+'courses/'+id+'/"'),prefix+id);
+  assert.ok(html.indexOf('class="shell home-paths"')>html.indexOf('class="hero"'));
+ }
+});
+
+
+test("Homepage prioritizes course discovery over campaign and shares guide card styling",async()=>{
+ const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
+ assert.match(css,/\.growth-card-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+ assert.match(css,/\.growth-card\{display:flex;flex-direction:column/);
+ assert.match(css,/\.hero-actions \.button-primary\{background:#fff;color:var\(--red-dark\)/);
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env())).text();
+  const program=html.indexOf('id="programs"'),campaign=html.indexOf('id="semester-qaws-1405"');
+  assert.ok(program>0&&campaign>program,prefix+" course discovery should precede campaign");
+  assert.ok(html.includes('class="growth-card-grid"'),prefix);
+ }
+});
+
+
+test("Signature course entry cards identify three academic pathways without modifying the approved palette",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env())).text();
+  const nav=html.match(/<div class="shell home-paths">([\s\S]*?)<\/nav><\/div>/)?.[1];assert.ok(nav,prefix);
+  for(const code of ["GENERAL ENGLISH","EAP","TOEFL iBT"])assert.ok(nav.includes('lang="en" dir="ltr">'+code+'</small>'),prefix+code);
+  assert.equal((nav.match(/class="home-path-label"/g)||[]).length,3);
  }
 });
