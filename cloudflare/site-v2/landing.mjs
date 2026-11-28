@@ -248,7 +248,7 @@ const V2_HOME_PATHS={
 };
 function v2HomeQuickPaths(locale){
  const c=V2_HOME_PATHS[locale],p=v2Prefix(locale),ids=["general-english","academic-english","toefl-preparation"];
- return '<div class="shell home-paths"><nav class="goal-finder" aria-label="'+v2T(c.label)+'"><div class="goal-finder-intro"><strong>'+v2T(c.label)+'</strong><span>'+v2T(c.hint)+'</span></div><div class="goal-finder-links">'+ids.map((id,i)=>'<a href="'+p+'courses/'+id+'/">'+v2T(c.links[i])+' <span aria-hidden="true">↗</span></a>').join("")+'</div></nav></div>';
+ return '<div class="shell home-paths"><nav class="goal-finder" aria-label="'+v2T(c.label)+'"><div class="goal-finder-intro"><strong>'+v2T(c.label)+'</strong><span>'+v2T(c.hint)+'</span></div><div class="goal-finder-links">'+ids.map((id,i)=>'<a href="'+p+'courses/'+id+'/">'+'<span class="home-path-label"><small lang="en" dir="ltr">'+["GENERAL ENGLISH","EAP","TOEFL iBT"][i]+'</small><strong>'+v2T(c.links[i])+'</strong></span><span aria-hidden="true">↗</span></a>').join("")+'</div></nav></div>';
 }
 function v2Programs(c,content,locale){
  const prefix=v2Prefix(locale);

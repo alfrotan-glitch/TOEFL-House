@@ -1172,3 +1172,13 @@ test("Homepage prioritizes course discovery over campaign and shares guide card 
   assert.ok(html.includes('class="growth-card-grid"'),prefix);
  }
 });
+
+
+test("Signature course entry cards identify three academic pathways without modifying the approved palette",async()=>{
+ for(const prefix of ["/","/fa/","/ps/"]){
+  const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env())).text();
+  const nav=html.match(/<div class="shell home-paths">([\s\S]*?)<\/nav><\/div>/)?.[1];assert.ok(nav,prefix);
+  for(const code of ["GENERAL ENGLISH","EAP","TOEFL iBT"])assert.ok(nav.includes('lang="en" dir="ltr">'+code+'</small>'),prefix+code);
+  assert.equal((nav.match(/class="home-path-label"/g)||[]).length,3);
+ }
+});
