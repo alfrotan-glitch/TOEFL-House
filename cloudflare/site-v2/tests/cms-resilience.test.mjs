@@ -48,6 +48,22 @@ test('valid editorial omission is preserved and does not trigger fallback',async
  assert.equal((await request('/api/content',env)).status,503);
 }));
 
+test('related courses use localized names and never link to omitted records',async()=>{
+ const {main,ps}=fixtures();
+ for(const locale of [main.locales.en,main.locales.fa,ps])locale.programs=locale.programs.filter(p=>['professional-writing','teacher-training'].includes(p.id));
+ const {env}=binding(main,ps);
+ for(const prefix of ['/','/fa/','/ps/']){
+  const html=await (await request(prefix+'courses/professional-writing/',env)).text();
+  const block=html.match(/<section class="detail-related section">([\s\S]*?)<\/section>/)?.[1];
+  assert.ok(block);assert.match(block,new RegExp('href="'+prefix+'courses/teacher-training/"'));
+  assert.doesNotMatch(block,/courses\/general-english|courses\/academic-english/);
+  if(prefix!=='/')assert.doesNotMatch(block,/Published teacher-training/);
+ }
+ for(const locale of [main.locales.en,main.locales.fa,ps])locale.programs=locale.programs.filter(p=>p.id==='professional-writing');
+ const single=binding(main,ps).env;
+ for(const prefix of ['/','/fa/','/ps/'])assert.doesNotMatch(await (await request(prefix+'courses/professional-writing/',single)).text(),/class="detail-related section"/);
+});
+
 test('malformed optional FAQ, stats and schedule entries cannot hide healthy published data',async()=>{
  const {main,ps}=fixtures();
  main.locales.en.faq={items:[null,{q:'Valid published question?',a:'Valid published answer'}, {q:{toString:null},a:'bad'}]};
@@ -62,7 +78,7 @@ test('malformed optional FAQ, stats and schedule entries cannot hide healthy pub
  const fa=await request('/fa/',env);assert.equal(fa.status,200);assert.match(await fa.text(),/Published summary/);
  const pashto=await request('/ps/',env);assert.equal(pashto.status,200);const psHtml=await pashto.text();assert.match(psHtml,/PUBLISHED-STAT/);assert.match(psHtml,/Valid Pashto question/);
  assert.equal((await request('/courses/professional-writing/',env)).status,200);
- assert.equal((await request('/api/content',env)).status,200);
+ assert.equal((await request('/api/content',env)).status,503);
  assert.equal(JSON.stringify({main,ps}),before,'published input was not modified');
 });
 
@@ -71,10 +87,15 @@ test('API HEAD for a missing binding has no response body',async()=>{
  const get=await request('/api/content',{});assert.equal(get.status,503);assert.deepEqual(await get.json(),{error:'Public content temporarily unavailable'});
 });
 
-test('known protected keys are removed recursively, but this is not a public schema allowlist',async()=>{
- const {main,ps}=fixtures();main.locales.en.contact={safe:'Public address',SeCrEt_KeY:'do-not-publish-one',nested:{admin_secret:'do-not-publish-two'}};
- const {env}=binding(main,ps),response=await request('/api/content',env);assert.equal(response.status,200);
- const text=await response.text();assert.match(text,/Public address/);assert.doesNotMatch(text,/do-not-publish-one|do-not-publish-two|secret_key|admin_secret/i);
+test('candidate API refuses all records without querying or leaking even unknown nested fields',async()=>{
+ const {main,ps}=fixtures();main.locales.en.contact={safe:'Public address',internal_note:'do-not-publish-one',nested:{unreviewed:'do-not-publish-two'}};
+ const {env,queries}=binding(main,ps);
+ for(const method of ['GET','HEAD']){
+  const response=await request('/api/content',env,method);assert.equal(response.status,503);
+  const text=await response.text();assert.doesNotMatch(text,/Public address|do-not-publish|internal_note|unreviewed/);
+  if(method==='HEAD')assert.equal(text,'');
+ }
+ assert.deepEqual(queries,[]);
 });
 
 test('untrusted CMS strings remain text in HTML, attributes and JSON-LD',async()=>{

@@ -528,35 +528,21 @@ test("EAP four levels retain three series while distinguishing publisher edition
  }
 });
 
-test("Published read-only API restores the exact public CMS contract in all languages",async()=>{
- const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env());
- assert.equal(response.status,200);
- assert.match(response.headers.get("Content-Type"),/application\/json/);
- assert.match(response.headers.get("X-Robots-Tag"),/noindex/);
- const publicContent=await response.json();
- assert.deepEqual(Object.keys(publicContent).sort(),["locales","media","timetable","revision","psRevision","updatedAt","cmsStatus"].sort());
- assert.equal(publicContent.cmsStatus,"connected");
- assert.equal(publicContent.revision,40);
- assert.equal(publicContent.psRevision,40);
- for(const l of ["en","fa","ps"])assert.equal(publicContent.locales[l].programs.length,7);
- assert.deepEqual(publicContent.locales.en.programs.map(p=>p.id),allIds);
- const head=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content",{method:"HEAD"}),env());
- assert.equal(head.status,200);
- assert.equal(await head.text(),"");
-});
-test("Public CMS endpoint rejects protected fields and never leaks drafts",async()=>{
- const unsafe={...main,locales:{...main.locales,en:{...main.locales.en, password_hash:"secret-do-not-publish"}}};
- const bad=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env(unsafe,ps));
- assert.equal(bad.status,200);
- const safe=await bad.text();
- assert.ok(safe.includes('"cmsStatus":"connected"'));
- assert.ok(!safe.includes("secret-do-not-publish"));
- const missing=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),{});
- assert.equal(missing.status,503);
- const before=JSON.stringify(main)+JSON.stringify(ps);
- const normal=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env());
- assert.equal(normal.status,200);
- assert.equal(JSON.stringify(main)+JSON.stringify(ps),before,"GET may not mutate CMS fixtures");
+test("Candidate public CMS API fails closed before database access until schema approval",async()=>{
+ let queries=0;
+ const binding={CMS_DB:{prepare(){queries++;throw Error('must not read unclassified content');}}};
+ for(const method of ['GET','HEAD']){
+  const response=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content",{method}),binding);
+  assert.equal(response.status,503);
+  assert.match(response.headers.get("Content-Type"),/application\/json/);
+  assert.match(response.headers.get("X-Robots-Tag"),/noindex/);
+  const body=await response.text();
+  if(method==='HEAD')assert.equal(body,'');
+  else assert.deepEqual(JSON.parse(body),{error:'Public content temporarily unavailable'});
+ }
+ const unsafe=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content",{method:'POST'}),binding);
+ assert.equal(unsafe.status,405);assert.equal(unsafe.headers.get('Allow'),'GET, HEAD');
+ assert.equal(queries,0);
 });
 
 test("Language selector labels and textbook pronunciation are accessible in all three languages",async()=>{
@@ -974,13 +960,9 @@ test("Google Meet copy across three languages preserves legacy online routes and
    if(path.endsWith("online-individual-zoom/"))assert.match(h,/online-individual-zoom/);
   }
  }
+ // The public API is intentionally unavailable pending schema review.
  const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/api/content"),env(m,p));
- assert.equal(r.status,200);
- const data=await r.json();
- for(const locale of Object.values(data.locales)){
-  const item=locale.programs.find(x=>x.id==="online-individual-zoom");
-  assert.equal(item.title,"Private Google Meet classes");assert.equal(item.highlights[0],"Google Meet practice");
- }
+ assert.equal(r.status,503);
 });
 
 test("Desktop-only image preload and revision-qualified cache lifetime",async()=>{
@@ -1012,7 +994,7 @@ test("Public design system uses only approved red, white and neutral colors",asy
  assert.match(css,/\.detail-summary\{background:#fff;color:var\(--ink\);border:1px solid var\(--line\);border-inline-start:4px solid var\(--red\)/);
  assert.match(css,/\.detail-summary li::before\{[^}]*background:var\(--red\);color:#fff/);
  assert.match(css,/\.online-panel\{background:linear-gradient\(125deg,var\(--red-dark\),var\(--red\)\)/);
- assert.match(css,/\.footer\{background:var\(--red-dark\)/);
+ assert.match(css,/\.footer\{background:var\(--ink\)/);
 });
 
 test("Shared logo preserves exact artwork, versioned caching and preview indexing rules",async()=>{
@@ -1053,8 +1035,8 @@ test("Signature editorial hero preserves accessible actions, true photography an
  const css=await cssResponse.text();
  assert.match(css,/\.hero\{position:relative;overflow:hidden;background:#fff;color:var\(--ink\)\}/);
  assert.match(css,/\.button-primary\{background:var\(--red\);color:#fff\}/);
- assert.match(css,/\.hero a:focus-visible\{outline-color:#fff\}/);
- assert.match(css,/\.hero-grid\{[^}]*background:var\(--red-dark\);border-radius:18px/);
+ assert.match(css,/a:focus-visible,summary:focus-visible,button:focus-visible\{outline:3px solid var\(--red\)/);
+ assert.match(css,/\.hero-grid\{[^}]*background:var\(--paper\);border-radius:18px/);
  assert.match(css,/\.course-card\{border:1px solid var\(--line\);border-radius:14px/);
  assert.match(css,/\.button-primary:active\{transform:translateY\(2px\)/);
  assert.doesNotMatch(css,/animation:hero-caption/);
@@ -1169,7 +1151,7 @@ test("Homepage prioritizes course discovery over campaign and shares guide card 
  const css=await (await worker.fetch(new Request("https://toeflhouse.pages.dev/__th/v2/site.css"),env())).text();
  assert.match(css,/\.growth-card-grid\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
  assert.match(css,/\.growth-card\{display:flex;flex-direction:column/);
- assert.match(css,/\.hero-actions \.button-primary\{background:#fff;color:var\(--red-dark\)/);
+ assert.match(css,/\.hero-actions \.button-primary\{background:var\(--red-dark\);color:#fff/);
  for(const prefix of ["/","/fa/","/ps/"]){
   const html=await (await worker.fetch(new Request("https://toeflhouse.pages.dev"+prefix),env())).text();
   const program=html.indexOf('id="programs"'),campaign=html.indexOf('id="semester-qaws-1405"');

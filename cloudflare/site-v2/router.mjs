@@ -2,7 +2,7 @@
 // edge routing. The build composes this module at the explicit edge hook.
 async function v2Route(request,env,url){
  if(noindex(url.hostname)&&!["GET","HEAD","OPTIONS"].includes(request.method))return new Response("Preview is read-only",{status:403,headers:{"Cache-Control":"no-store","X-Robots-Tag":"noindex"}});
- if(url.pathname==="/api/content"&&["GET","HEAD"].includes(request.method))return v2PublicContent(request,env);
+ if(url.pathname==="/api/content")return v2PublicContent(request,env);
  const homeLocale=url.pathname==="/"?"en":url.pathname==="/fa/"?"fa":url.pathname==="/ps/"?"ps":null;
  if(homeLocale){
   const page=await v2Home(request,env,homeLocale);

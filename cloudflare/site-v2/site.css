@@ -45,17 +45,17 @@ a:focus-visible,summary:focus-visible,button:focus-visible{outline:3px solid var
 html[dir=rtl] .eyebrow{letter-spacing:0;font-size:13px}
 .section{padding:105px 0}
 .hero{position:relative;overflow:hidden;background:#fff;color:var(--ink)}
-.hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:0;align-items:stretch;margin-block:28px 24px;background:var(--red-dark);border-radius:18px;overflow:hidden}
-.hero-copy{min-width:0;align-self:center;padding:clamp(26px,3.4vw,52px);color:#fff}
-.eyebrow-hero{color:#fff;font-size:12px;letter-spacing:.13em;margin-bottom:16px;margin-inline-end:12px}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:0;align-items:stretch;margin-block:28px 24px;background:var(--paper);border-radius:18px;overflow:hidden}
+.hero-copy{min-width:0;align-self:center;padding:clamp(26px,3.4vw,52px);color:var(--ink)}
+.eyebrow-hero{color:var(--red-dark);font-size:12px;letter-spacing:.13em;margin-bottom:16px;margin-inline-end:12px}
 .eyebrow-rule{background:currentColor;height:2px;width:35px;display:inline-block;flex:none}
 .hero h1{font-weight:850;letter-spacing:-.06em;font-size:clamp(42px,4.3vw,60px);line-height:1.08;max-width:650px;margin:0 0 24px}
-.hero h1 span{display:block;color:#f8d7dc}
+.hero h1 span{display:block;color:var(--red-dark)}
 html[dir=rtl] .hero h1{font-weight:800;letter-spacing:0;line-height:1.42;font-size:clamp(36px,4.3vw,60px);max-width:740px}
 .hero-lead{max-width:560px;margin:0 0 32px}
 .hero-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
-.hero-fine{margin-top:25px;padding-top:16px;border-top:1px solid #ffffff60;display:flex;gap:10px;align-items:center;font-weight:700;max-width:520px}
-.hero-fine span{font-size:20px;color:#f8d7dc}
+.hero-fine{margin-top:25px;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;font-weight:700;max-width:520px}
+.hero-fine span{font-size:20px;color:var(--red-dark)}
 .hero-art{min-width:0;display:flex;flex-direction:column;background:#fff}
 .photo-frame{position:relative;overflow:hidden;width:100%;flex:1;min-height:440px;background:var(--paper)}
 .photo-frame>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
@@ -79,7 +79,7 @@ html[dir=rtl] .section-head h2,html[dir=rtl] .faq-aside h2{line-height:1.6;lette
 .section-head h2 em{font-style:normal;color:var(--red)}
 .section-intro{max-width:335px;margin:0}
 .programs-section{background:var(--paper)}
-.courses-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}
+.courses-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
 .course-card{position:relative;cursor:pointer;background:#fff;padding:27px 27px 22px;display:flex;flex-direction:column;transition:box-shadow .25s var(--ease),transform .25s var(--ease),border-color .25s}
 .course-card:hover{transform:translateY(-3px)}
 .course-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
@@ -393,9 +393,9 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .ge-skills h4{font-size:17px;margin:0 0 6px}
 .ge-skills p{font-size:14px;color:var(--muted);margin:0}
 .ge-skills .ge-fact{justify-content:flex-start}
-.ge-stages{display:grid;grid-template-columns:1fr;gap:10px;list-style:none;padding:0;margin:0}
-.ge-stage{display:grid;grid-template-columns:40px minmax(0,1fr);gap:14px;background:#fff;border:2px solid var(--line);border-radius:20px;padding:21px;min-width:0;align-items:center}
-.ge-number{font-size:22px;color:var(--red-dark);font-weight:900;letter-spacing:-.03em;text-align:center;background:#fde8e9;border-radius:12px}
+.ge-stages{display:grid;grid-template-columns:1fr;gap:0;list-style:none;padding:0;margin:0;border-block-end:1px solid var(--line)}
+.ge-stage{display:grid;grid-template-columns:40px minmax(0,1fr);gap:20px;background:transparent;border-block-start:1px solid var(--line);padding:24px 0;min-width:0;align-items:center}
+.ge-number{font-size:18px;color:#fff;font-weight:900;letter-spacing:-.03em;text-align:center;background:var(--red-dark);border-radius:50%;line-height:40px}
 .ge-stage>div{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2.4fr) max-content;align-items:center;gap:20px}
 .ge-stage h4{font-size:18px;font-weight:800;line-height:1.5;margin:0;direction:ltr;text-align:start}
 html[dir=rtl] .ge-stage h4{text-align:right}
@@ -465,8 +465,8 @@ html[dir=rtl] .ge-stage h4{text-align:right}
 .ge-fact{padding:16px;min-height:98px}
 .ge-fact strong{font-size:17px}
 .ge-fact span{font-size:13px}
-.ge-stages{gap:9px}
-.ge-stage{padding:16px;grid-template-columns:32px minmax(0,1fr);align-items:start}
+.ge-stages{gap:0}
+.ge-stage{padding:20px 0;grid-template-columns:40px minmax(0,1fr);align-items:start}
 .ge-stage>div{grid-template-columns:1fr;gap:8px;justify-items:start}
 .ge-stages-block,.ge-columns{margin-bottom:46px}
 .ge-side{display:grid;grid-template-columns:1fr}
@@ -701,9 +701,9 @@ a:focus-visible,button:focus-visible,select:focus-visible,summary:focus-visible,
 .button-xl{font-size:15px;min-height:52px}
 .button-light,.button-white{font-size:14px}
 .hero-lead{font-size:17px;line-height:1.85}
-.hero-fine{font-size:13px;line-height:1.7;color:#fff}
+.hero-fine{font-size:13px;line-height:1.7;color:var(--reading)}
 .section-intro{font-size:15px;line-height:1.9;color:var(--muted)}
-.course-card{min-height:290px}
+.course-card{min-height:250px}
 .course-card:focus-within{border-color:var(--red);box-shadow:0 0 0 2px #c008182a}
 .course-card h3{font-size:clamp(20px,2vw,26px);line-height:1.35;overflow-wrap:anywhere}
 .course-full-name{display:block;font-size:12px;font-weight:700;color:var(--red-dark);line-height:1.5;margin:0 0 10px;text-align:start;overflow-wrap:anywhere}
@@ -862,7 +862,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .brand strong{color:#292629}
 .mobile-quick-apply{display:none}
 .hero h1,.section-head h2,.final-inner h2,.eap-heading h2,.detail-intro h1{text-wrap:balance}
-.hero-lead{color:#fff}
+.hero-lead{color:var(--reading)}
 .button-primary{box-shadow:0 4px var(--red-dark)}
 .button-primary:active{transform:translateY(2px);box-shadow:0 2px var(--red-dark)}
 .course-card{border:1px solid var(--line);border-radius:14px;min-width:0;overflow-wrap:anywhere;box-shadow:0 3px 16px #2424270a}
@@ -881,7 +881,7 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .online-panel{background:linear-gradient(125deg,var(--red-dark),var(--red));border-radius:16px}
 .online-symbol,.online-copy p:not(.eyebrow){color:#fff}
 .final-cta{background:linear-gradient(110deg,var(--red-dark),var(--red) 60%,var(--red-dark))}
-.footer{background:var(--red-dark)}
+.footer{background:var(--ink)}
 .footer-brand p,.footer-hours,.footer-links a,.footer-bottom{color:#fff}
 .faq-list summary:hover,.faq-list summary:focus-visible{color:var(--red)}
 @media(max-width:760px){
@@ -990,10 +990,10 @@ html[dir=rtl] .notfound-section h1{line-height:1.55}
 .eap-editorial .eap-visual-small{padding-bottom:24px;text-align:left;letter-spacing:.08em}
 @media(prefers-reduced-motion:no-preference){
 .eap-editorial .eap-faq-plus{transition:transform .18s ease-out}}
-.hero-actions .button-primary{background:#fff;color:var(--red-dark);box-shadow:none}
-.hero-actions .button-quiet{background:transparent;border-color:#f8d7dc;color:#fff}
-.hero-actions .button:hover{background:#f8d7dc;color:var(--red-dark)}
-.hero a:focus-visible{outline-color:#fff}
+.hero-actions .button-primary{background:var(--red-dark);color:#fff}
+.hero-actions .button-quiet{background:#fff;border-color:var(--line);color:var(--ink)}
+.hero-actions .button-primary:hover{background:#690912}
+.hero-actions .button-quiet:hover{background:#fde8e9}
 .home-editorial .site-header{background:#fff;backdrop-filter:none;-webkit-backdrop-filter:none}
 .home-paths .goal-finder{margin-block:0 20px;border-inline-start:1px solid var(--line);border-block-start:4px solid var(--red);box-shadow:none}
 .home-paths .goal-finder-links a{flex:1 1 140px;justify-content:space-between;text-align:start;min-height:70px;background:#fff}

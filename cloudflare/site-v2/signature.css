@@ -80,11 +80,12 @@ html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissio
 
 /* The homepage remains grounded in the institution's real photography. */
 .hero-grid { box-shadow: 0 22px 55px #6909121a; }
-.hero-copy { background-image: radial-gradient(ellipse at 0% 0%, #c00818, transparent 60%); }
+.hero-copy { background: var(--paper); }
 .photo-frame { background: linear-gradient(145deg, #fff3f3, #f8d7dc); }
 .photo-label { background: #242427f0; border-inline-start: 4px solid var(--logo-red); }
 .journey-step { border-block-start: 2px solid var(--signature-red); }
 .footer { border-block-start: 5px solid var(--logo-red); }
+.footer a:focus-visible { outline-color: #fff; }
 
 /* Motion reinforces affordances, never content visibility. */
 @media (hover:hover) and (prefers-reduced-motion:no-preference) {
@@ -126,6 +127,10 @@ html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissio
   align-items: start;
 }
 .guide-contents {
+  position: sticky;
+  inset-block-start: 110px;
+  max-height: calc(100vh - 130px);
+  overflow: auto;
   background: var(--paper);
   border-block-start: 4px solid var(--signature-red);
   padding: 22px;
@@ -165,7 +170,6 @@ html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissio
 }
 .guide-back { border-block-start: 1px solid var(--signature-line); width: 100%; }
 .guide-layout .growth-article { width: 100%; max-width: none; margin: 0; min-width: 0; }
-.guide-layout .growth-article > section { scroll-margin-block-start: 24px; }
 .editorial-guides .growth-article .guide-course {
   display: inline-flex;
   gap: 8px;
@@ -182,7 +186,7 @@ html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissio
 .guide-related .growth-card h3 { color: var(--ink); font-size: 22px; line-height: 1.55; margin: 0; }
 @media (max-width:760px) {
   .guide-layout { grid-template-columns: minmax(0,1fr); gap: 32px; }
-  .guide-contents { padding: 18px 20px; }
+  .guide-contents { position: static; max-height: none; overflow: visible; padding: 18px 20px; }
   .guide-related .growth-card-grid { grid-template-columns: minmax(0,1fr); }
   .guide-related .growth-card h3 { font-size: 20px; }
 }

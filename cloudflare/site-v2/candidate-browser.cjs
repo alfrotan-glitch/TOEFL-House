@@ -116,6 +116,14 @@ const axe=require('axe-core');
       assert.ok(lang==='en'?boxes[1].x<boxes[0].x+3:boxes[1].x+boxes[1].width>boxes[0].x+boxes[0].width-3,`${lang} ${width} logical spine`);
      }
      await page.screenshot({path:join(out,`${label}-${lang}-${width}.png`)});
+     if(label==='book'){
+      const contents=page.locator('.guide-contents');
+      assert.equal(await contents.evaluate(e=>getComputedStyle(e).position),width===1440?'sticky':'static',`${lang} ${width} reading navigation layout`);
+      if(width===1440){
+       await page.locator('#guide-section-2').scrollIntoViewIfNeeded();
+       assert.ok(await contents.isVisible(),`${lang} contents remain visible while reading`);
+      }
+     }
     }
    }
    await page.setViewportSize({width:390,height:900});
@@ -128,6 +136,9 @@ const axe=require('axe-core');
     await Promise.all([page.waitForURL(url=>url.hash===href),page.keyboard.press('Enter')]);
     assert.equal(new URL(page.url()).hash,href,`${lang} ${slug} keyboard section navigation`);
     assert.equal(await page.locator(href).count(),1,`${lang} ${slug} section target`);
+    const anchorTop=await page.locator(href).evaluate(e=>e.getBoundingClientRect().top);
+    const headerBottom=await page.locator('.site-header').evaluate(e=>e.getBoundingClientRect().bottom);
+    assert.ok(anchorTop>=headerBottom-1,`${lang} ${slug} target not hidden by sticky header`);
     const related=page.locator('.guide-related .growth-card');
     assert.equal(await related.count(),2,`${lang} ${slug} related guides`);
     const next=await related.first().getAttribute('href');
@@ -198,6 +209,17 @@ const axe=require('axe-core');
    await form.locator('.form-submit').click();
    const draft=new URL((await draftRequest).url()).searchParams.get('text');
    for(const label of labels)assert.ok(draft.includes(label),`${lang} selected option included in intercepted draft`);
+   // The intercepted WhatsApp navigation leaves the page; return before a
+   // second, independently intercepted guidance request.
+   await page.goto(origin+prefix+'admissions/',{waitUntil:'load'});
+   // A learner can request guidance and placement without guessing a course.
+   await program.selectOption('undecided');
+   assert.equal(await form.locator('#v2-program-preview').isHidden(),true,`${lang} no invented course facts`);
+   assert.equal(await format.locator('option[value="campus"]').isDisabled(),false);
+   const unsureLabel=await program.locator('option:checked').textContent();
+   const unsureRequest=page.waitForRequest(req=>req.url().startsWith('https://wa.me/')&&req.url().includes('?text='));
+   await form.locator('.form-submit').click();
+   assert.ok(new URL((await unsureRequest).url()).searchParams.get('text').includes(unsureLabel),`${lang} guidance request included in intercepted draft`);
   }
   // Simulate a broken client bundle, not just a browser with scripting disabled.
   const blockClient=route=>route.abort();
