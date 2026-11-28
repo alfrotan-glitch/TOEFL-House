@@ -365,22 +365,12 @@ html[dir=rtl] .admissions-copy h1{line-height:1.75;letter-spacing:-.015em}
 .admission-help-inner h2{font-size:26px}
 .admission-help-actions{margin-top:25px}
 }
-.stat-head p{color:#6a6568}
-.stat-item span{color:#6a6568}
-.course-top{color:#6a6568}
+.stat-head p,.stat-item span,.course-top{color:#6a6568}
 .course-featured .course-top{color:var(--line)}
-.breadcrumbs{color:var(--muted)}
-.detail-info p{color:var(--muted)}
+.breadcrumbs,.detail-info p{color:var(--muted)}
 .detail-summary-head span,.detail-small-label{color:var(--red-dark)}
 .final-inner p:not(.eyebrow){color:#fff}
-.form-step{color:var(--muted)}
-.form-privacy{color:var(--muted)}
-.original-form{color:var(--muted)}
-.admission-help-inner p:not(.eyebrow){color:var(--muted)}
-.journey-step p{color:var(--muted)}
-.tools-content p{color:var(--muted)}
-.faq-aside>p:not(.eyebrow){color:var(--muted)}
-.faq-list details p{color:var(--muted)}
+.form-step,.form-privacy,.original-form,.admission-help-inner p:not(.eyebrow),.journey-step p,.tools-content p,.faq-aside>p:not(.eyebrow),.faq-list details p{color:var(--muted)}
 .final-inner .eyebrow{color:#fff}
 .detail-aside p{color:var(--muted)}
 .ge-section{padding-block:90px 96px;background:var(--paper)}
@@ -478,8 +468,7 @@ html[dir=rtl] .ge-stage h4{text-align:right}
 .ge-stages{gap:9px}
 .ge-stage{padding:16px;grid-template-columns:32px minmax(0,1fr);align-items:start}
 .ge-stage>div{grid-template-columns:1fr;gap:8px;justify-items:start}
-.ge-stages-block{margin-bottom:46px}
-.ge-columns{margin-bottom:46px}
+.ge-stages-block,.ge-columns{margin-bottom:46px}
 .ge-side{display:grid;grid-template-columns:1fr}
 .ge-panel{padding:24px 20px}
 .ge-fees{padding:25px 15px;margin-bottom:45px}
@@ -545,8 +534,7 @@ html[dir=rtl] .semester-chips li{font-size:12px}
 html[dir=rtl] .semester-title{font-size:29px}}
 @media(prefers-reduced-motion:reduce){
 .semester-hero-pill{transition:none}
-.semester-hero-pill:hover{transform:none}
-.semester-video-frame{transform:none}}
+.semester-hero-pill:hover,.semester-video-frame{transform:none}}
 .semester-video-cover{position:absolute;inset:0;display:grid;place-items:center;width:100%;height:100%;padding:0;border:0;color:#fff;background:#292629;cursor:pointer;isolation:isolate}
 .semester-video-cover[hidden]{display:none}
 .semester-video-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
@@ -762,8 +750,7 @@ a:focus-visible,button:focus-visible,select:focus-visible,summary:focus-visible,
 .ge-section .ge-stage p,.ge-section .ge-panel p,.ge-section .ge-faq p{font-size:15px}
 .ge-section .ge-note,.ge-section .ge-fee-note{font-size:14px}
 .ge-cta .button{font-size:14px;min-height:48px}
-html[dir=rtl] .hero h1,html[dir=rtl] .section-head h2{letter-spacing:0}
-html[dir=rtl] .course-card h3{letter-spacing:0}
+html[dir=rtl] .hero h1,html[dir=rtl] .section-head h2,html[dir=rtl] .course-card h3{letter-spacing:0}
 html[dir=rtl] .course-copy,html[dir=rtl] .eap-goal p,html[dir=rtl] .eap-level p,html[dir=rtl] .eap-book p{line-height:2.05}
 html[dir=rtl] .eap-level li li,html[dir=rtl] .eap-book li{line-height:2}
 @media(max-width:760px){
@@ -796,8 +783,7 @@ html[dir=rtl] .eap-level li li,html[dir=rtl] .eap-book li{line-height:2}
 .course-copy{font-size:15px}
 .eap-fact{padding:16px 14px}
 .eap-fact span{font-size:14px}
-.eap-fact strong{font-size:21px}
-.eap-book h3{font-size:21px}
+.eap-fact strong,.eap-book h3{font-size:21px}
 }
 .editorial-guides{background:#fff;color:#292629}
 .guide-hero{background:linear-gradient(130deg,var(--paper) 0%,var(--sage) 65%,#f8d7dc 100%);border-bottom:1px solid #f8d7dc;padding:38px 0 76px}
@@ -893,14 +879,10 @@ html[dir=rtl] .editorial-guides .growth-article h2{letter-spacing:0;line-height:
 .course-featured .course-mark{color:#fff;border-color:#ffffff66}
 .course-featured:hover .course-mark,.course-featured:focus-within .course-mark{background:#fff;color:var(--red-dark)}
 .online-panel{background:linear-gradient(125deg,var(--red-dark),var(--red));border-radius:16px}
-.online-symbol{color:#fff}
-.online-copy p:not(.eyebrow){color:#fff}
+.online-symbol,.online-copy p:not(.eyebrow){color:#fff}
 .final-cta{background:linear-gradient(110deg,var(--red-dark),var(--red) 60%,var(--red-dark))}
 .footer{background:var(--red-dark)}
-.footer-brand p{color:#fff}
-.footer-hours{color:#fff}
-.footer-links a{color:#fff}
-.footer-bottom{color:#fff}
+.footer-brand p,.footer-hours,.footer-links a,.footer-bottom{color:#fff}
 .faq-list summary:hover,.faq-list summary:focus-visible{color:var(--red)}
 @media(max-width:760px){
 .site-header{position:sticky;inset-block-start:0}

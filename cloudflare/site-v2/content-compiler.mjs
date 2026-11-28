@@ -16,6 +16,12 @@ function sameShape(reference,value,path){
   if(JSON.stringify(expected)!==JSON.stringify(actual))throw Error('Different localized keys: '+path);
   for(const key of expected)sameShape(reference[key],value[key],path+'.'+key);
  }else if(typeof value!==typeof reference)throw Error('Invalid localized value: '+path);
+ else if(typeof value==='string'&&!value.trim()){
+  // Articles can deliberately have no associated program. Other localized
+  // strings are visible copy, labels, URLs or identifiers and cannot be blank.
+  const optionalArticleProgram=/^guides\.data\.(en|fa|ps)\.[a-z0-9-]+\.program$/.test(path);
+  if(!(optionalArticleProgram&&value===''))throw Error('Missing required text: '+path);
+ }
 }
 function localized(data,name){
  if(!data||JSON.stringify(Object.keys(data).sort())!==JSON.stringify([...locales].sort()))throw Error('Missing or unexpected locales: '+name);

@@ -73,7 +73,7 @@ test('indexed content and routes fail closed even when all locales drift togethe
  const unsafeGlyph=structuredClone(home);unsafeGlyph.courseGlyphs['academic-english']='<script>alert(1)</script>';
  assert.throws(()=>compile(general,academic,special,guides,unsafeGlyph),/Invalid course glyph/);
  const blankCourse=structuredClone(home);for(const l of locales)blankCourse.courseCards[l]['academic-english'].shortDuration=' ';
- assert.throws(()=>compile(general,academic,special,guides,blankCourse),/Missing required text.*course card/);
+ assert.throws(()=>compile(general,academic,special,guides,blankCourse),/Missing required text.*courseCards.*shortDuration/);
  const badPath=structuredClone(home);badPath.paths.catalog[0].id='not-a-course';
  assert.throws(()=>compile(general,academic,special,guides,badPath),/Invalid home path ID/);
  const dupPath=structuredClone(home);dupPath.paths.catalog[1].id=dupPath.paths.catalog[0].id;
@@ -88,6 +88,17 @@ test('indexed content and routes fail closed even when all locales drift togethe
  assert.throws(()=>compile(blank),/Missing required text/);
  const explanations=structuredClone(ui);for(const l of locales)explanations.practice[l].explanations.pop();
  assert.throws(()=>compile(general,academic,special,guides,home,explanations),/practice explanations/);
+ // Shape equality alone must not let an essential label disappear in all locales.
+ const emptyMenu=structuredClone(home);for(const l of locales)emptyMenu.copy[l].navMenu='  ';
+ assert.throws(()=>compile(general,academic,special,guides,emptyMenu),/Missing required text.*navMenu/);
+ const emptyCta=structuredClone(ui);emptyCta.detail.fa.submit='';
+ assert.throws(()=>compile(general,academic,special,guides,home,emptyCta),/Missing required text.*submit/);
+ const emptyTopic=structuredClone(special);for(const l of locales)emptyTopic.courses[l].toefl.path[0].title='';
+ assert.throws(()=>compile(general,academic,emptyTopic),/Missing required text.*title/);
+ const whitespaceProgram=structuredClone(guides);for(const l of locales)whitespaceProgram.data[l]['english-courses-kabul'].program='  ';
+ assert.throws(()=>compile(general,academic,special,whitespaceProgram),/Missing required text.*program/);
+ // A general-interest article intentionally has no single course association.
+ assert.equal(guides.data.en['english-courses-kabul'].program,'');assert.doesNotThrow(()=>compile());
 });
 
 test('authoritative source catalog parsing rejects changed, invalid or ambiguous declarations',async()=>{
