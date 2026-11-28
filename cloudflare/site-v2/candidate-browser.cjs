@@ -243,4 +243,8 @@ const axe=require('axe-core');
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({status:'passed',workerSha256:sha256,routeCount:paths.length,widths,routeViewportChecks:paths.length*widths.length,bookGuidesAxeChecked:12,bookGuideAxeViolations:0,tabletMenuWidths:[768,1024,1200],practiceLocales:3,noScriptLocales:3,practiceAxeViolations:0,screenshots:out,limits:['Local interception, not Cloudflare Pages','Synthetic CMS, no production bindings or external images','Automated checks do not establish WCAG compliance']},null,2));
  }finally{await context.close();await browser.close();}
-})().catch(error=>{console.error(error);process.exitCode=1;});
+})().catch(error=>{
+ console.error(error);
+ if(process.env.GITHUB_ACTIONS==='true')console.log('::error title=Candidate browser failure::'+String(error.stack||error).replace(/%/g,'%25').replace(/\r/g,'%0D').replace(/\n/g,'%0A'));
+ process.exitCode=1;
+});
