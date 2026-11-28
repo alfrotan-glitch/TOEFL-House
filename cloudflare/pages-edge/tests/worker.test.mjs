@@ -155,3 +155,22 @@ test("Legacy tools brand correction is scoped and does not touch data entry",asy
   assert.ok(!(await home.text()).includes("tools-brand-v1.js"));
  });
 });
+
+test("HTML asset routing distinguishes public responses from deployment manifest",async()=>{
+ for(const path of ['/index.html','/404.html','/fa/index.html','/fa/404.html','/ps/index.html','/ps/404.html']){
+  for(const status of [200,301,404]){
+   const requested=[];
+   const env={ASSETS:{fetch:async req=>{requested.push(new URL(req.url).pathname);return new Response(status===200?'static asset':null,{status});}}};
+   const r=await worker.fetch(new Request(canonical+path),env);
+   assert.deepEqual(requested,[path]);
+   assert.equal(r.status,status===200?200:404,`${path} ASSETS returned ${status}`);
+   if(status===200)assert.equal(await r.text(),'static asset');
+  }
+ }
+ for(const [path,asset] of [['/tools/','/index.html'],['/fa/tools/','/fa/index.html'],['/ps/tools/','/ps/index.html']]){
+  const requested=[];
+  const env={ASSETS:{fetch:async req=>{requested.push(new URL(req.url).pathname);return new Response(null,{status:301});}}};
+  const r=await worker.fetch(new Request(canonical+path),env);
+  assert.deepEqual(requested,[asset]);assert.equal(r.status,503,`${path} rejects a non-OK internal asset response`);
+ }
+});
