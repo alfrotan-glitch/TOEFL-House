@@ -124,7 +124,8 @@
           "Find the central idea, key details and structure of a text.",
           "Use context clues and purposeful reading strategies.",
           "Increase reading fluency while checking understanding."
-        ]
+        ],
+        "guide": "active-skills-for-reading"
       },
       {
         "title": "Contemporary Topics",
@@ -135,7 +136,8 @@
           "Listen for topic, organisation, details and supporting examples.",
           "Take structured lecture notes and review them.",
           "Build academic vocabulary and discuss lecture content."
-        ]
+        ],
+        "guide": "contemporary-topics"
       },
       {
         "title": "Longman Academic Writing Series",
@@ -146,7 +148,8 @@
           "Plan a piece of writing before drafting.",
           "Organise paragraphs and essays with connected ideas.",
           "Edit sentence structure, grammar, vocabulary and coherence."
-        ]
+        ],
+        "guide": "longman-academic-writing"
       }
     ],
     "staffLabel": "TEACHING APPROACH",
@@ -198,7 +201,12 @@
       "Paragraphs",
       "Paragraphs to Essays",
       "Essays"
-    ]
+    ],
+    "seoTitle": "English for Academic Purposes (EAP) in Kabul | Four Levels | The TOEFL House",
+    "seoDescription": "EAP 1–4 at The TOEFL House: four two-month levels; three instructors, three textbook series per level. AFN 1,000/month, AFN 2,000/level. Free assessment.",
+    "feeMonthDisplay": "AFN 1,000",
+    "feeLevelDisplay": "AFN 2,000",
+    "levelDuration": "2 months"
   },
   "fa": {
     "badge": "انگلیسی اکادمیک · EAP",
@@ -325,7 +333,8 @@
           "شناخت اندیشهٔ اصلی، جزئیات مهم و ساختار متن.",
           "درک معنای لغات از قرینه و کاربرد روش‌های خواندن.",
           "تقویت روان‌خوانی همراه با درک دقیق مطلب."
-        ]
+        ],
+        "guide": "active-skills-for-reading"
       },
       {
         "title": "Contemporary Topics",
@@ -336,7 +345,8 @@
           "تشخیص موضوع، ترتیب و شواهد پشتیبان لکچر.",
           "تهیه و مرور نوت‌های منظم از مطالب شنیده‌شده.",
           "تقویت واژگان علمی و سهم‌گیری در بحث‌های صنفی."
-        ]
+        ],
+        "guide": "contemporary-topics"
       },
       {
         "title": "Longman Academic Writing Series",
@@ -347,7 +357,8 @@
           "طرح‌ریزی موضوع و تنظیم اندیشه‌های اصلی.",
           "نوشتن پاراگراف و مقاله با ساختار منطقی.",
           "اصلاح جمله‌بندی، واژگان، گرامر و انسجام متن."
-        ]
+        ],
+        "guide": "longman-academic-writing"
       }
     ],
     "staffLabel": "شیوهٔ تدریس",
@@ -399,7 +410,12 @@
       "Paragraphs",
       "Paragraphs to Essays",
       "Essays"
-    ]
+    ],
+    "seoTitle": "انگلیسی اکادمیک EAP در کابل | چهار سطح، سه مجموعهٔ درسی و فیس | تافل هوس",
+    "seoDescription": "EAP تافل هوس: چهار سطح دوماهه، سه استاد و سه مجموعهٔ درسی در هر سطح. فیس ماهانه ۱٬۰۰۰ افغانی؛ تعیین سطح رایگان.",
+    "feeMonthDisplay": "۱٬۰۰۰ افغانی",
+    "feeLevelDisplay": "۲٬۰۰۰ افغانی",
+    "levelDuration": "۲ ماه"
   },
   "ps": {
     "badge": "اکاډمیکه انګلیسي · EAP",
@@ -526,7 +542,8 @@
           "د متن اصلي مفکوره، جزئیات او جوړښت پېژندل.",
           "د لغتونو معنا له سیاق څخه معلومول او د لوستلو تګلارې کارول.",
           "د لوستلو روانتیا او د مطلب درک پیاوړي کول."
-        ]
+        ],
+        "guide": "active-skills-for-reading"
       },
       {
         "title": "Contemporary Topics",
@@ -537,7 +554,8 @@
           "د لکچر موضوع، جوړښت او ملاتړي دلیلونه پېژندل.",
           "د مهمو معلوماتو منظم یادښتونه اخیستل او بیاکتل.",
           "د علمي لغتونو کارول او په ټولګیز بحث کې ګډون."
-        ]
+        ],
+        "guide": "contemporary-topics"
       },
       {
         "title": "Longman Academic Writing Series",
@@ -548,7 +566,8 @@
           "د لیکلو لپاره د موضوع او مفکورو تنظیمول.",
           "د روښانه جوړښت لرونکي پاراګرافونه او مقالې لیکل.",
           "د ګرامر، لغتونو، جملو او د متن د انسجام سمون."
-        ]
+        ],
+        "guide": "longman-academic-writing"
       }
     ],
     "staffLabel": "د تدریس بڼه",
@@ -600,6 +619,11 @@
       "Paragraphs",
       "Paragraphs to Essays",
       "Essays"
-    ]
+    ],
+    "seoTitle": "اکاډمیکه انګلیسي EAP | څلور کچې او فیس | تافل هوس",
+    "seoDescription": "EAP د تافل هوس څلور دوه میاشتني کچې، په هره کچه درې ښوونکي او درې درسي لړۍ لري. میاشتنی فیس ۱٬۰۰۰ او د هرې کچې فیس ۲٬۰۰۰ افغانۍ.",
+    "feeMonthDisplay": "۱٬۰۰۰ افغانۍ",
+    "feeLevelDisplay": "۲٬۰۰۰ افغانۍ",
+    "levelDuration": "۲ میاشتې"
   }
 }

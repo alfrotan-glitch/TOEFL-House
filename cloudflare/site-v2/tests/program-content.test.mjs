@@ -35,6 +35,16 @@ test('indexed content and routes fail closed even when all locales drift togethe
  assert.throws(()=>compile(short),/indexed length.*stageFocus/);
  const pair=structuredClone(academic);for(const l of locales)pair[l].facts[0].pop();
  assert.throws(()=>compile(general,pair),/indexed length.*facts/);
+ const levels=structuredClone(academic);for(const l of locales)levels[l].levels.pop();
+ assert.throws(()=>compile(general,levels),/indexed length.*academic levels/);
+ const wrongBook=structuredClone(academic);for(const l of locales)wrongBook[l].books[0].guide='got-it-series';
+ assert.throws(()=>compile(general,wrongBook),/Invalid academic book guide/);
+ const duplicateBook=structuredClone(academic);for(const l of locales)duplicateBook[l].books[1].guide=duplicateBook[l].books[0].guide;
+ assert.throws(()=>compile(general,duplicateBook),/academic book order/);
+ const reordered=structuredClone(academic);reordered.fa.books.reverse();
+ assert.throws(()=>compile(general,reordered),/academic book order/);
+ const missingSeo=structuredClone(academic);for(const l of locales)delete missingSeo[l].seoTitle;
+ assert.throws(()=>compile(general,missingSeo),/Missing required text.*seoTitle/);
  const deleted=structuredClone(guides);for(const l of locales)delete deleted.bookData[l]['got-it-series'];
  assert.throws(()=>compile(general,academic,special,deleted),/catalog keys.*books/);
  const badRoute=structuredClone(guides);for(const l of locales)badRoute.bookData[l]['got-it-series'].program='evil" onclick="alert(1)';

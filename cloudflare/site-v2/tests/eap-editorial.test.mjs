@@ -30,3 +30,17 @@ test("Narrow EAP layouts align actions and preserve readable introduction spacin
  assert.match(css,/@media\(max-width:460px\)\{\s*\.eap-editorial \.eap-hero \.breadcrumbs\{margin-bottom:20px\}[^}]*\}[^}]*\.eap-actions\{display:grid;grid-template-columns:1fr\}/);
  assert.match(css,/\.eap-editorial \.eap-lead\{margin-bottom:20px;line-height:1\.8\}/);
 });
+
+test('each localized academic book links to its own guide',async()=>{
+ const expected=[['ACTIVE Skills for Reading','active-skills-for-reading'],['Contemporary Topics','contemporary-topics'],['Longman Academic Writing Series','longman-academic-writing']];
+ for(const prefix of ['/','/fa/','/ps/']){
+  const response=await worker.fetch(new Request('https://toeflhouse.pages.dev'+prefix+'courses/academic-english/'),{});
+  assert.equal(response.status,200);const html=await response.text();
+  const articles=[...html.matchAll(/<article class="eap-book">([\s\S]*?)<\/article>/g)].map(x=>x[1]);
+  assert.equal(articles.length,expected.length);
+  for(const [index,[title,slug]] of expected.entries()){
+   assert.ok(articles[index].includes(title),prefix+title);
+   assert.ok(articles[index].includes('href="'+prefix+'guides/'+slug+'/"'),prefix+slug);
+  }
+ }
+});

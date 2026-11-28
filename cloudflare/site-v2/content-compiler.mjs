@@ -55,7 +55,15 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
   lengthIs(general[locale].stageDescs,contract.stageCount,prefix+'stageDescs');
   lengthIs(ui.practice[locale].explanations,contract.practiceCount,prefix+'practice explanations');
   for(const value of [...home.paths[locale].links,...general[locale].stageFocus,...general[locale].stageDescs,...ui.practice[locale].explanations])requireText(value,prefix+'indexed content');
-  lengthIs(academic[locale].books,3,prefix+'academic books'); // Three renderer-owned guide links.
+  lengthIs(academic[locale].levels,4,prefix+'academic levels'); // The fourth-level note is renderer-indexed.
+  for(const key of ['seoTitle','seoDescription','feeMonthDisplay','feeLevelDisplay','levelDuration'])requireText(academic[locale][key],prefix+'academic.'+key);
+  if(!Array.isArray(academic[locale].books)||!academic[locale].books.length)throw Error('Missing academic books: '+locale);
+  const bookIds=academic[locale].books.map(book=>book.guide);
+  if(new Set(bookIds).size!==bookIds.length||JSON.stringify(bookIds)!==JSON.stringify(academic.en.books.map(book=>book.guide)))throw Error('Invalid localized academic book order: '+locale);
+  for(const book of academic[locale].books){
+   requireText(book.title,prefix+'academic book title');
+   if(!contract.books.includes(book.guide)||guides.bookData[locale]?.[book.guide]?.program!=='academic-english')throw Error('Invalid academic book guide: '+prefix+book.guide);
+  }
   for(const [value,size,path] of [
    [general[locale].facts,2,'general facts'],[general[locale].faqs,2,'general FAQs'],[general[locale].skills,2,'general skills'],
    [academic[locale].facts,2,'academic facts'],[academic[locale].outcomes,2,'academic outcomes'],[academic[locale].faq,2,'academic FAQs'],
