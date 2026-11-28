@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: toefl-v2-quality-${{ github.ref }}
@@ -111,6 +112,41 @@ jobs:
             ${{ runner.temp }}/toefl-candidate-screenshots/fullpage/*.png
           retention-days: 7
           if-no-files-found: ignore
+
+  historical-package:
+    name: Assemble unapproved candidate and historical assets
+    needs: build-and-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: toefl-v2-release-worker
+          path: ${{ runner.temp }}/candidate-worker
+      # Public snapshot captured on 17 November. It is NOT proof of the active
+      # production manifest: the release operator must independently compare it.
+      - uses: actions/download-artifact@v4
+        with:
+          name: toefl-house-pages-public-snapshot
+          path: ${{ runner.temp }}/historical-snapshot
+          github-token: ${{ github.token }}
+          run-id: 44041822731
+      - name: Require every historical path and record SHA-256 for the package
+        env:
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          TESTED_BUILD_REF: ${{ github.sha }}
+        run: |
+          node cloudflare/site-v2/package-candidate.mjs "$RUNNER_TEMP/historical-snapshot" "$RUNNER_TEMP/candidate-worker/_worker.js" "$RUNNER_TEMP/toefl-unapproved-package" "$SOURCE_COMMIT" "$TESTED_BUILD_REF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toefl-unapproved-candidate-with-historical-assets
+          path: ${{ runner.temp }}/toefl-unapproved-package/
+          retention-days: 14
+          if-no-files-found: error
 
   production-site:
     name: Verify live content and security
