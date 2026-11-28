@@ -141,7 +141,11 @@ jobs:
           TESTED_BUILD_REF: ${{ github.sha }}
         run: |
           node cloudflare/site-v2/package-candidate.mjs "$RUNNER_TEMP/historical-snapshot" "$RUNNER_TEMP/candidate-worker/_worker.js" "$RUNNER_TEMP/toefl-unapproved-package" "$SOURCE_COMMIT" "$TESTED_BUILD_REF"
+      - name: Compare historical package to canonical public asset responses (read-only)
+        run: |
+          node cloudflare/site-v2/compare-public-assets.mjs "$RUNNER_TEMP/toefl-unapproved-package/PACKAGE-INVENTORY.json" "$RUNNER_TEMP/toefl-unapproved-package/PUBLIC-ASSET-COMPARISON.json"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: toefl-unapproved-candidate-with-historical-assets
           path: ${{ runner.temp }}/toefl-unapproved-package/
