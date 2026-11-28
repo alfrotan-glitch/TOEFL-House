@@ -2,6 +2,7 @@ import {readFile,mkdir,writeFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {dirname,join} from "node:path";
 import {createHash} from "node:crypto";
+import {buildStyles} from "./build-styles.mjs";
 const here=dirname(fileURLToPath(import.meta.url));
 let main=await readFile(join(here,"../pages-edge/worker.mjs"),"utf8");
 const landingSource=await readFile(join(here,"landing.mjs"),"utf8");
@@ -28,10 +29,8 @@ if(!/const V2_EAP=\{/.test(academicEnglishSource))throw Error("EAP data missing;
 // academic-english.mjs already stores its three-language static data as compact JSON.
 const academicEnglish=academicEnglishSource;
 const specialPrograms=await readFile(join(here,"special-programs.mjs"),"utf8");
-// Remove CSS comments and layout-only whitespace in the published asset, while
-// retaining readable, separately version-controlled CSS source for editors.
-const cssSource=await readFile(join(here,"site.css"),"utf8");
-const css=cssSource.replace(/\/\*[\s\S]*?\*\//g,"").split("\n").map(line=>line.trim()).join("");
+// Compile the three source layers to the existing single, versioned CSS endpoint.
+const {css}=await buildStyles();
 const js=await readFile(join(here,"site.js"),"utf8");
 const assetRevision=createHash("sha256").update(css).update(js).digest("hex").slice(0,12);
 const entry="export default {\n  async fetch(request,env,ctx){";

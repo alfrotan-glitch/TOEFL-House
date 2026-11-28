@@ -61,16 +61,7 @@ jobs:
           npm install --prefix /tmp/toefl-accessibility --no-save playwright-core@1.56.0 axe-core@4.10.3 --silent
           TOEFL_QA_BASE=https://restore-public-site-20261122.toeflhouse.pages.dev node cloudflare/site-v2/accessibility-audit.cjs
       - name: Enforce Cloudflare server-rendered Worker size budget
-        run: |
-          # Guide layouts, localization and CMS content are server-rendered; visitors download only compressed CSS/JS.
-          # The Worker embeds reviewed EN/FA/PS editorial copy, course detail modules and learning guides.
-          # Keep a 400 KB source budget; client downloads remain the separately versioned CSS/JS below.
-          test $(wc -c < cloudflare/site-v2/dist/_worker.js) -lt 400000
-          # Readable source includes goal-based navigation and is compacted before delivery.
-          # CI checkout measures 74,206 bytes; the deployed minified CSS is 73,147 bytes.
-          # Allow 76 KB CSS source for accessible practice controls; retain 400 KB Worker / 10 KB JS ceilings.
-          test $(wc -c < cloudflare/site-v2/site.css) -lt 76000
-          test $(wc -c < cloudflare/site-v2/site.js) -lt 10000
+        run: node cloudflare/site-v2/budgets.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: toefl-v2-release-worker

@@ -1,0 +1,131 @@
+/* Shared institutional design language. Tokens live in tokens.css; component
+   layout and locale-specific rules remain in site.css. Logical properties keep
+   the same composition in English, Dari and Pashto. */
+:root {
+  --signature-ink: #242427;
+  --signature-red: #980616;
+  --signature-wash: #fff3f3;
+  --signature-line: #f8d7dc;
+  --signature-shadow: 0 18px 44px #6909120d;
+  --signature-radius: 18px;
+}
+
+/* A recurring ruled edge gives each journey the same editorial frame. */
+.guide-hero, .detail-hero, .eap-editorial .eap-hero, .admissions-hero {
+  background-color: var(--paper);
+  background-image: radial-gradient(ellipse at 90% 0%, #fde8e9 0, transparent 48%);
+  border-block-end: 1px solid var(--signature-line);
+}
+.guide-hero .shell, .detail-hero .shell, .eap-hero .shell, .admissions-grid {
+  position: relative;
+}
+.guide-hero .eyebrow, .detail-intro .eyebrow, .eap-hero-copy .eyebrow, .admissions-copy .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.guide-hero .eyebrow::before, .detail-intro .eyebrow::before,
+.eap-hero-copy .eyebrow::before, .admissions-copy .eyebrow::before {
+  content: '';
+  width: 32px;
+  height: 2px;
+  flex: none;
+  background: var(--red);
+}
+.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissions-copy h1 {
+  color: var(--signature-ink);
+  text-wrap: balance;
+}
+html[dir=rtl] :is(.guide-hero h1, .detail-intro h1, .eap-hero-copy h1, .admissions-copy h1) {
+  letter-spacing: 0;
+}
+
+/* The same card language supports discovery, course comparison and study. */
+.course-card, .growth-card, .eap-goal, .eap-book, .detail-summary, .admissions-formbox {
+  border-color: var(--signature-line);
+  box-shadow: var(--signature-shadow);
+}
+.growth-card {
+  border-radius: var(--signature-radius);
+  border-block-start: 3px solid var(--signature-red);
+  background: linear-gradient(145deg, #fff 72%, var(--signature-wash));
+}
+.growth-card small, .eap-index, .step-no {
+  color: var(--signature-red);
+}
+.growth-card .growth-arrow {
+  border-block-start: 1px solid var(--signature-line);
+  padding-block-start: 15px;
+}
+.growth-article > section {
+  border-block-start: 1px solid var(--signature-line);
+  padding-block-start: 24px;
+}
+.growth-article > section.book-exercise {
+  border: 1px solid var(--signature-line);
+  border-inline-start: 4px solid var(--signature-red);
+  border-radius: var(--signature-radius);
+  background: var(--signature-wash);
+  padding: clamp(20px, 3vw, 32px);
+}
+.admissions-formbox {
+  border-block-start: 4px solid var(--signature-red);
+  border-radius: var(--signature-radius);
+}
+.admissions-formbox select {
+  border-radius: 9px;
+  background-color: var(--paper);
+}
+.eap-editorial .eap-hero-visual, .sp-page .eap-hero-visual {
+  border-radius: var(--signature-radius);
+  box-shadow: 0 20px 45px #6909122b;
+}
+.eap-editorial .eap-hero-visual {
+  background: radial-gradient(circle at 100% 0%, #c00818, transparent 55%), var(--signature-red);
+}
+
+/* The homepage remains grounded in the institution's real photography. */
+.hero-grid { box-shadow: 0 22px 55px #6909121a; }
+.hero-copy { background-image: radial-gradient(ellipse at 0% 0%, #c00818, transparent 60%); }
+.photo-frame { background: linear-gradient(145deg, #fff3f3, #f8d7dc); }
+.photo-label { background: #242427f0; border-inline-start: 4px solid var(--logo-red); }
+.journey-step { border-block-start: 2px solid var(--signature-red); }
+.footer { border-block-start: 5px solid var(--logo-red); }
+
+/* Motion reinforces affordances, never content visibility. */
+@media (hover:hover) and (prefers-reduced-motion:no-preference) {
+  .growth-card, .course-card, .button { transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease; }
+  .growth-card:hover, .course-card:hover { transform: translateY(-4px); box-shadow: 0 18px 38px #6909121c; }
+  .button:hover { transform: translateY(-2px); }
+}
+@media (max-width:760px) {
+  .guide-hero .eyebrow::before, .detail-intro .eyebrow::before,
+  .eap-hero-copy .eyebrow::before, .admissions-copy .eyebrow::before { width: 22px; }
+  .growth-article > section.book-exercise { padding: 20px; }
+}
+
+/* The library is a destination, not another generic marketing section.
+   Its dark cover and numbered cards echo a study volume's spine. */
+.guide-hero {
+  color: #fff;
+  background-color: var(--signature-red);
+  background-image: radial-gradient(ellipse at 100% 0%, var(--red) 0, transparent 60%);
+  border: 0;
+}
+.guide-hero .breadcrumbs, .guide-hero .breadcrumbs [aria-current],
+.guide-hero h1, .guide-hero .eyebrow, .guide-hero .shell > p { color: #fff; }
+.guide-hero .breadcrumbs a:hover { color: #fff; text-decoration: underline; }
+.guide-hero .eyebrow::before { background: #fff; }
+.book-library > h2, #practical-guides-title {
+  padding-block-end: 18px;
+  border-block-end: 1px solid var(--signature-line);
+}
+.growth-card {
+  position: relative;
+  overflow: hidden;
+  border-block-start: 1px solid var(--signature-line);
+  border-inline-start: 5px solid var(--signature-red);
+}
+.growth-card small { font-size: 13px; letter-spacing: .08em; }
+.growth-card h2 { text-wrap: balance; }
+.growth-card:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 4px; }

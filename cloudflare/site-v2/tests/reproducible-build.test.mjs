@@ -15,7 +15,7 @@ test("identical source builds byte-identical Workers across UTC dates",async()=>
   const copy=join(root,"site-v2"), edge=join(root,"pages-edge");
   await mkdir(copy); await mkdir(edge);
   for(const name of await readdir(site)){
-   if(name.endsWith(".mjs") || name==="site.css" || name==="site.js")
+   if(name.endsWith(".mjs") || name.endsWith(".css") || name==="site.js")
     await copyFile(join(site,name),join(copy,name));
   }
   await copyFile(join(site,"../pages-edge/worker.mjs"),join(edge,"worker.mjs"));
