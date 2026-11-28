@@ -66,6 +66,14 @@ test('indexed content and routes fail closed even when all locales drift togethe
  assert.throws(()=>compile(general,academic,special,guides,brokenLink),/route references/);
  const drift=structuredClone(home);drift.goals.ps.items[0][0]='academic-english';
  assert.throws(()=>compile(general,academic,special,guides,drift),/route references/);
+ const missingCourse=structuredClone(home);for(const l of locales)delete missingCourse.courseCards[l]['academic-english'];
+ assert.throws(()=>compile(general,academic,special,guides,missingCourse),/catalog keys.*course cards/);
+ const missingGlyph=structuredClone(home);delete missingGlyph.courseGlyphs['academic-english'];
+ assert.throws(()=>compile(general,academic,special,guides,missingGlyph),/catalog keys.*glyph/);
+ const unsafeGlyph=structuredClone(home);unsafeGlyph.courseGlyphs['academic-english']='<script>alert(1)</script>';
+ assert.throws(()=>compile(general,academic,special,guides,unsafeGlyph),/Invalid course glyph/);
+ const blankCourse=structuredClone(home);for(const l of locales)blankCourse.courseCards[l]['academic-english'].shortDuration=' ';
+ assert.throws(()=>compile(general,academic,special,guides,blankCourse),/Missing required text.*course card/);
  const language=structuredClone(home);language.copy.fa.dir='ltr';
  assert.throws(()=>compile(general,academic,special,guides,language),/language or direction/);
  const missingHeader=structuredClone(home);for(const l of locales)delete missingHeader.header[l].skip;

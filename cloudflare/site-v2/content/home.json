@@ -104,14 +104,6 @@
           "University admissions worldwide"
         ]
       ],
-      "courseNames": [
-        "General English",
-        "Academic English",
-        "TOEFL Preparation",
-        "Special Speaking",
-        "Professional Writing",
-        "Teacher Training"
-      ],
       "fallbackFaq": [
         [
           "Is the placement assessment free?",
@@ -231,14 +223,6 @@
           "پذیرش در دانشگاه‌های جهان"
         ]
       ],
-      "courseNames": [
-        "انگلیسی عمومی",
-        "انگلیسی اکادمیک",
-        "آمادگی تافل",
-        "مکالمهٔ ویژه",
-        "نگارش مسلکی",
-        "تربیهٔ استاد"
-      ],
       "fallbackFaq": [
         [
           "آیا تعیین سطح رایگان است؟",
@@ -357,14 +341,6 @@
           "۱۰۰+",
           "په نړیوالو پوهنتونونو کې منل شوي"
         ]
-      ],
-      "courseNames": [
-        "عمومي انګلیسي",
-        "اکاډمیکه انګلیسي",
-        "د TOEFL چمتووالی",
-        "ځانګړې خبرې",
-        "مسلکي لیکنه",
-        "د ښوونکو روزنه"
       ],
       "fallbackFaq": [
         [
@@ -684,58 +660,6 @@
       "all": "ټول ښوونیز لارښودونه"
     }
   },
-  "fallbackDurations": {
-    "en": [
-      "Pre-Starter: 1 month; other levels: 2 months",
-      "2 months per level",
-      "4 months",
-      "2 months",
-      "2 months",
-      "2 months"
-    ],
-    "fa": [
-      "Pre-Starter: یک ماه؛ سایر سطح‌ها: دو ماه",
-      "دو ماه برای هر سطح",
-      "چهار ماه",
-      "دو ماه",
-      "دو ماه",
-      "دو ماه"
-    ],
-    "ps": [
-      "Pre-Starter: یوه میاشت؛ نورې کچې: دوه میاشتې",
-      "د هرې کچې لپاره دوه میاشتې",
-      "څلور میاشتې",
-      "دوه میاشتې",
-      "دوه میاشتې",
-      "دوه میاشتې"
-    ]
-  },
-  "shortDurations": {
-    "en": [
-      "Pre-Starter: 1 mo · Other levels: 2 mo",
-      "2 months per level",
-      "4 months",
-      "2 months",
-      "2 months",
-      "2 months"
-    ],
-    "fa": [
-      "Pre-Starter: ۱ ماه · سایر سطوح: ۲ ماه",
-      "۲ ماه برای هر سطح",
-      "۴ ماه",
-      "۲ ماه",
-      "۲ ماه",
-      "۲ ماه"
-    ],
-    "ps": [
-      "Pre-Starter: ۱ میاشت · نورې کچې: ۲ میاشتې",
-      "د هرې کچې لپاره ۲ میاشتې",
-      "څلور میاشتې",
-      "۲ میاشتې",
-      "۲ میاشتې",
-      "۲ میاشتې"
-    ]
-  },
   "reviewedCards": {
     "en": {
       "special-speaking": "Two-month semester with Master Speaking and grammar in conversation. Total semester fee: AFN 2,000.",
@@ -766,5 +690,111 @@
       "skip": "منځپانګې ته لاړ شئ",
       "language": "ژبه وټاکئ"
     }
+  },
+  "courseCards": {
+    "en": {
+      "general-english": {
+        "name": "General English",
+        "fallbackDuration": "Pre-Starter: 1 month; other levels: 2 months",
+        "shortDuration": "Pre-Starter: 1 mo · Other levels: 2 mo"
+      },
+      "academic-english": {
+        "name": "Academic English",
+        "fallbackDuration": "2 months per level",
+        "shortDuration": "2 months per level"
+      },
+      "toefl-preparation": {
+        "name": "TOEFL Preparation",
+        "fallbackDuration": "4 months",
+        "shortDuration": "4 months"
+      },
+      "special-speaking": {
+        "name": "Special Speaking",
+        "fallbackDuration": "2 months",
+        "shortDuration": "2 months"
+      },
+      "professional-writing": {
+        "name": "Professional Writing",
+        "fallbackDuration": "2 months",
+        "shortDuration": "2 months"
+      },
+      "teacher-training": {
+        "name": "Teacher Training",
+        "fallbackDuration": "2 months",
+        "shortDuration": "2 months"
+      }
+    },
+    "fa": {
+      "general-english": {
+        "name": "انگلیسی عمومی",
+        "fallbackDuration": "Pre-Starter: یک ماه؛ سایر سطح‌ها: دو ماه",
+        "shortDuration": "Pre-Starter: ۱ ماه · سایر سطوح: ۲ ماه"
+      },
+      "academic-english": {
+        "name": "انگلیسی اکادمیک",
+        "fallbackDuration": "دو ماه برای هر سطح",
+        "shortDuration": "۲ ماه برای هر سطح"
+      },
+      "toefl-preparation": {
+        "name": "آمادگی تافل",
+        "fallbackDuration": "چهار ماه",
+        "shortDuration": "۴ ماه"
+      },
+      "special-speaking": {
+        "name": "مکالمهٔ ویژه",
+        "fallbackDuration": "دو ماه",
+        "shortDuration": "۲ ماه"
+      },
+      "professional-writing": {
+        "name": "نگارش مسلکی",
+        "fallbackDuration": "دو ماه",
+        "shortDuration": "۲ ماه"
+      },
+      "teacher-training": {
+        "name": "تربیهٔ استاد",
+        "fallbackDuration": "دو ماه",
+        "shortDuration": "۲ ماه"
+      }
+    },
+    "ps": {
+      "general-english": {
+        "name": "عمومي انګلیسي",
+        "fallbackDuration": "Pre-Starter: یوه میاشت؛ نورې کچې: دوه میاشتې",
+        "shortDuration": "Pre-Starter: ۱ میاشت · نورې کچې: ۲ میاشتې"
+      },
+      "academic-english": {
+        "name": "اکاډمیکه انګلیسي",
+        "fallbackDuration": "د هرې کچې لپاره دوه میاشتې",
+        "shortDuration": "د هرې کچې لپاره ۲ میاشتې"
+      },
+      "toefl-preparation": {
+        "name": "د TOEFL چمتووالی",
+        "fallbackDuration": "څلور میاشتې",
+        "shortDuration": "څلور میاشتې"
+      },
+      "special-speaking": {
+        "name": "ځانګړې خبرې",
+        "fallbackDuration": "دوه میاشتې",
+        "shortDuration": "۲ میاشتې"
+      },
+      "professional-writing": {
+        "name": "مسلکي لیکنه",
+        "fallbackDuration": "دوه میاشتې",
+        "shortDuration": "۲ میاشتې"
+      },
+      "teacher-training": {
+        "name": "د ښوونکو روزنه",
+        "fallbackDuration": "دوه میاشتې",
+        "shortDuration": "۲ میاشتې"
+      }
+    }
+  },
+  "courseGlyphs": {
+    "general-english": "<path d=\"M3 4h7a5 5 0 0 1 5 5v15a5 5 0 0 0-5-5H3zM27 4h-7a5 5 0 0 0-5 5v15a5 5 0 0 1 5-5h7z\"/><path d=\"M6 8h4m10 0h4M6 12h4m10 0h4\"/>",
+    "academic-english": "<path d=\"m2 10 13-6 13 6-13 6zM7 13v7c5 4 11 4 16 0v-7M28 10v10\"/>",
+    "toefl-preparation": "<circle cx=\"15\" cy=\"15\" r=\"11\"/><circle cx=\"15\" cy=\"15\" r=\"6\"/><path d=\"m15 15 10-10m-1 0h4v4\"/>",
+    "special-speaking": "<path d=\"M4 5h22v14H14l-6 5v-5H4z\"/><path d=\"M9 10h12M9 14h8\"/>",
+    "professional-writing": "<path d=\"M5 23l3-8L20 3l7 7-12 12zM8 15l7 7M17 6l7 7M5 27h22\"/>",
+    "teacher-training": "<rect x=\"3\" y=\"4\" width=\"24\" height=\"16\" rx=\"3\"/><path d=\"M15 20v7m-7 0h14M8 15l5-5 4 3 5-6\"/>"
   }
 }

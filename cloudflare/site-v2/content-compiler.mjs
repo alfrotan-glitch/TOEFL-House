@@ -43,10 +43,11 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
   const prefix=locale+'.';
   const expectedLanguage={en:['en','ltr'],fa:['fa-AF','rtl'],ps:['ps-AF','rtl']}[locale];
   if(home.copy[locale].lang!==expectedLanguage[0]||home.copy[locale].dir!==expectedLanguage[1])throw Error('Invalid language or direction: '+locale);
-  lengthIs(home.copy[locale].courseNames,contract.courses.length,prefix+'courseNames');
-  lengthIs(home.fallbackDurations[locale],contract.courses.length,prefix+'fallback durations');
-  lengthIs(home.shortDurations[locale],contract.courses.length,prefix+'short durations');
-  for(const value of [...home.copy[locale].courseNames,...home.fallbackDurations[locale],...home.shortDurations[locale]])requireText(value,prefix+'indexed course content');
+  sameKeys(home.courseCards[locale],contract.courses,prefix+'course cards');
+  for(const [id,card] of Object.entries(home.courseCards[locale])){
+   sameKeys(card,['name','fallbackDuration','shortDuration'],prefix+'course card '+id);
+   for(const value of Object.values(card))requireText(value,prefix+'course card '+id);
+  }
   for(const id of Object.keys(home.reviewedCards[locale]))if(!contract.courses.includes(id))throw Error('Unknown reviewed course: '+prefix+id);
   sameKeys(home.header[locale],['compact','skip','language'],prefix+'header');
   for(const value of Object.values(home.header[locale]))requireText(value,prefix+'header');
@@ -109,9 +110,15 @@ export function compileContent(general,academic,special,guides,home,ui,contract)
  const uiKeys=['breadcrumb','campusAlt','detail','facts','fallback','practice'];
  if(!ui||JSON.stringify(Object.keys(ui).sort())!==JSON.stringify(uiKeys))throw Error('Invalid shared UI content');
  for(const key of uiKeys)localized(ui[key],'ui.'+key);
- const homeKeys=['copy','fallbackDurations','goals','habits','header','paths','reviewedCards','semester','shortDurations'];
+ const homeKeys=['copy','courseCards','courseGlyphs','goals','habits','header','paths','reviewedCards','semester'];
  if(!home||JSON.stringify(Object.keys(home).sort())!==JSON.stringify(homeKeys))throw Error('Invalid home content');
- for(const key of homeKeys)localized(home[key],'home.'+key);
+ for(const key of homeKeys.filter(key=>key!=='courseGlyphs'))localized(home[key],'home.'+key);
+ if(!contract)throw Error('Content contract required');
+ sameKeys(home.courseGlyphs,contract.courses,'home course glyphs');
+ // Trusted source graphics, not user markup. Limit to the exact primitive and
+ // attribute forms used by these decorative icons before embedding as SVG.
+ const glyphPattern=/^(?:<path d="[A-Za-z0-9 .,-]+"\/>|<circle cx="[0-9]+" cy="[0-9]+" r="[0-9]+"\/>|<rect x="[0-9]+" y="[0-9]+" width="[0-9]+" height="[0-9]+" rx="[0-9]+"\/>)+$/;
+ for(const [id,glyph] of Object.entries(home.courseGlyphs))if(typeof glyph!=='string'||!glyphPattern.test(glyph))throw Error('Invalid course glyph: '+id);
  sameKeys(general,['catalog','locales'],'general');
  lengthIs(general.catalog,5,'general stage catalog');
  for(const [i,stage] of general.catalog.entries()){
@@ -132,7 +139,7 @@ export function compileContent(general,academic,special,guides,home,ui,contract)
  validateReferences(general,academic,special,guides,home,ui,contract);
  return ['const V2_GENERAL_ENGLISH='+JSON.stringify(general.locales)+';', 'const V2_GE_STAGES='+JSON.stringify(general.catalog)+';', 'const V2_EAP='+JSON.stringify(academic)+';', 'const V2_SPECIAL_UI='+JSON.stringify(special.ui)+';', 'const V2_SPECIAL_COURSES='+JSON.stringify(special.courses)+';',
   ...[['V2_GUIDE_UI','ui'],['V2_GUIDE_DATA','data'],['V2_BOOK_UI','bookUi'],['V2_BOOK_DATA','bookData'],['V2_BOOK_FEEDBACK','feedback'],['V2_GUIDE_NAV','nav']].map(([name,key])=>'const '+name+'='+JSON.stringify(guides[key])+';'),
-  ...[['V2_COPY','copy'],['V2_SEMESTER','semester'],['V2_GOALS','goals'],['V2_HOME_PATHS','paths'],['V2_LEARNING_HABITS','habits'],['V2_HOME_HEADER','header'],['V2_HOME_FALLBACK_DURATIONS','fallbackDurations'],['V2_HOME_SHORT_DURATIONS','shortDurations'],['V2_HOME_REVIEWED_CARDS','reviewedCards']].map(([name,key])=>'const '+name+'='+JSON.stringify(home[key])+';'),
+  ...[['V2_COPY','copy'],['V2_SEMESTER','semester'],['V2_GOALS','goals'],['V2_HOME_PATHS','paths'],['V2_LEARNING_HABITS','habits'],['V2_HOME_HEADER','header'],['V2_HOME_COURSE_CARDS','courseCards'],['V2_COURSE_GLYPHS','courseGlyphs'],['V2_HOME_REVIEWED_CARDS','reviewedCards']].map(([name,key])=>'const '+name+'='+JSON.stringify(home[key])+';'),
   ...[['V2_BREADCRUMB','breadcrumb'],['V2_CAMPUS_ALT','campusAlt'],['V2_DETAIL_LABELS','detail'],['V2_ADMISSIONS_FACTS','facts'],['V2_ADMISSIONS_FALLBACK','fallback'],['V2_GE_PRACTICE_UI','practice']].map(([name,key])=>'const '+name+'='+JSON.stringify(ui[key])+';')].join('\n');
 }
 export async function loadContent(contract){

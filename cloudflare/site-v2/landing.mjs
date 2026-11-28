@@ -46,8 +46,7 @@ function v2Short(s,max=140){const text=v2String(s).replace(/\s+/g," ").trim();re
 function v2OnlineFallback(locale){const c=V2_COPY[locale];return {id:"online-individual-zoom",title:c.onlineLabel,summary:c.onlineText};}
 async function v2FallbackCms(){
  const ids=V2_COURSE_IDS;
- const duration=V2_HOME_FALLBACK_DURATIONS;
- const programs=locale=>[...ids.map((id,i)=>({id,title:V2_COPY[locale].courseNames[i]||id,summary:V2_COPY[locale].subtitle,duration:duration[locale][i]||""})),v2OnlineFallback(locale)];
+ const programs=locale=>[...ids.map(id=>({id,title:V2_HOME_COURSE_CARDS[locale][id].name,summary:V2_COPY[locale].subtitle,duration:V2_HOME_COURSE_CARDS[locale][id].fallbackDuration})),v2OnlineFallback(locale)];
  return {main:{locales:{en:{programs:programs("en")},fa:{programs:programs("fa")}},media:{},timetable:{}},pashto:{programs:programs("ps")},revision:0,psRevision:0,cmsStatus:"fallback"};
 }
 async function v2Cms(env){
@@ -104,15 +103,8 @@ function v2Stats(c,content,locale){
 }
 // V2_GOALS is compiled from content/home.json.
 // Original, decorative program illustrations. Shared stroke geometry, no third-party assets.
-const V2_COURSE_GLYPHS=[
- '<path d="M3 4h7a5 5 0 0 1 5 5v15a5 5 0 0 0-5-5H3zM27 4h-7a5 5 0 0 0-5 5v15a5 5 0 0 1 5-5h7z"/><path d="M6 8h4m10 0h4M6 12h4m10 0h4"/>',
- '<path d="m2 10 13-6 13 6-13 6zM7 13v7c5 4 11 4 16 0v-7M28 10v10"/>',
- '<circle cx="15" cy="15" r="11"/><circle cx="15" cy="15" r="6"/><path d="m15 15 10-10m-1 0h4v4"/>',
- '<path d="M4 5h22v14H14l-6 5v-5H4z"/><path d="M9 10h12M9 14h8"/>',
- '<path d="M5 23l3-8L20 3l7 7-12 12zM8 15l7 7M17 6l7 7M5 27h22"/>',
- '<rect x="3" y="4" width="24" height="16" rx="3"/><path d="M15 20v7m-7 0h14M8 15l5-5 4 3 5-6"/>'
-];
-function v2CourseGlyph(i){return '<svg viewBox="0 0 30 30" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+V2_COURSE_GLYPHS[i]+'</svg>';}
+// V2_COURSE_GLYPHS is compiled from the trusted, validated graphic data in content/home.json.
+function v2CourseGlyph(id){return '<svg viewBox="0 0 30 30" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+V2_COURSE_GLYPHS[id]+'</svg>';}
 // V2_HOME_PATHS is compiled from content/home.json.
 function v2HomeQuickPaths(locale){
  const c=V2_HOME_PATHS[locale],p=v2Prefix(locale),ids=["general-english","academic-english","toefl-preparation"];
@@ -122,16 +114,16 @@ function v2Programs(c,content,locale){
  const prefix=v2Prefix(locale);
  const src=locale==="ps"?content.pashto.programs:content.main.locales[locale].programs;
  const goal=V2_GOALS[locale],goalNav='<nav class="goal-finder" aria-label="'+v2T(goal.label)+'"><div class="goal-finder-intro"><strong>'+v2T(goal.title)+'</strong><span>'+v2T(goal.hint)+'</span></div><div class="goal-finder-links">'+goal.items.map(([id,label])=>'<a href="#course-'+id+'">'+v2T(label)+' <span aria-hidden="true">↗</span></a>').join("")+'</div></nav>';
- const cards=V2_COURSE_IDS.map((id,i)=>{
+ const cards=V2_COURSE_IDS.map(id=>{
   const program=src.find(x=>x.id===id)||{};
   let duration=program.duration;
-  const shortDurations=V2_HOME_SHORT_DURATIONS;
-  duration=shortDurations[locale][i]||duration;
+  const card=V2_HOME_COURSE_CARDS[locale][id];
+  duration=card.shortDuration||duration;
   let desc=program.summary||program.subtitle||"";
   // Owner-confirmed program facts take precedence over older CMS summaries.
   const reviewed=V2_HOME_REVIEWED_CARDS;
   if(reviewed[locale]?.[id])desc=reviewed[locale][id];
-  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(i)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(c.courseNames[i]||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(v2String(program.title)||c.courseNames[i]))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
+  return '<article id="course-'+id+'" class="course-card '+(id==="toefl-preparation"?"course-featured":"")+'"><div class="course-top"><span class="course-number">'+v2CourseGlyph(id)+'</span><span class="course-mark" aria-hidden="true">↗</span></div><h3>'+v2T(card.name||program.title||id)+'</h3>'+(id==="academic-english"?'<bdi class="course-full-name" lang="en" dir="ltr">EAP (English for Academic Purposes)</bdi>':"")+'<p class="course-copy">'+v2Short(desc,160)+'</p><div class="course-bottom"><span><small>'+v2T(c.courseDuration)+'</small><strong>'+v2Short(duration||"",85)+'</strong></span><a aria-label="'+v2T(c.courseDetail+' — '+(v2String(program.title)||card.name))+'" href="'+prefix+'courses/'+id+'/">'+v2T(c.courseDetail)+' <span aria-hidden="true">↗</span></a></div></article>';
  }).join("");
  return '<section class="programs-section section" id="programs"><div class="shell"><div class="section-head"><div><p class="eyebrow">'+v2T(c.courseEyebrow)+'</p><h2>'+v2T(c.coursesTitle)+' <em>'+v2T(c.coursesAccent)+'</em></h2></div><p class="section-intro">'+v2T(c.coursesLead)+'</p></div>'+goalNav+'<div class="courses-grid">'+cards+'</div></div></section>';
 }
@@ -216,13 +208,13 @@ function v2Footer(c,locale,content){
 }
 // Google Course list: only six real, publicly described curricula; online is a format, not a seventh course.
 function v2CourseListSchema(locale,content){
- const names=V2_COPY[locale].courseNames,root=v2Prefix(locale);
+ const cards=V2_HOME_COURSE_CARDS[locale],root=v2Prefix(locale);
  const programs=locale==="ps"?content.pashto.programs:content.main.locales[locale].programs;
  const provider={"@type":"Organization","name":"The TOEFL House","url":V2_ORIGIN+"/"};
  return {"@context":"https://schema.org","@type":"ItemList","itemListElement":V2_COURSE_IDS.map((id,i)=>{
   const course=programs.find(p=>p.id===id)||{};
   const url=V2_ORIGIN+root+"courses/"+id+"/";
-  const name=v2String(course.title||names[i]).trim().slice(0,180)||names[i];
+  const name=v2String(course.title||cards[id].name).trim().slice(0,180)||cards[id].name;
   const summary=v2String(course.summary||course.details||"").replace(/\s+/g," ").trim();
   const description=(summary.length>=10?summary:name+" course at The TOEFL House in Kabul.").slice(0,280);
   return {"@type":"ListItem","position":i+1,"url":url,"item":{"@type":"Course","name":name,"description":description,"url":url,"provider":provider}};
