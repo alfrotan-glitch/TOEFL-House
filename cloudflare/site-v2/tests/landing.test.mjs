@@ -926,17 +926,21 @@ test("Retired anchor-only routes show the branded 404",async()=>{
  }
 });
 
-test("Sitemap carries a truthful lastmod on every URL",async()=>{
- const r=await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml"),env());
- assert.equal(r.status,200);
- const xml=await r.text();
- assert.equal((xml.match(/<loc>/g)||[]).length,39);
- const lastmods=xml.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g)||[];
- assert.equal(lastmods.length,39,"every sitemap URL must carry lastmod");
- assert.equal(new Set(lastmods).size,1,"all lastmod dates must be the single build date");
- const date=lastmods[0].replace(/<\/?lastmod>/g,"");
- assert.ok(!Number.isNaN(Date.parse(date+"T00:00:00Z")),"lastmod must be a valid date");
- assert.ok(Date.parse(date+"T00:00:00Z")<=Date.now(),"lastmod must not be in the future");
+test("Sitemap retains canonical URLs without invented modification dates",async()=>{
+ for(const host of ["toeflhouse.pages.dev","candidate.toeflhouse.pages.dev"]){
+  const r=await worker.fetch(new Request("https://"+host+"/sitemap.xml"),env());
+  assert.equal(r.status,200);
+  if(host!=="toeflhouse.pages.dev")assert.match(r.headers.get("X-Robots-Tag"),/noindex/);
+  const xml=await r.text();
+  const locations=[...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match=>match[1]);
+  assert.equal(locations.length,39);
+  assert.equal(new Set(locations).size,39);
+  assert.ok(locations.every(url=>url.startsWith("https://toeflhouse.pages.dev/")));
+  assert.doesNotMatch(xml,/<lastmod>|<changefreq>/);
+ }
+ const head=await worker.fetch(new Request("https://toeflhouse.pages.dev/sitemap.xml",{method:"HEAD"}),env());
+ assert.equal(head.status,200);
+ assert.equal(await head.text(),"");
 });
 
 test("TOEFL Listening tasks render as separate lines in English; FA/PS bilingual lines unchanged",async()=>{
