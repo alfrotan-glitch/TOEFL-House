@@ -169,6 +169,17 @@ test('required renderer fields and learning lists cannot disappear in every loca
   const data=structuredClone(original);for(const locale of locales)remove(data[kind],locale);
   assert.throws(()=>compileContent(...data,contract),new RegExp('Missing required field.*'+path+'.*'+field),path+'.'+field);
  }
+ for(const [kind,change] of [
+  [4,(o,l)=>{o.copy[l].navMenu=42;}],
+  [4,(o,l)=>{o.semester[l].chips={};}],
+  [1,(o,l)=>{o[l].levels[0].title=42;}],
+  [2,(o,l)=>{o.ui[l].source=false;}],
+  [3,(o,l)=>{o.feedback[l].hints=[];}],
+  [5,(o,l)=>{o.detail[l].submit=42;}]
+ ]){
+  const data=structuredClone(original);for(const locale of locales)change(data[kind],locale);
+  assert.throws(()=>compileContent(...data,contract),/Invalid required field type/);
+ }
  for(const [kind,remove] of [
   [1,(o,l)=>{o[l].levels[0].skills=[];}],
   [1,(o,l)=>{o[l].books[0].points=[];}],

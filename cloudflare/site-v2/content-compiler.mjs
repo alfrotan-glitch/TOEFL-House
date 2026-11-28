@@ -3,7 +3,7 @@
 import {readFile} from 'node:fs/promises';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {REQUIRED_CONTENT_KEYS} from './content-shape-contract.mjs';
+import {REQUIRED_CONTENT_KEYS,NON_TEXT_CONTENT_FIELDS} from './content-shape-contract.mjs';
 const here=dirname(fileURLToPath(import.meta.url));
 const locales=['en','fa','ps'];
 function sameShape(reference,value,path){
@@ -46,7 +46,12 @@ function requireText(value,path){
 }
 function requiredFields(value,contractName,path){
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Missing required object: '+path);
- for(const key of REQUIRED_CONTENT_KEYS[contractName])if(!Object.hasOwn(value,key))throw Error('Missing required field: '+path+'.'+key);
+ for(const key of REQUIRED_CONTENT_KEYS[contractName]){
+  if(!Object.hasOwn(value,key))throw Error('Missing required field: '+path+'.'+key);
+  const expected=NON_TEXT_CONTENT_FIELDS[contractName]?.[key]||'string',item=value[key];
+  const valid=expected==='array'?Array.isArray(item):expected==='object'?item!==null&&typeof item==='object'&&!Array.isArray(item):typeof item==='string';
+  if(!valid)throw Error('Invalid required field type: '+path+'.'+key+' (expected '+expected+')');
+ }
 }
 function textList(value,path){
  if(!Array.isArray(value)||!value.length)throw Error('Missing required list: '+path);
