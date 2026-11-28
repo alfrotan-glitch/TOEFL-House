@@ -5,7 +5,7 @@
  * Never imports copyrighted Oxford textbook pages or photos.
  */
 
-const V2_GE_STAGE_IDS=["Pre-Starter","Starter","Prep One","Prep Two","Prep Three"];
+// V2_GE_STAGES and localized details are compiled from content/general.json.
 // Original practice questions. Local-only, no placement inference or personal data.
 // V2_GE_PRACTICE_UI is compiled from content/ui.json.
 const V2_GE_PRACTICE_QUESTIONS=[{"prompt":"Where are you from?","choices":["I'm twenty years old.","I'm from Kabul.","I'm fine, thanks."],"correct":1},{"prompt":"She ___ English every day.","choices":["study","studying","studies"],"correct":2},{"prompt":"You didn't hear someone clearly. What can you say?","choices":["Could you repeat that, please?","I don't have a pen.","See you tomorrow."],"correct":0}];
@@ -20,20 +20,17 @@ function v2GeneralEnglish(locale){
  const c=V2_GENERAL_ENGLISH[locale]||V2_GENERAL_ENGLISH.en;
  const esc=v2T;
  const prefix=v2Prefix(locale);
- const money=locale==="en"?["500 AFN","1,000 AFN","1,000 AFN","1,000 AFN","1,000 AFN"]:
-   locale==="fa"?["۵۰۰ افغانی","۱٬۰۰۰ افغانی","۱٬۰۰۰ افغانی","۱٬۰۰۰ افغانی","۱٬۰۰۰ افغانی"]:
-   ["۵۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ","۱٬۰۰۰ افغانۍ"];
- const levelItems=V2_GE_STAGE_IDS.map((name,i)=>
+ const levelItems=V2_GE_STAGES.map((stage,i)=>
   '<li class="ge-stage"><span class="ge-number" aria-hidden="true">'+String(i+1).padStart(2,"0")+'</span>'+
-  '<div><h4 dir="ltr">'+esc(name)+'</h4><p><strong>'+esc(c.stageFocus[i])+'</strong><br>'+esc(c.stageDescs[i])+'</p>'+
-  '<span class="ge-stage-meta">'+esc(i===0?c.foundation:c.semester)+'</span></div></li>'
+  '<div><h4 dir="ltr">'+esc(stage.id)+'</h4><p><strong>'+esc(c.stageData[stage.id].focus)+'</strong><br>'+esc(c.stageData[stage.id].description)+'</p>'+
+  '<span class="ge-stage-meta">'+esc(c[stage.durationKey])+'</span></div></li>'
  ).join("");
  const facts=c.facts.map(pair=>
   '<div class="ge-fact"><strong>'+esc(pair[0])+'</strong><span>'+esc(pair[1])+'</span></div>'
  ).join("");
- const tableRows=V2_GE_STAGE_IDS.map((name,i)=>
-  '<tr><th scope="row" dir="ltr">'+esc(name)+'</th><td>'+esc(i===0?c.foundation:c.semester)+'</td>'+
-  '<td><strong>'+esc(money[i])+'</strong></td></tr>'
+ const tableRows=V2_GE_STAGES.map(stage=>
+  '<tr><th scope="row" dir="ltr">'+esc(stage.id)+'</th><td>'+esc(c[stage.durationKey])+'</td>'+
+  '<td><strong>'+esc(c.stageData[stage.id].fee)+'</strong></td></tr>'
  ).join("");
  const faqs=c.faqs.map(pair=>
   '<details class="ge-faq"><summary>'+esc(pair[0])+'</summary><p>'+esc(pair[1])+'</p></details>'

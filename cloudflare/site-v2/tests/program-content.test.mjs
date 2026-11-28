@@ -31,8 +31,16 @@ test('indexed content and routes fail closed even when all locales drift togethe
  const [general,academic,special,guides,home,ui]=await content(),contract=extractContentContract(...await sources());
  const compile=(g=general,a=academic,s=special,d=guides,h=home,u=ui)=>compileContent(g,a,s,d,h,u,contract);
  const locales=['en','fa','ps'];
- const short=structuredClone(general);for(const l of locales)short[l].stageFocus.pop();
- assert.throws(()=>compile(short),/indexed length.*stageFocus/);
+ const short=structuredClone(general);for(const l of locales)delete short.locales[l].stageData['Prep Three'];
+ assert.throws(()=>compile(short),/catalog keys.*General English stages/);
+ const catalog=structuredClone(general);catalog.catalog.pop();
+ assert.throws(()=>compile(catalog),/indexed length.*general stage catalog/);
+ const duplicateStage=structuredClone(general);duplicateStage.catalog[1].id=duplicateStage.catalog[0].id;
+ assert.throws(()=>compile(duplicateStage),/Duplicate General English stage/);
+ const duration=structuredClone(general);duration.catalog[0].durationKey='semester';
+ assert.throws(()=>compile(duration),/stage duration/);
+ const missingDuration=structuredClone(general);for(const l of locales)delete missingDuration.locales[l].foundation;
+ assert.throws(()=>compile(missingDuration),/Missing required text.*duration foundation/);
  const pair=structuredClone(academic);for(const l of locales)pair[l].facts[0].pop();
  assert.throws(()=>compile(general,pair),/indexed length.*facts/);
  const levels=structuredClone(academic);for(const l of locales)levels[l].levels.pop();
@@ -61,7 +69,7 @@ test('indexed content and routes fail closed even when all locales drift togethe
  assert.throws(()=>compile(general,academic,special,guides,language),/language or direction/);
  const missingHeader=structuredClone(home);for(const l of locales)delete missingHeader.header[l].skip;
  assert.throws(()=>compile(general,academic,special,guides,missingHeader),/catalog keys.*header/);
- const blank=structuredClone(general);for(const l of locales)blank[l].stageDescs[1]=' ';
+ const blank=structuredClone(general);for(const l of locales)blank.locales[l].stageData.Starter.description=' ';
  assert.throws(()=>compile(blank),/Missing required text/);
  const explanations=structuredClone(ui);for(const l of locales)explanations.practice[l].explanations.pop();
  assert.throws(()=>compile(general,academic,special,guides,home,explanations),/practice explanations/);

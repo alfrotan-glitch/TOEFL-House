@@ -1262,3 +1262,25 @@ test("Course summary displays only CMS fields actually supplied",async()=>{
   assert.equal(html.includes('class="detail-grid detail-grid-single"'),!(duration||highlights.length));
  }
 });
+
+test('General English stage fees and durations remain attached to the correct stage in each language',async()=>{
+ const cases=[
+  ['/','1 month','2 months / semester','500 AFN','1,000 AFN'],
+  ['/fa/','۱ ماه','۲ ماه / یک سمستر','۵۰۰ افغانی','۱٬۰۰۰ افغانی'],
+  ['/ps/','۱ میاشت','۲ میاشتې / یو سمستر','۵۰۰ افغانۍ','۱٬۰۰۰ افغانۍ']
+ ];
+ const names=['Pre-Starter','Starter','Prep One','Prep Two','Prep Three'];
+ for(const [prefix,foundation,semester,firstFee,otherFee] of cases){
+  const response=await worker.fetch(new Request('https://toeflhouse.pages.dev'+prefix+'courses/general-english/'),env());
+  assert.equal(response.status,200);const html=await response.text();
+  const body=html.match(/<table class="ge-fee-table">[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/)?.[1];
+  assert.ok(body,prefix+' fee table');
+  const rows=[...body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(match=>match[1]);
+  assert.equal(rows.length,5,prefix);
+  for(const [i,row] of rows.entries()){
+   assert.ok(row.includes('>'+names[i]+'</th>'),prefix+names[i]);
+   assert.ok(row.includes('<td>'+(i===0?foundation:semester)+'</td>'),prefix+names[i]+' duration');
+   assert.ok(row.includes('<strong>'+(i===0?firstFee:otherFee)+'</strong>'),prefix+names[i]+' fee');
+  }
+ }
+});

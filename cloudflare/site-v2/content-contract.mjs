@@ -26,11 +26,9 @@ export function extractContentContract(edge,renderer){
  const publicCourses=ids([...courses,JSON.parse(publicExpression[1])],'public courses');
  const articles=ids(literalArray('['+guidesExpression[1]+']','guides'),'guides');
  const guides=ids([...articles,...books],'guides');
- const stages=literalArray(declaration(renderer,'V2_GE_STAGE_IDS'),'stages');
- if(stages.some(x=>typeof x!=='string'||!x.trim())||new Set(stages).size!==stages.length)throw Error('Invalid General English stages');
  const questions=literalArray(declaration(renderer,'V2_GE_PRACTICE_QUESTIONS'),'practice');
  for(const question of questions){
   if(!question||typeof question.prompt!=='string'||!question.prompt.trim()||!Array.isArray(question.choices)||question.choices.length<2||question.choices.some(x=>typeof x!=='string'||!x.trim())||!Number.isInteger(question.correct)||question.correct<0||question.correct>=question.choices.length)throw Error('Invalid practice question');
  }
- return {courses,publicCourses,articles,books,guides,stageCount:stages.length,practiceCount:questions.length};
+ return {courses,publicCourses,articles,books,guides,practiceCount:questions.length};
 }

@@ -51,10 +51,15 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
   sameKeys(home.header[locale],['compact','skip','language'],prefix+'header');
   for(const value of Object.values(home.header[locale]))requireText(value,prefix+'header');
   lengthIs(home.paths[locale].links,3,prefix+'home paths'); // Three renderer-owned quick paths.
-  lengthIs(general[locale].stageFocus,contract.stageCount,prefix+'stageFocus');
-  lengthIs(general[locale].stageDescs,contract.stageCount,prefix+'stageDescs');
+  sameKeys(general.locales[locale].stageData,general.catalog.map(stage=>stage.id),prefix+'General English stages');
+  for(const stage of general.catalog){
+   const data=general.locales[locale].stageData[stage.id];
+   sameKeys(data,['focus','description','fee'],prefix+stage.id);
+   for(const value of Object.values(data))requireText(value,prefix+stage.id);
+   requireText(general.locales[locale][stage.durationKey],prefix+'duration '+stage.durationKey);
+  }
   lengthIs(ui.practice[locale].explanations,contract.practiceCount,prefix+'practice explanations');
-  for(const value of [...home.paths[locale].links,...general[locale].stageFocus,...general[locale].stageDescs,...ui.practice[locale].explanations])requireText(value,prefix+'indexed content');
+  for(const value of [...home.paths[locale].links,...ui.practice[locale].explanations])requireText(value,prefix+'indexed content');
   lengthIs(academic[locale].levels,4,prefix+'academic levels'); // The fourth-level note is renderer-indexed.
   for(const key of ['seoTitle','seoDescription','feeMonthDisplay','feeLevelDisplay','levelDuration'])requireText(academic[locale][key],prefix+'academic.'+key);
   if(!Array.isArray(academic[locale].books)||!academic[locale].books.length)throw Error('Missing academic books: '+locale);
@@ -65,7 +70,7 @@ function validateReferences(general,academic,special,guides,home,ui,contract){
    if(!contract.books.includes(book.guide)||guides.bookData[locale]?.[book.guide]?.program!=='academic-english')throw Error('Invalid academic book guide: '+prefix+book.guide);
   }
   for(const [value,size,path] of [
-   [general[locale].facts,2,'general facts'],[general[locale].faqs,2,'general FAQs'],[general[locale].skills,2,'general skills'],
+   [general.locales[locale].facts,2,'general facts'],[general.locales[locale].faqs,2,'general FAQs'],[general.locales[locale].skills,2,'general skills'],
    [academic[locale].facts,2,'academic facts'],[academic[locale].outcomes,2,'academic outcomes'],[academic[locale].faq,2,'academic FAQs'],
    [home.copy[locale].steps,3,'home steps'],[home.copy[locale].statsFallback,2,'home stats'],[home.copy[locale].fallbackFaq,2,'home FAQs'],
    [home.goals[locale].items,2,'goals'],[home.habits[locale].habits,3,'habits'],[home.habits[locale].links,3,'habit links'],[ui.detail[locale].faqs,2,'admissions FAQs']
@@ -107,7 +112,15 @@ export function compileContent(general,academic,special,guides,home,ui,contract)
  const homeKeys=['copy','fallbackDurations','goals','habits','header','paths','reviewedCards','semester','shortDurations'];
  if(!home||JSON.stringify(Object.keys(home).sort())!==JSON.stringify(homeKeys))throw Error('Invalid home content');
  for(const key of homeKeys)localized(home[key],'home.'+key);
- localized(general,'general');
+ sameKeys(general,['catalog','locales'],'general');
+ lengthIs(general.catalog,5,'general stage catalog');
+ for(const [i,stage] of general.catalog.entries()){
+  sameKeys(stage,['id','durationKey'],'general stage '+i);
+  requireText(stage.id,'general stage ID');
+  if(stage.durationKey!==(i===0?'foundation':'semester'))throw Error('Invalid General English stage duration: '+stage.id);
+ }
+ if(new Set(general.catalog.map(stage=>stage.id)).size!==general.catalog.length)throw Error('Duplicate General English stage');
+ localized(general.locales,'general.locales');
  localized(academic,'academic');
  if(!special||JSON.stringify(Object.keys(special).sort())!==JSON.stringify(['courses','ui']))throw Error('Invalid special program content');
  localized(special.ui,'special.ui');
@@ -117,7 +130,7 @@ export function compileContent(general,academic,special,guides,home,ui,contract)
  if(!guides||JSON.stringify(Object.keys(guides).sort())!==JSON.stringify(guideKeys))throw Error('Invalid guide content');
  for(const key of guideKeys)localized(guides[key],'guides.'+key);
  validateReferences(general,academic,special,guides,home,ui,contract);
- return ['const V2_GENERAL_ENGLISH='+JSON.stringify(general)+';', 'const V2_EAP='+JSON.stringify(academic)+';', 'const V2_SPECIAL_UI='+JSON.stringify(special.ui)+';', 'const V2_SPECIAL_COURSES='+JSON.stringify(special.courses)+';',
+ return ['const V2_GENERAL_ENGLISH='+JSON.stringify(general.locales)+';', 'const V2_GE_STAGES='+JSON.stringify(general.catalog)+';', 'const V2_EAP='+JSON.stringify(academic)+';', 'const V2_SPECIAL_UI='+JSON.stringify(special.ui)+';', 'const V2_SPECIAL_COURSES='+JSON.stringify(special.courses)+';',
   ...[['V2_GUIDE_UI','ui'],['V2_GUIDE_DATA','data'],['V2_BOOK_UI','bookUi'],['V2_BOOK_DATA','bookData'],['V2_BOOK_FEEDBACK','feedback'],['V2_GUIDE_NAV','nav']].map(([name,key])=>'const '+name+'='+JSON.stringify(guides[key])+';'),
   ...[['V2_COPY','copy'],['V2_SEMESTER','semester'],['V2_GOALS','goals'],['V2_HOME_PATHS','paths'],['V2_LEARNING_HABITS','habits'],['V2_HOME_HEADER','header'],['V2_HOME_FALLBACK_DURATIONS','fallbackDurations'],['V2_HOME_SHORT_DURATIONS','shortDurations'],['V2_HOME_REVIEWED_CARDS','reviewedCards']].map(([name,key])=>'const '+name+'='+JSON.stringify(home[key])+';'),
   ...[['V2_BREADCRUMB','breadcrumb'],['V2_CAMPUS_ALT','campusAlt'],['V2_DETAIL_LABELS','detail'],['V2_ADMISSIONS_FACTS','facts'],['V2_ADMISSIONS_FALLBACK','fallback'],['V2_GE_PRACTICE_UI','practice']].map(([name,key])=>'const '+name+'='+JSON.stringify(ui[key])+';')].join('\n');
